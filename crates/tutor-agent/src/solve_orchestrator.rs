@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use llm_adapter::provider::Provider;
 use llm_harness_runtime::audit::AuditEventType;
 use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
 use llm_harness_types::ExecutionEnv;
@@ -15,6 +16,7 @@ pub struct SolveOrchestrator {
     env: Arc<dyn ExecutionEnv>,
     llm: LlmConfig,
     governance: GovernanceConfig,
+    client: Option<Arc<dyn Provider>>,
 }
 
 impl SolveOrchestrator {
@@ -29,7 +31,31 @@ impl SolveOrchestrator {
             env,
             llm,
             governance,
+            client: None,
         }
+    }
+
+    /// Inject a custom LLM client; skips `LlmConfig::build_client()` and auth.
+    pub fn with_client(mut self, client: Arc<dyn Provider>) -> Self {
+        self.client = Some(client);
+        self
+    }
+
+    fn make_client(&self) -> Arc<dyn Provider> {
+        if let Some(c) = &self.client {
+            return c.clone();
+        }
+        self.llm.build_client()
+    }
+
+    fn auth_hook(&self) -> Option<Arc<dyn llm_harness_types::AuthHook>> {
+        if self.client.is_some() {
+            return None;
+        }
+        use llm_harness_types::AuthHook;
+        self.llm
+            .auth_hook()
+            .map(|h| Arc::new(h) as Arc<dyn AuthHook>)
     }
 
     /// Run the full pipeline: [Pre-retrieve] → Plan → (Solve → [REPLAN])* → Synthesize.
@@ -68,8 +94,7 @@ impl SolveOrchestrator {
 
     async fn run_plan(&mut self) -> Result<()> {
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
-        use std::sync::Arc;
+        use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
@@ -113,7 +138,7 @@ impl SolveOrchestrator {
             )
         };
 
-        let client = self.llm.build_client();
+        let client = self.make_client();
 
         let opts = AgentHarnessOptions {
             model: self.llm.model.clone(),
@@ -123,13 +148,9 @@ impl SolveOrchestrator {
                  Respond only with the requested JSON."
                     .into(),
             ),
-            auth: self
-                .llm
-                .auth_hook()
-                .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
+            auth: self.auth_hook(),
             hooks: HarnessHooks {
                 after_provider_response: Some(self.governance.budget.clone()),
-                should_stop: Some(self.governance.budget.clone()),
                 ..HarnessHooks::none()
             },
             ..AgentHarnessOptions::new(self.llm.model.clone())
@@ -173,7 +194,7 @@ impl SolveOrchestrator {
 
     async fn run_solve_steps(&mut self) -> Result<()> {
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, AuthHook, BeforeToolCallHook, ContentBlock};
+        use llm_harness_types::{AgentEvent, BeforeToolCallHook, ContentBlock};
         use std::sync::Arc;
         use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
 
@@ -240,13 +261,9 @@ impl SolveOrchestrator {
                     id = step.id,
                     goal = step.goal,
                 )),
-                auth: self
-                    .llm
-                    .auth_hook()
-                    .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
+                auth: self.auth_hook(),
                 hooks: HarnessHooks {
                     after_provider_response: Some(self.governance.budget.clone()),
-                    should_stop: Some(self.governance.budget.clone()),
                     before_tool_call: before_tool_call.clone(),
                     prepare_next_turn: Some(phase_mgr),
                     ..HarnessHooks::none()
@@ -254,7 +271,7 @@ impl SolveOrchestrator {
                 ..AgentHarnessOptions::new(self.llm.model.clone())
             };
 
-            let client = self.llm.build_client();
+            let client = self.make_client();
             let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
             let mut rx = harness.subscribe();
 
@@ -309,8 +326,7 @@ impl SolveOrchestrator {
 
     async fn run_synthesize(&mut self) -> Result<String> {
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
-        use std::sync::Arc;
+        use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
@@ -330,7 +346,7 @@ impl SolveOrchestrator {
             question
         );
 
-        let client = self.llm.build_client();
+        let client = self.make_client();
 
         let opts = AgentHarnessOptions {
             model: self.llm.model.clone(),
@@ -340,13 +356,9 @@ impl SolveOrchestrator {
                  Be clear, structured, and educational."
                     .into(),
             ),
-            auth: self
-                .llm
-                .auth_hook()
-                .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
+            auth: self.auth_hook(),
             hooks: HarnessHooks {
                 after_provider_response: Some(self.governance.budget.clone()),
-                should_stop: Some(self.governance.budget.clone()),
                 ..HarnessHooks::none()
             },
             ..AgentHarnessOptions::new(self.llm.model.clone())

@@ -15,6 +15,7 @@ license = "MIT"
 # Core (same rev as llm-harness-runtime)
 llm-harness       = { git = "https://github.com/oh-my-harness/llm-harness-core", rev = "9ad7292c67c1d7828a907a7fd270a007b5d1f750" }
 llm-harness-types = { git = "https://github.com/oh-my-harness/llm-harness-core", rev = "9ad7292c67c1d7828a907a7fd270a007b5d1f750" }
+llm-harness-loop  = { git = "https://github.com/oh-my-harness/llm-harness-core", rev = "9ad7292c67c1d7828a907a7fd270a007b5d1f750" }
 
 # Runtime crates (path deps relative to this workspace)
 llm-harness-runtime            = { path = "../llm-harness-runtime/crates/llm-harness-runtime" }

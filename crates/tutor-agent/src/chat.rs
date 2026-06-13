@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
+use llm_harness_types::{AgentEvent, ContentBlock};
 use tutor_tools::{RagSearchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
@@ -25,19 +25,15 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
              web_search for supplementary information, then answer clearly and concisely."
                 .into(),
         ),
-        auth: router
-            .llm
-            .auth_hook()
-            .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
+        auth: router.auth_hook(),
         hooks: HarnessHooks {
             after_provider_response: Some(gov.budget.clone()),
-            should_stop: Some(gov.budget.clone()),
             ..HarnessHooks::none()
         },
         ..AgentHarnessOptions::new(router.llm.model.clone())
     };
 
-    let client = router.llm.build_client();
+    let client = router.make_client();
 
     let harness = AgentHarness::new_in_memory(client, router.env.clone(), opts).await;
     let mut rx = harness.subscribe();
