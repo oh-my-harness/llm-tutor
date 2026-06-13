@@ -1,0 +1,7 @@
+# Local checkouts of llm-harness-core and llm-api-adapter.
+[patch."https://github.com/oh-my-harness/llm-harness-core"]
+llm-harness       = { path = "../llm-harness-core/crates/llm-harness" }
+llm-harness-types = { path = "../llm-harness-core/crates/llm-harness-types" }
+
+[patch."https://github.com/oh-my-harness/llm-api-adapter.git"]
+llm_adapter = { path = "../llm-api-adapter" }
