@@ -53,9 +53,15 @@ impl CapabilityRouter {
     pub async fn run(&self, capability: Capability, question: &str) -> Result<String> {
         match capability {
             Capability::Chat => crate::chat::run_chat(self, question).await,
-            Capability::DeepSolve => Err(TutorError::UnsupportedCapability(
-                "DeepSolve (Phase 2)".into(),
-            )),
+            Capability::DeepSolve => {
+                let mut orchestrator = crate::solve_orchestrator::SolveOrchestrator::new(
+                    question,
+                    self.env.clone(),
+                    &self.model,
+                    &self.anthropic_api_key,
+                );
+                orchestrator.run(None).await
+            }
             Capability::CodeExec => Err(TutorError::UnsupportedCapability(
                 "CodeExec (Phase 2+)".into(),
             )),
