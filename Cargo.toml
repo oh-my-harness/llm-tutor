@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/tutor-tools",
+    "crates/tutor-agent",
 ]
 resolver = "2"
 
