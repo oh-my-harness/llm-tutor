@@ -4,6 +4,7 @@ use std::sync::Arc;
 use llm_harness_types::ExecutionEnv;
 
 use crate::error::{Result, TutorError};
+use crate::governance::GovernanceConfig;
 
 /// Supported teaching modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub struct CapabilityRouter {
     pub env: Arc<dyn ExecutionEnv>,
     pub model: String,
     pub anthropic_api_key: String,
+    pub governance: GovernanceConfig,
 }
 
 impl CapabilityRouter {
@@ -41,11 +43,13 @@ impl CapabilityRouter {
         env: Arc<dyn ExecutionEnv>,
         model: impl Into<String>,
         anthropic_api_key: impl Into<String>,
+        governance: GovernanceConfig,
     ) -> Self {
         Self {
             env,
             model: model.into(),
             anthropic_api_key: anthropic_api_key.into(),
+            governance,
         }
     }
 
@@ -58,7 +62,7 @@ impl CapabilityRouter {
                     question,
                     self.env.clone(),
                     &self.model,
-                    &self.anthropic_api_key,
+                    self.governance.clone(),
                 );
                 orchestrator.run(None).await
             }

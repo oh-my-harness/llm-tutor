@@ -797,6 +797,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "llm-harness-runtime-audit-jsonl"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "llm-harness-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "llm-harness-runtime-auth"
 version = "0.2.0"
 dependencies = [
@@ -1608,6 +1621,7 @@ dependencies = [
  "futures",
  "llm-harness",
  "llm-harness-runtime",
+ "llm-harness-runtime-audit-jsonl",
  "llm-harness-runtime-auth",
  "llm-harness-runtime-sandbox-os",
  "llm-harness-types",
@@ -1619,6 +1633,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tutor-tools",
+ "uuid",
 ]
 
 [[package]]

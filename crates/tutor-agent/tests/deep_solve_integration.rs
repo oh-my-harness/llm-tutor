@@ -3,8 +3,28 @@
 
 use std::sync::Arc;
 
+use llm_harness_runtime::budget::BudgetControlAdapter;
+use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_sandbox_os::OsEnv;
+use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter};
+
+struct NoOpPricing;
+impl PricingProvider for NoOpPricing {
+    fn price_for(&self, _model: &str, _provider: &str) -> Option<TokenPrice> {
+        Some(TokenPrice {
+            input_per_mtok: 0.0,
+            output_per_mtok: 0.0,
+            cache_read_per_mtok: 0.0,
+            cache_write_per_mtok: 0.0,
+        })
+    }
+}
+
+fn make_governance() -> GovernanceConfig {
+    let budget = Arc::new(BudgetControlAdapter::new(Arc::new(NoOpPricing), 2.0, None));
+    GovernanceConfig::new(budget, None, false)
+}
 
 #[tokio::test]
 #[ignore = "requires ANTHROPIC_API_KEY and network"]
@@ -12,7 +32,8 @@ async fn deep_solve_end_to_end() {
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY required");
     let tmp = tempfile::tempdir().unwrap();
     let env = Arc::new(OsEnv::new(tmp.path()));
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key);
+    let gov = make_governance();
+    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key, gov);
 
     let result = router
         .run(
@@ -32,7 +53,8 @@ async fn deep_solve_replan_triggers_and_recovers() {
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY required");
     let tmp = tempfile::tempdir().unwrap();
     let env = Arc::new(OsEnv::new(tmp.path()));
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key);
+    let gov = make_governance();
+    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key, gov);
 
     let result = router
         .run(

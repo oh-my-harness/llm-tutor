@@ -15,6 +15,7 @@ llm-harness-types  = { workspace = true }
 llm-harness-runtime = { workspace = true }
 llm-harness-runtime-auth = { workspace = true }
 llm-harness-runtime-sandbox-os = { workspace = true }
+llm-harness-runtime-audit-jsonl = { workspace = true }
 llm_adapter.workspace = true
 anyhow.workspace = true
 futures.workspace = true
@@ -23,6 +24,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 chrono = "0.4"

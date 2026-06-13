@@ -1,17 +1,19 @@
 use std::sync::{Arc, Mutex};
 
+use llm_harness_runtime::audit::AuditEventType;
+use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
 use llm_harness_types::ExecutionEnv;
 
 use crate::error::{Result, TutorError};
+use crate::governance::GovernanceConfig;
 use crate::solve_context::{Plan, SolveContext, StepResult};
 
 /// Drives the four-phase Deep Solve pipeline.
-#[allow(dead_code)]
 pub struct SolveOrchestrator {
     context: Arc<Mutex<SolveContext>>,
     env: Arc<dyn ExecutionEnv>,
     model: String,
-    anthropic_api_key: String,
+    governance: GovernanceConfig,
 }
 
 impl SolveOrchestrator {
@@ -19,13 +21,13 @@ impl SolveOrchestrator {
         question: impl Into<String>,
         env: Arc<dyn ExecutionEnv>,
         model: impl Into<String>,
-        anthropic_api_key: impl Into<String>,
+        governance: GovernanceConfig,
     ) -> Self {
         Self {
             context: Arc::new(Mutex::new(SolveContext::new(question))),
             env,
             model: model.into(),
-            anthropic_api_key: anthropic_api_key.into(),
+            governance,
         }
     }
 
@@ -50,16 +52,32 @@ impl SolveOrchestrator {
     }
 
     async fn run_pre_retrieve(&mut self, kb: &str) -> Result<()> {
+        // v0.1 stub for pre-retrieve phase
         self.context.lock().unwrap().kb_summary = Some(format!("[KB summary for: {kb}]"));
+
+        crate::governance::record_audit(
+            &self.governance.audit,
+            AuditEventType::StateTransition,
+            serde_json::json!({"phase": "pre_retrieve", "kb": kb}),
+        )
+        .await;
+
         Ok(())
     }
 
     async fn run_plan(&mut self) -> Result<()> {
         use llm_adapter::anthropic::AnthropicProvider;
-        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions};
+        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
         use llm_harness_runtime_auth::EnvAuthHook;
         use llm_harness_types::{AgentEvent, ContentBlock};
         use std::sync::Arc;
+
+        crate::governance::record_audit(
+            &self.governance.audit,
+            AuditEventType::StateTransition,
+            serde_json::json!({"phase": "plan"}),
+        )
+        .await;
 
         let (question, kb_summary, replan_reason, prev_plan) = {
             let ctx = self.context.lock().unwrap();
@@ -109,6 +127,11 @@ impl SolveOrchestrator {
                     .into(),
             ),
             auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+            hooks: HarnessHooks {
+                after_provider_response: Some(self.governance.budget.clone()),
+                should_stop: Some(self.governance.budget.clone()),
+                ..HarnessHooks::none()
+            },
             ..AgentHarnessOptions::new(self.model.clone())
         };
 
@@ -152,7 +175,7 @@ impl SolveOrchestrator {
         use llm_adapter::anthropic::AnthropicProvider;
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
         use llm_harness_runtime_auth::EnvAuthHook;
-        use llm_harness_types::{AgentEvent, ContentBlock};
+        use llm_harness_types::{AgentEvent, BeforeToolCallHook, ContentBlock};
         use std::sync::Arc;
         use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
 
@@ -173,8 +196,27 @@ impl SolveOrchestrator {
             .steps
             .clone();
 
+        crate::governance::record_audit(
+            &self.governance.audit,
+            AuditEventType::StateTransition,
+            serde_json::json!({"phase": "solve_steps", "step_count": steps.len()}),
+        )
+        .await;
+
         // ReplanHook shares the orchestrator's context directly via Arc.
         let replan_hook = Arc::new(ReplanHook::new(self.context.clone()));
+
+        // Compose hooks: approval wrapper (if configured) then replan hook
+        let before_tool_call: Option<Arc<dyn BeforeToolCallHook>> = {
+            if let Some(approval) = &self.governance.approval {
+                Some(Arc::new(CompositeBeforeToolCallHook::new(vec![
+                    approval.clone() as Arc<dyn BeforeToolCallHook>,
+                    replan_hook.clone() as Arc<dyn BeforeToolCallHook>,
+                ])))
+            } else {
+                Some(replan_hook.clone() as Arc<dyn BeforeToolCallHook>)
+            }
+        };
 
         for step in &steps {
             let solve_tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
@@ -205,7 +247,9 @@ impl SolveOrchestrator {
                 )),
                 auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
                 hooks: HarnessHooks {
-                    before_tool_call: Some(replan_hook.clone()),
+                    after_provider_response: Some(self.governance.budget.clone()),
+                    should_stop: Some(self.governance.budget.clone()),
+                    before_tool_call: before_tool_call.clone(),
                     prepare_next_turn: Some(phase_mgr),
                     ..HarnessHooks::none()
                 },
@@ -238,6 +282,12 @@ impl SolveOrchestrator {
             // Check if replan was triggered
             let step_reason = self.context.lock().unwrap().replan_reason.clone();
             if step_reason.is_some() {
+                crate::governance::record_audit(
+                    &self.governance.audit,
+                    AuditEventType::StateTransition,
+                    serde_json::json!({"event": "replan", "step": step.id}),
+                )
+                .await;
                 return Ok(());
             }
 
@@ -261,10 +311,17 @@ impl SolveOrchestrator {
 
     async fn run_synthesize(&mut self) -> Result<String> {
         use llm_adapter::anthropic::AnthropicProvider;
-        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions};
+        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
         use llm_harness_runtime_auth::EnvAuthHook;
         use llm_harness_types::{AgentEvent, ContentBlock};
         use std::sync::Arc;
+
+        crate::governance::record_audit(
+            &self.governance.audit,
+            AuditEventType::StateTransition,
+            serde_json::json!({"phase": "synthesize"}),
+        )
+        .await;
 
         let (question, steps_summary) = {
             let ctx = self.context.lock().unwrap();
@@ -290,6 +347,11 @@ impl SolveOrchestrator {
                     .into(),
             ),
             auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+            hooks: HarnessHooks {
+                after_provider_response: Some(self.governance.budget.clone()),
+                should_stop: Some(self.governance.budget.clone()),
+                ..HarnessHooks::none()
+            },
             ..AgentHarnessOptions::new(self.model.clone())
         };
 

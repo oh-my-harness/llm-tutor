@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use llm_adapter::anthropic::AnthropicProvider;
-use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions};
+use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
 use llm_harness_runtime_auth::EnvAuthHook;
 use llm_harness_types::{AgentEvent, ContentBlock};
 use tutor_tools::{RagSearchTool, WebSearchTool};
@@ -17,6 +17,8 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
         Arc::new(WebSearchTool::new()),
     ];
 
+    let gov = &router.governance;
+
     let opts = AgentHarnessOptions {
         model: router.model.clone(),
         tools,
@@ -26,13 +28,18 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
                 .into(),
         ),
         auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+        hooks: HarnessHooks {
+            after_provider_response: Some(gov.budget.clone()),
+            should_stop: Some(gov.budget.clone()),
+            ..HarnessHooks::none()
+        },
         ..AgentHarnessOptions::new(router.model.clone())
     };
 
-    // AnthropicProvider is the concrete LlmClient implementation.
-    let client = Arc::new(AnthropicProvider::builder(&router.anthropic_api_key).build());
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| crate::error::TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
+    let client = Arc::new(AnthropicProvider::builder(api_key).build());
 
-    // Subscribe before prompt() so we don't miss any events.
     let harness = AgentHarness::new_in_memory(client, router.env.clone(), opts).await;
     let mut rx = harness.subscribe();
 
