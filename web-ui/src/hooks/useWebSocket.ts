@@ -8,6 +8,7 @@ export type StreamEvent =
 interface UseWebSocketOptions {
   onEvent: (event: StreamEvent) => void
   onClose?: () => void
+  onError?: () => void
 }
 
 export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions) {
@@ -19,7 +20,8 @@ export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions
   useEffect(() => {
     if (!sessionId) return
 
-    const ws = new WebSocket(`ws://localhost:8080/ws/sessions/${sessionId}`)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/sessions/${sessionId}`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -36,6 +38,7 @@ export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions
       } catch { /* ignore parse errors */ }
     }
 
+    ws.onerror = () => optsRef.current.onError?.()
     ws.onclose = () => optsRef.current.onClose?.()
 
     return () => ws.close()

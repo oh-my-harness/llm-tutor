@@ -63,31 +63,51 @@ export default function App() {
             args: payload.args as Record<string, unknown>,
             requestId: payload.request_id as string,
           })
+        } else if (kind === 'error') {
+          const message = typeof payload.message === 'string' ? payload.message : 'WebSocket error'
+          setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+          setRunning(false)
         }
       }
     },
     onClose: () => setRunning(false),
+    onError: () => {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: 'Error: WebSocket connection failed. Check that tutor-web is running on 127.0.0.1:8080.' },
+      ])
+      setRunning(false)
+    },
   })
 
   const handleSend = useCallback(async (text: string) => {
-    let sid = sessionId
-    if (!sid) {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          capability,
-          llm: settingsForSession(llmSettings),
-        }),
-      })
-      const data = await res.json()
-      sid = data.id as string
-      setSessionId(sid)
-    }
+    try {
+      let sid = sessionId
+      if (!sid) {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            capability,
+            llm: settingsForSession(llmSettings),
+          }),
+        })
+        if (!res.ok) {
+          throw new Error(`failed to create session: HTTP ${res.status}`)
+        }
+        const data = await res.json()
+        sid = data.id as string
+        setSessionId(sid)
+      }
 
-    setMessages((prev) => [...prev, { role: 'user', text }])
-    setRunning(true)
-    send({ type: 'message', content: text })
+      setMessages((prev) => [...prev, { role: 'user', text }])
+      setRunning(true)
+      send({ type: 'message', content: text })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+      setRunning(false)
+    }
   }, [sessionId, capability, llmSettings, send])
 
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {

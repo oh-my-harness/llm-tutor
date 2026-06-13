@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
 
-use crate::stream::{StreamEvent, TutorStream};
+use crate::stream::TutorStream;
 
 #[derive(Clone, Debug)]
 pub struct LlmSessionConfig {
@@ -29,14 +29,12 @@ pub struct SessionEntry {
 /// Thread-safe pool of active sessions.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
-    receivers: Mutex<HashMap<String, tokio::sync::mpsc::Receiver<StreamEvent>>>,
 }
 
 impl SessionPool {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
-            receivers: Mutex::new(HashMap::new()),
         })
     }
 
@@ -48,7 +46,7 @@ impl SessionPool {
         llm: Option<LlmSessionConfig>,
     ) -> String {
         let id = Uuid::new_v4().to_string();
-        let (stream, rx) = TutorStream::new(128);
+        let stream = TutorStream::new(128);
         let entry = SessionEntry {
             id: id.clone(),
             capability: capability.to_string(),
@@ -57,13 +55,7 @@ impl SessionPool {
             stream,
         };
         self.sessions.lock().unwrap().insert(id.clone(), entry);
-        self.receivers.lock().unwrap().insert(id.clone(), rx);
         id
-    }
-
-    /// Called by the WS handler to get the event receiver for forwarding to the client.
-    pub fn take_rx(&self, id: &str) -> Option<tokio::sync::mpsc::Receiver<StreamEvent>> {
-        self.receivers.lock().unwrap().remove(id)
     }
 
     pub fn get(&self, id: &str) -> Option<SessionEntry> {
@@ -75,7 +67,6 @@ impl Default for SessionPool {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            receivers: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -92,7 +83,6 @@ mod tests {
         assert!(entry.is_some());
         let entry = entry.unwrap();
         assert_eq!(entry.capability, "chat");
-        assert!(pool.take_rx(&id).is_some());
     }
 
     #[test]

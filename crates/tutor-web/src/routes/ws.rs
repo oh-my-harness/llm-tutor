@@ -53,17 +53,13 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
         Some(e) => e,
         None => return,
     };
-    // Take the receiver stored during session creation
-    let mut event_rx = match pool.take_rx(&session_id) {
-        Some(rx) => rx,
-        None => return,
-    };
+    let mut event_rx = entry.stream.subscribe();
 
     let (mut ws_sink, mut ws_stream) = socket.split();
 
     // Forward events from the agent harness to the WebSocket client
     let send_task = tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
+        while let Ok(event) = event_rx.recv().await {
             let json = match serde_json::to_string(&event) {
                 Ok(j) => j,
                 Err(_) => continue,

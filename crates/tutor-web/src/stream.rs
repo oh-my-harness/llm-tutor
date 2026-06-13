@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 /// Events pushed from the agent harness to the WebSocket handler.
 #[derive(Debug, Clone, Serialize)]
@@ -25,44 +25,38 @@ pub enum StreamEvent {
 /// WebSocket event bus — one per active session.
 #[derive(Clone)]
 pub struct TutorStream {
-    tx: mpsc::Sender<StreamEvent>,
+    tx: broadcast::Sender<StreamEvent>,
 }
 
 impl TutorStream {
-    /// Create a stream and the matching receiver.
-    pub fn new(capacity: usize) -> (Self, mpsc::Receiver<StreamEvent>) {
-        let (tx, rx) = mpsc::channel(capacity);
-        (Self { tx }, rx)
+    pub fn new(capacity: usize) -> Self {
+        let (tx, _rx) = broadcast::channel(capacity);
+        Self { tx }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
+        self.tx.subscribe()
     }
 
     pub async fn content(&self, text: &str, chunk: bool) {
-        let _ = self
-            .tx
-            .send(StreamEvent::Content {
-                text: text.to_string(),
-                chunk,
-            })
-            .await;
+        let _ = self.tx.send(StreamEvent::Content {
+            text: text.to_string(),
+            chunk,
+        });
     }
 
     pub async fn trace(&self, kind: &str, data: impl Serialize) {
-        let _ = self
-            .tx
-            .send(StreamEvent::Trace {
-                kind: kind.to_string(),
-                data: serde_json::to_value(data).unwrap_or_default(),
-            })
-            .await;
+        let _ = self.tx.send(StreamEvent::Trace {
+            kind: kind.to_string(),
+            data: serde_json::to_value(data).unwrap_or_default(),
+        });
     }
 
     pub async fn status(&self, kind: &str, data: impl Serialize) {
-        let _ = self
-            .tx
-            .send(StreamEvent::Status {
-                kind: kind.to_string(),
-                data: serde_json::to_value(data).unwrap_or_default(),
-            })
-            .await;
+        let _ = self.tx.send(StreamEvent::Status {
+            kind: kind.to_string(),
+            data: serde_json::to_value(data).unwrap_or_default(),
+        });
     }
 }
 
@@ -96,7 +90,8 @@ mod tests {
 
     #[tokio::test]
     async fn tutor_stream_sends_content() {
-        let (stream, mut rx) = TutorStream::new(16);
+        let stream = TutorStream::new(16);
+        let mut rx = stream.subscribe();
         stream.content("hello", true).await;
         let event = rx.recv().await.unwrap();
         match event {
