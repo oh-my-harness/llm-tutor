@@ -160,7 +160,7 @@ T0 读取型（无副作用）
 └── get_session_context() → SessionCtx  — 读取学习进度（v0.2）
 
 T1 可逆写入
-└── save_note(content, topic) → NoteId  — 保存学习笔记
+└── save_note(content, topic) → NoteId  — 保存学习笔记（v0.2）
 
 T2 外部副作用
 ├── code_exec(language, code) → ExecResult  — OsEnvSandbox 执行（v0.1）
@@ -173,7 +173,7 @@ T2 外部副作用
 | Capability / 阶段 | 活跃工具 |
 |-----------------|---------|
 | Chat - Explore | `rag_search`, `web_search` |
-| Chat - Respond | `save_note` |
+| Chat - Respond | _(纯 LLM 输出，无工具)_ |
 | Deep Solve - Pre-retrieve | `rag_search` |
 | Deep Solve - Plan | _(纯 LLM 输出，无工具)_ |
 | Deep Solve - Solve step | `rag_search`, `web_search`, `code_exec`, `replan` |
@@ -211,13 +211,13 @@ for each step in plan.steps:
     流程: THINK（推理）→ TOOL calls（工具） → FINISH（输出本步结论）
     REPLAN 路径:
       agent 调用 replan(reason)
-      → BeforeToolCallHook 拦截：
-          SolveContext.replan_reason = reason
-          返回 Deny（工具不执行）
-      → harness 收到 ToolDenied → TaskVerdict::Fail
-      → SolveOrchestrator 检测 replan_reason 非空
-      → 重启 Harness B（replan_count += 1）
-      → max_replans = 2，超限继续执行 Synthesize
+      → BeforeToolCallHook (ReplanHook) 拦截：
+          写入 SolveContext.replan_reason = reason（共享状态）
+          返回 Deny(ToolResult)（工具体不执行，harness 正常 Settled）
+      → SolveOrchestrator.run_solve_steps() 检测共享状态中 replan_reason 非空
+      → 提前返回，外层 loop 调用 should_replan() → reset_for_replan()
+      → 重启 Harness B（replan_count += 1，plan + step_results 清空）
+      → max_replans = 2，should_replan() 返回 false 时退出 loop，继续 Synthesize
 
 [Harness D] Synthesize
   工具: 无
@@ -237,6 +237,21 @@ struct SolveContext {
     replan_count: usize,
     replan_reason: Option<String>,  // 由 ReplanHook 写入
     max_replans: usize,             // 默认 2
+}
+
+impl SolveContext {
+    /// 是否应触发 REPLAN：reason 已设置且未达上限。
+    fn should_replan(&self) -> bool {
+        self.replan_reason.is_some() && self.replan_count < self.max_replans
+    }
+
+    /// 清理状态准备新一轮 Plan（保留 question/kb_summary）。
+    fn reset_for_replan(&mut self) {
+        self.plan = None;
+        self.step_results.clear();
+        self.replan_count += 1;
+        self.replan_reason = None;
+    }
 }
 
 struct Plan {
@@ -272,41 +287,55 @@ ResourceLimits {
 
 ```rust
 pub struct CapabilityRouter {
-    registry: Arc<dyn ToolRegistry>,
-    audit: Arc<dyn AuditSink>,
-    budget: Arc<BudgetControlAdapter>,
-    stream: Arc<TutorStream>,
+    env: Arc<dyn ExecutionEnv>,
+    model: String,
+    governance: GovernanceConfig,   // 聚合 budget + audit + approval（跨 harness 共享）
+    stream: Option<Arc<TutorStream>>, // WebSocket 事件总线（Web 模式），CLI 模式为 None
 }
 
 impl CapabilityRouter {
-    pub async fn run(&self, capability: Capability, req: TurnRequest) -> Result<TurnResponse>;
+    pub async fn run(&self, capability: Capability, question: &str) -> Result<String>;
 }
 ```
 
-`budget` 跨所有 harness 共用同一个 `BudgetControlAdapter` 实例，保证 session 内各阶段累加。
+`governance.budget` 跨所有 harness 共用同一个 `BudgetControlAdapter` 实例，保证 session 内各阶段累加。
+`stream` 在 CLI 模式下为 `None`（不推送流式事件），Web 模式下注入 `TutorStream`。
 
 ### 4.2 SolveOrchestrator
 
 ```rust
 pub struct SolveOrchestrator {
     context: SolveContext,
-    registry: Arc<dyn ToolRegistry>,
-    budget: Arc<BudgetControlAdapter>,
-    stream: Arc<TutorStream>,
+    env: Arc<dyn ExecutionEnv>,
+    model: String,
+    governance: GovernanceConfig,
+    stream: Option<Arc<TutorStream>>,
 }
 
 impl SolveOrchestrator {
-    pub async fn run(&mut self, question: &str, kb: Option<&str>) -> Result<SolveResult> {
+    /// question 在构造时绑定，kb 在 run() 时传入。
+    pub fn new(
+        question: impl Into<String>,
+        env: Arc<dyn ExecutionEnv>,
+        model: impl Into<String>,
+        governance: GovernanceConfig,
+        stream: Option<Arc<TutorStream>>,
+    ) -> Self;
+
+    /// 运行完整流水线：[Pre-retrieve] → Plan → (Solve → [REPLAN])* → Synthesize。
+    pub async fn run(&mut self, kb: Option<&str>) -> Result<String> {
         // 1. Pre-retrieve（有 KB 时）
-        if kb.is_some() { self.run_pre_retrieve(kb.unwrap()).await?; }
+        if let Some(kb_text) = kb {
+            self.run_pre_retrieve(kb_text).await?;
+        }
         
         // 2. Plan loop（支持 REPLAN 回溯）
         loop {
             self.run_plan().await?;
             self.run_solve_steps().await?;
             
-            if self.context.replan_reason.is_none() { break; }
-            if self.context.replan_count >= self.context.max_replans { break; }
+            if !self.context.should_replan() { break; }
+            self.context.reset_for_replan();
         }
         
         // 3. Synthesize
@@ -320,16 +349,23 @@ impl SolveOrchestrator {
 ```rust
 /// PrepareNextTurnHook: 仅控制 Solve step 内的工具白名单。
 /// 不驱动外层阶段切换（外层由 SolveOrchestrator 顺序调用控制）。
+/// 使用 `active_tools` 从已注册工具中筛选手集（而非 `tools` 替换全部）。
 pub struct PhaseManager {
     allowed_tools: Vec<String>,
 }
 
 impl PrepareNextTurnHook for PhaseManager {
-    async fn prepare_next_turn(&self, _ctx: &TurnContext) -> NextTurnDirective {
-        NextTurnDirective {
-            tools: Some(self.allowed_tools.clone()),
-            ..Default::default()
-        }
+    fn prepare<'a>(
+        &'a self,
+        _ctx: PrepareNextTurnCtx<'a>,
+    ) -> BoxFuture<'a, Result<NextTurnDirective, AgentError>> {
+        let tools: HashSet<String> = self.allowed_tools.iter().cloned().collect();
+        Box::pin(async move {
+            Ok(NextTurnDirective {
+                active_tools: Some(tools),
+                ..Default::default()
+            })
+        })
     }
 }
 ```
@@ -338,19 +374,31 @@ impl PrepareNextTurnHook for PhaseManager {
 
 ```rust
 /// BeforeToolCallHook: 拦截 replan() 工具调用，触发 REPLAN 回溯。
+/// 通过 Arc<Mutex<SolveContext>> 共享状态写入 replan_reason，
+/// SolveOrchestrator 在每个 Solve step 结束后检测该标志。
 pub struct ReplanHook {
     context: Arc<Mutex<SolveContext>>,
 }
 
 impl BeforeToolCallHook for ReplanHook {
-    async fn before_tool_call(&self, req: &ToolCallRequest) -> BeforeToolCallDecision {
-        if req.tool_name == "replan" {
-            let reason = req.args["reason"].as_str().unwrap_or("").to_string();
+    fn on_call<'a>(
+        &'a self,
+        ctx: BeforeToolCallCtx<'a>,
+    ) -> BoxFuture<'a, BeforeToolCallDecision> {
+        Box::pin(async move {
+            if ctx.tool_name != "replan" {
+                return BeforeToolCallDecision::Allow;
+            }
+            let reason = ctx.args["reason"].as_str().unwrap_or("").to_string();
             self.context.lock().unwrap().replan_reason = Some(reason);
-            BeforeToolCallDecision::Deny { reason: "replan triggered".into() }
-        } else {
-            BeforeToolCallDecision::Allow
-        }
+            BeforeToolCallDecision::Deny(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!("replan triggered: {reason}"),
+                }],
+                details: json!({ "replan_reason": reason }),
+                terminate: false,
+            })
+        })
     }
 }
 ```
@@ -419,18 +467,32 @@ useWebSocket hook 订阅 /ws/sessions/:id
 
 ## 6. 审计与预算
 
-### 6.1 预算控制
+### 6.1 治理配置
+
+```rust
+/// 聚合 session 级治理组件（预算 + 审计 + 人工审批），跨所有 harness 共享。
+pub struct GovernanceConfig {
+    pub budget: Arc<BudgetControlAdapter>,
+    pub audit: Option<Arc<dyn AuditSink>>,
+    pub approval: Option<Arc<HumanApprovalWrapper>>,
+    pub require_code_exec_approval: bool,
+}
+```
+
+### 6.2 预算控制
 
 ```rust
 // 全局 session 预算，跨所有 harness 共用
 let budget = Arc::new(BudgetControlAdapter::new(
     pricing_provider,
-    max_total_cost: 2.00,   // per session，单位 USD
+    2.00,   // max_total_cost per session，单位 USD
+    None,   // 可选 token 上限
 ));
-// ShouldStopHook: 超限 → task Failed → TutorStream 推 status.budget_exceeded
+// BudgetControlAdapter 同时实现 AfterProviderResponseHook（累加成本）
+// 和 ShouldStopHook（超限返回 ShouldStop::Yes，触发 harness Settled）
 ```
 
-### 6.2 审计事件
+### 6.3 审计事件
 
 | 事件 | 触发点 | 关键字段 |
 |-----|-------|---------|
@@ -456,14 +518,16 @@ v0.1 不做 hash 链完整性验证（留 v0.2）。
 ### 7.2 API
 
 ```
-REST:
+REST (Phase 4 实现):
   POST /api/sessions               — 创建 session（capability, kb?）
   GET  /api/sessions/:id           — 获取 session 详情
+
+REST (v0.2):
   GET  /api/sessions/:id/cost      — 当前成本
   GET  /api/sessions/:id/audit     — 审计日志
   GET  /api/kb                     — 列出知识库
 
-WebSocket:
+WebSocket (Phase 4 实现):
   WS /ws/sessions/:id
     客户端 → 服务端: { type: "message", content: "..." }
     服务端 → 客户端: content / trace / status 事件（见 §5）
@@ -586,8 +650,11 @@ App
 
 - 沙箱后端（BwrapSandbox / SeatbeltSandbox）
 - Multi-user session 隔离
+- `save_note` 工具实现（学习笔记持久化）
+- `get_session_context` 工具实现（学习进度读取）
 - Explain judge
 - AuditSink hash 链验证
+- REST `/cost`、`/audit`、`/kb` 端点
 
 ---
 

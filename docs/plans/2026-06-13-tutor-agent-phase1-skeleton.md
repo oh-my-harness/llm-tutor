@@ -933,11 +933,8 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
     };
 
     // AnthropicProvider is the concrete LlmClient implementation.
-    // Reads ANTHROPIC_API_KEY from env (the auth hook resolves it at call time,
-    // but AnthropicProvider also needs the key to build the HTTP client).
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| crate::error::TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
-    let client = Arc::new(AnthropicProvider::builder(api_key).build());
+    // Uses the API key passed through CapabilityRouter.
+    let client = Arc::new(AnthropicProvider::builder(&router.anthropic_api_key).build());
 
     // Subscribe before prompt() so we don't miss any events.
     let harness = AgentHarness::new_in_memory(client, router.env.clone(), opts).await;
@@ -1018,7 +1015,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let env = Arc::new(OsEnv::new(std::env::current_dir()?));
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", "");
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .expect("ANTHROPIC_API_KEY environment variable required");
+    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", &api_key);
 
     println!("Question: {question}");
     let answer = router.run(Capability::Chat, &question).await?;

@@ -63,7 +63,14 @@ path = "src/main.rs"
 
 [dependencies]
 tutor-agent = { path = "../tutor-agent" }
+# NOTE: direct llm-harness-runtime dep is needed for types (BudgetControlAdapter, AuditSink)
+# that appear in GovernanceConfig. The Spec's intended layering is:
+#   tutor-web → tutor-agent → tutor-tools → llm-harness-runtime
+# In practice, tutor-web needs runtime types for server setup (Phase 5 main.rs constructs
+# BudgetControlAdapter and JsonlAuditSink directly). Consider re-exporting these from
+# tutor-agent in v0.2.
 llm-harness-runtime = { workspace = true }
+llm-harness-runtime-audit-jsonl = { workspace = true }
 anyhow.workspace = true
 futures.workspace = true
 serde.workspace = true
@@ -102,11 +109,13 @@ mod tests {
     fn trace_event_serializes_correctly() {
         let event = StreamEvent::Trace {
             kind: "phase_start".into(),
-            payload: serde_json::json!({ "phase": "plan" }),
+            data: serde_json::json!({ "phase": "plan" }),
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "trace");
         assert_eq!(json["payload"]["kind"], "phase_start");
+        // `data` is flattened, so phase is directly under payload
+        assert_eq!(json["payload"]["phase"], "plan");
     }
 
     #[tokio::test]
@@ -140,14 +149,18 @@ pub enum StreamEvent {
     /// LLM text chunk or final message.
     Content { text: String, chunk: bool },
     /// Internal event for the TracePanel (tool calls, phase changes, REPLAN).
+    /// `data` is flattened into the payload, so the JSON shape is:
+    /// `{"type":"trace","payload":{"kind":"...","phase":"...","step":1}}`
     Trace {
         kind: String,
-        payload: serde_json::Value,
+        #[serde(flatten)]
+        data: serde_json::Value,
     },
     /// Status notification (budget_warning, phase_change, approval_request, error).
     Status {
         kind: String,
-        payload: serde_json::Value,
+        #[serde(flatten)]
+        data: serde_json::Value,
     },
 }
 
@@ -174,22 +187,22 @@ impl TutorStream {
             .await;
     }
 
-    pub async fn trace(&self, kind: &str, payload: impl Serialize) {
+    pub async fn trace(&self, kind: &str, data: impl Serialize) {
         let _ = self
             .tx
             .send(StreamEvent::Trace {
                 kind: kind.to_string(),
-                payload: serde_json::to_value(payload).unwrap_or_default(),
+                data: serde_json::to_value(data).unwrap_or_default(),
             })
             .await;
     }
 
-    pub async fn status(&self, kind: &str, payload: impl Serialize) {
+    pub async fn status(&self, kind: &str, data: impl Serialize) {
         let _ = self
             .tx
             .send(StreamEvent::Status {
                 kind: kind.to_string(),
-                payload: serde_json::to_value(payload).unwrap_or_default(),
+                data: serde_json::to_value(data).unwrap_or_default(),
             })
             .await;
     }
@@ -238,6 +251,8 @@ mod tests {
         assert!(entry.is_some());
         let entry = entry.unwrap();
         assert_eq!(entry.capability, "chat");
+        // Receiver is stored and retrievable by the WS handler
+        assert!(pool.take_rx(&id).is_some());
     }
 
     #[test]
@@ -269,20 +284,23 @@ pub struct SessionEntry {
 }
 
 /// Thread-safe pool of active sessions.
+/// Receivers are stored in a separate map so the WS handler can take them.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
+    receivers: Mutex<HashMap<String, tokio::sync::mpsc::Receiver<crate::stream::StreamEvent>>>,
 }
 
 impl SessionPool {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
+            receivers: Mutex::new(HashMap::new()),
         })
     }
 
     /// Create a new session and return its ID.
-    /// The `TutorStream` receiver is returned separately for the WS handler.
-    pub fn create(&self, capability: &str, kb: Option<String>) -> (String, tokio::sync::mpsc::Receiver<crate::stream::StreamEvent>) {
+    /// The receiver is stored internally; the WS handler retrieves it via `take_rx()`.
+    pub fn create(&self, capability: &str, kb: Option<String>) -> String {
         let id = Uuid::new_v4().to_string();
         let (stream, rx) = TutorStream::new(128);
         let entry = SessionEntry {
@@ -292,7 +310,13 @@ impl SessionPool {
             stream,
         };
         self.sessions.lock().unwrap().insert(id.clone(), entry);
-        (id, rx)
+        self.receivers.lock().unwrap().insert(id.clone(), rx);
+        id
+    }
+
+    /// Called by the WS handler to get the event receiver for forwarding to the client.
+    pub fn take_rx(&self, id: &str) -> Option<tokio::sync::mpsc::Receiver<crate::stream::StreamEvent>> {
+        self.receivers.lock().unwrap().remove(id)
     }
 
     pub fn get(&self, id: &str) -> Option<SessionEntry> {
@@ -309,11 +333,7 @@ impl Default for SessionPool {
 }
 ```
 
-**Note:** The test above calls `pool.create("chat", None)` but the real signature returns a tuple. Update the test to ignore the receiver:
-
-```rust
-let (id, _rx) = pool.create("chat", None);
-```
+**Note:** `SessionPool::create()` stores the receiver internally (retrievable via `take_rx()`), so the REST handler only needs the session ID.
 
 - [ ] **Step 3: Run test**
 
@@ -400,7 +420,7 @@ async fn create_session(
     State(pool): State<Arc<SessionPool>>,
     Json(req): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
-    let (id, _rx) = pool.create(&req.capability, req.kb);
+    let id = pool.create(&req.capability, req.kb);
     (StatusCode::CREATED, Json(CreateSessionResponse { id }))
 }
 
@@ -489,17 +509,14 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
     let Some(entry) = pool.get(&session_id) else {
         return;
     };
+    // Take the receiver stored during session creation
+    let Some(mut event_rx) = pool.take_rx(&session_id) else {
+        return;
+    };
 
     let (mut ws_sink, mut ws_stream) = socket.split();
 
-    // Spawn a task that reads from TutorStream and forwards to WebSocket
-    let (event_tx, mut event_rx) = mpsc::channel::<StreamEvent>(128);
-
-    // Rebuild a new channel since SessionEntry.stream is a sender clone
-    // In production, SessionPool should store the receiver alongside the entry.
-    // For now, accept that the WS handler gets events directly via event_tx.
-    // TODO: wire event_rx from SessionPool.create() into the session store.
-
+    // Forward events from the agent harness to the WebSocket client
     let send_task = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let json = match serde_json::to_string(&event) {
@@ -512,17 +529,16 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
         }
     });
 
-    // Receive messages from the client (approval responses, etc.)
+    // Receive messages from the client (user messages, approval responses, etc.)
     while let Some(Ok(msg)) = ws_stream.next().await {
         match msg {
             Message::Text(text) => {
-                // Parse and handle client messages
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
                     let msg_type = val["type"].as_str().unwrap_or("");
                     match msg_type {
                         "message" => {
                             // Client sent a chat message — run the capability
-                            // TODO: wire to CapabilityRouter.run()
+                            // TODO: wire to CapabilityRouter.run() with streaming
                             let _ = entry.stream.content("Processing...", false).await;
                         }
                         "approval_response" => {
@@ -1029,7 +1045,7 @@ git -C /Users/hhl/Documents/projs/tutor_agent push
 
 ```tsx
 // web-ui/src/App.tsx
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { CapabilitySelector } from './components/CapabilitySelector'
 import { ChatBox } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
@@ -1049,6 +1065,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
+  const streamingRef = useRef('')  // avoid stale closure in onEvent
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
@@ -1059,12 +1076,15 @@ export default function App() {
     onEvent: (event) => {
       if (event.type === 'content') {
         if (event.payload.chunk) {
-          setStreamingText((prev) => prev + event.payload.text)
+          streamingRef.current += event.payload.text
+          setStreamingText(streamingRef.current)
         } else {
+          const finalText = streamingRef.current + event.payload.text
           setMessages((prev) => [
             ...prev,
-            { role: 'assistant', text: streamingText + event.payload.text },
+            { role: 'assistant', text: finalText },
           ])
+          streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
         }
@@ -1074,10 +1094,12 @@ export default function App() {
           { kind: event.payload.kind, payload: event.payload, timestamp: Date.now() },
         ])
       } else if (event.type === 'status') {
-        const { kind, payload } = event.payload as { kind: string; payload: Record<string, unknown> }
+        // Status events use flattened data: { kind, ...rest } directly under payload
+        const payload = event.payload as Record<string, unknown>
+        const kind = payload.kind as string
         if (kind === 'budget_warning') {
           setBudgetWarning(true)
-          setBudgetSpent((payload.spent_usd as number) ?? budgetSpent)
+          setBudgetSpent((payload.spent_usd as number) ?? 0)
         } else if (kind === 'approval_request') {
           setPendingApproval({
             tool: payload.tool as string,

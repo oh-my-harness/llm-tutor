@@ -152,7 +152,8 @@ Change `run_chat` signature to accept `GovernanceConfig`:
 ```rust
 // crates/tutor-agent/src/chat.rs
 pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<String> {
-    use llm_harness::HarnessHooks;
+    use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
+    use llm_harness_types::{AgentEvent, ContentBlock};
 
     let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
         Arc::new(RagSearchTool::new()),
@@ -178,24 +179,41 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
         ..AgentHarnessOptions::new(router.model.clone())
     };
 
-    let harness = AgentHarness::new_in_memory(
-        Arc::new(llm_harness_runtime_auth::AnthropicClient::from_env()),
-        router.env.clone(),
-        opts,
-    )
-    .await;
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| crate::error::TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
+    let client = Arc::new(AnthropicProvider::builder(api_key).build());
 
+    let harness = AgentHarness::new_in_memory(client, router.env.clone(), opts).await;
+    let mut rx = harness.subscribe();
     harness.prompt(question).await?;
-    harness.wait_for_idle().await;
 
-    Ok(harness
-        .last_assistant_text()
-        .await
-        .unwrap_or_else(|| "(no response)".into()))
+    // Collect the last complete assistant message (same pattern as Phase 1).
+    let mut last_text = String::new();
+    while let Ok(event) = rx.recv().await {
+        match event.as_ref() {
+            AgentHarnessEvent::Agent(AgentEvent::MessageEnd { message }) => {
+                for block in &message.content {
+                    if let ContentBlock::Text { text } = block {
+                        last_text = text.clone();
+                    }
+                }
+            }
+            AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
+            _ => {}
+        }
+    }
+
+    Ok(if last_text.is_empty() {
+        "(no response)".into()
+    } else {
+        last_text
+    })
 }
 ```
 
-**Note:** `BudgetControlAdapter` implements `AfterProviderResponseHook` and `ShouldStopHook` directly. Confirm this compiles by checking trait impls:
+**Note:** `BudgetControlAdapter` implements `AfterProviderResponseHook` and `ShouldStopHook` directly. When budget is exhausted, `ShouldStopHook` returns `ShouldStop::Yes`, the harness settles, and the event loop above exits via `AgentHarnessEvent::Settled`. The caller can detect budget exhaustion by checking `gov.budget.current_cost() >= gov.budget.max_cost()`.
+
+Confirm trait impls:
 
 ```bash
 grep -n "impl AfterProviderResponseHook\|impl ShouldStopHook" \
@@ -349,9 +367,42 @@ Write audit events at key phase transitions. The `AuditSink` API is:
 cat /Users/hhl/Documents/projs/llm-harness-runtime/crates/llm-harness-runtime/src/audit.rs | head -80
 ```
 
-- [ ] **Step 2: Add audit calls to SolveOrchestrator**
+- [ ] **Step 2: Add GovernanceConfig to SolveOrchestrator**
 
-After reading the actual API, add calls at phase boundaries. Pattern:
+First, update `SolveOrchestrator` to accept `GovernanceConfig` and wire budget hooks into its harnesses (Plan, Solve, Synthesize phases). Pattern:
+
+```rust
+// In solve_orchestrator.rs
+use crate::governance::GovernanceConfig;
+
+pub struct SolveOrchestrator {
+    context: Arc<Mutex<SolveContext>>,
+    env: Arc<dyn ExecutionEnv>,
+    model: String,
+    governance: GovernanceConfig,
+}
+
+impl SolveOrchestrator {
+    pub fn new(
+        question: impl Into<String>,
+        env: Arc<dyn ExecutionEnv>,
+        model: impl Into<String>,
+        governance: GovernanceConfig,
+    ) -> Self { ... }
+
+    // In run_plan(), run_solve_steps(), run_synthesize():
+    // Add to AgentHarnessOptions:
+    hooks: HarnessHooks {
+        after_provider_response: Some(self.governance.budget.clone()),
+        should_stop: Some(self.governance.budget.clone()),
+        ..HarnessHooks::none()
+    },
+}
+```
+
+- [ ] **Step 3: Add audit calls to SolveOrchestrator**
+
+After wiring governance, add audit calls at phase boundaries. Pattern:
 
 ```rust
 if let Some(audit) = &self.governance.audit {

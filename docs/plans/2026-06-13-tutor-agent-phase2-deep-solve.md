@@ -558,7 +558,7 @@ use crate::solve_context::{Plan, SolveContext, StepResult};
 
 /// Drives the four-phase Deep Solve pipeline.
 pub struct SolveOrchestrator {
-    pub context: SolveContext,
+    context: Arc<Mutex<SolveContext>>,
     env: Arc<dyn ExecutionEnv>,
     model: String,
     anthropic_api_key: String,
@@ -572,7 +572,7 @@ impl SolveOrchestrator {
         anthropic_api_key: impl Into<String>,
     ) -> Self {
         Self {
-            context: SolveContext::new(question),
+            context: Arc::new(Mutex::new(SolveContext::new(question))),
             env,
             model: model.into(),
             anthropic_api_key: anthropic_api_key.into(),
@@ -589,11 +589,11 @@ impl SolveOrchestrator {
             self.run_plan().await?;
             self.run_solve_steps().await?;
 
-            if should_replan(&self.context) {
-                self.context.reset_for_replan();
-            } else {
+            if !should_replan(&self.context.lock().unwrap()) {
+                self.context.lock().unwrap().replan_reason = None;
                 break;
             }
+            self.context.lock().unwrap().reset_for_replan();
         }
 
         self.run_synthesize().await
@@ -601,18 +601,19 @@ impl SolveOrchestrator {
 
     async fn run_pre_retrieve(&mut self, kb: &str) -> Result<()> {
         // Phase 1 stub: set kb_summary to the kb parameter
-        self.context.kb_summary = Some(format!("[KB summary for: {kb}]"));
+        self.context.lock().unwrap().kb_summary = Some(format!("[KB summary for: {kb}]"));
         Ok(())
     }
 
     async fn run_plan(&mut self) -> Result<()> {
         // TODO Phase 2 Task 6: real harness call to generate JSON plan
         // Stub: create a single-step plan
-        self.context.plan = Some(Plan {
-            analysis: format!("Analyze: {}", self.context.question),
+        let question = self.context.lock().unwrap().question.clone();
+        self.context.lock().unwrap().plan = Some(Plan {
+            analysis: format!("Analyze: {question}"),
             steps: vec![crate::solve_context::PlanStep {
                 id: "step-1".into(),
-                goal: format!("Solve: {}", self.context.question),
+                goal: format!("Solve: {question}"),
             }],
         });
         Ok(())
@@ -622,6 +623,7 @@ impl SolveOrchestrator {
         // TODO Phase 2 Task 7: real harness per step
         let steps = self
             .context
+            .lock().unwrap()
             .plan
             .as_ref()
             .ok_or_else(|| TutorError::Internal("no plan".into()))?
@@ -630,7 +632,7 @@ impl SolveOrchestrator {
 
         for step in steps {
             // Stub: append a result without calling the LLM
-            self.context.step_results.push(StepResult {
+            self.context.lock().unwrap().step_results.push(StepResult {
                 step_id: step.id.clone(),
                 finish_text: format!("[stub result for {}]", step.goal),
             });
@@ -642,6 +644,7 @@ impl SolveOrchestrator {
         // TODO Phase 2 Task 8: real harness call to synthesize
         let summary = self
             .context
+            .lock().unwrap()
             .step_results
             .iter()
             .map(|r| r.finish_text.clone())
@@ -706,9 +709,17 @@ async fn run_plan(&mut self) -> Result<()> {
     use llm_harness_runtime_auth::EnvAuthHook;
     use llm_harness_types::{AgentEvent, ContentBlock};
 
-    let prompt = if let Some(reason) = &self.context.replan_reason {
+    let (question, kb_summary, replan_reason, prev_plan) = {
+        let ctx = self.context.lock().unwrap();
+        (ctx.question.clone(),
+         ctx.kb_summary.clone(),
+         ctx.replan_reason.clone(),
+         ctx.plan.clone())
+    };
+
+    let prompt = if let Some(reason) = &replan_reason {
         // REPLAN path: include previous plan + reason
-        let prev = self.context.plan.as_ref()
+        let prev = prev_plan.as_ref()
             .map(|p| serde_json::to_string_pretty(p).unwrap_or_default())
             .unwrap_or_default();
         format!(
@@ -717,8 +728,8 @@ async fn run_plan(&mut self) -> Result<()> {
              Create a NEW step-by-step plan in JSON: \
              {{\"analysis\":\"...\",\"steps\":[{{\"id\":\"s1\",\"goal\":\"...\"}},...]}}\n\
              Output ONLY the JSON, no prose.",
-            self.context.question,
-            self.context.kb_summary.as_deref().unwrap_or("none")
+            question,
+            kb_summary.as_deref().unwrap_or("none")
         )
     } else {
         format!(
@@ -726,8 +737,8 @@ async fn run_plan(&mut self) -> Result<()> {
              Create a step-by-step plan in JSON: \
              {{\"analysis\":\"...\",\"steps\":[{{\"id\":\"s1\",\"goal\":\"...\"}},...]}}\n\
              Output ONLY the JSON, no prose.",
-            self.context.question,
-            self.context.kb_summary.as_deref().unwrap_or("none")
+            question,
+            kb_summary.as_deref().unwrap_or("none")
         )
     };
 
@@ -780,7 +791,7 @@ async fn run_plan(&mut self) -> Result<()> {
     let plan: Plan = serde_json::from_str(json_str)
         .map_err(|e| TutorError::Internal(format!("plan parse error: {e}\nraw: {raw}")))?;
 
-    self.context.plan = Some(plan);
+    self.context.lock().unwrap().plan = Some(plan);
     Ok(())
 }
 ```
@@ -844,16 +855,17 @@ async fn run_solve_steps(&mut self) -> Result<()> {
 
     let steps = self
         .context
+        .lock().unwrap()
         .plan
         .as_ref()
         .ok_or_else(|| TutorError::Internal("no plan".into()))?
         .steps
         .clone();
 
+    // ReplanHook shares the orchestrator's context directly via Arc.
+    let replan_hook = Arc::new(ReplanHook::new(self.context.clone()));
+
     for step in &steps {
-        // Per-step SolveContext clone to receive the replan reason
-        let hook_ctx = Arc::new(std::sync::Mutex::new(SolveContext::new(&self.context.question)));
-        let replan_hook = Arc::new(ReplanHook::new(hook_ctx.clone()));
 
         let solve_tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
             Arc::new(RagSearchTool::new()),
@@ -912,11 +924,11 @@ async fn run_solve_steps(&mut self) -> Result<()> {
             }
         }
 
-        // Check if replan was triggered
-        let step_reason = hook_ctx.lock().unwrap().replan_reason.clone();
+        // Check if replan was triggered (ReplanHook wrote to shared context)
+        let step_reason = self.context.lock().unwrap().replan_reason.clone();
         if let Some(reason) = step_reason {
-            self.context.replan_reason = Some(reason);
-            return Ok(()); // Caller loop detects should_replan() == true
+            // Return early — outer loop detects should_replan() and calls reset_for_replan()
+            return Ok(());
         }
 
         let finish_text = raw
@@ -925,7 +937,7 @@ async fn run_solve_steps(&mut self) -> Result<()> {
             .collect::<Vec<_>>()
             .join("\n");
 
-        self.context.step_results.push(crate::solve_context::StepResult {
+        self.context.lock().unwrap().step_results.push(crate::solve_context::StepResult {
             step_id: step.id.clone(),
             finish_text: if finish_text.is_empty() { raw } else { finish_text },
         });
@@ -997,12 +1009,15 @@ async fn run_synthesize(&mut self) -> Result<String> {
     use llm_harness_runtime_auth::EnvAuthHook;
     use llm_harness_types::{AgentEvent, ContentBlock};
 
-    let steps_summary = format_step_results(&self.context.step_results);
+    let (question, steps_summary) = {
+        let ctx = self.context.lock().unwrap();
+        (ctx.question.clone(), format_step_results(&ctx.step_results))
+    };
     let prompt = format!(
         "Question: {}\n\nStep-by-step work:\n{steps_summary}\n\n\
          Synthesize a clear, complete final answer for the student. \
          Start with the direct answer, then provide explanation.",
-        self.context.question
+        question
     );
 
     let api_key = std::env::var("ANTHROPIC_API_KEY")
