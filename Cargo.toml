@@ -2,6 +2,7 @@
 members = [
     "crates/tutor-tools",
     "crates/tutor-agent",
+    "crates/tutor-web",
 ]
 resolver = "2"
 
