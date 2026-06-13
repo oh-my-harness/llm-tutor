@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use tower_http::cors::{Any, CorsLayer};
 

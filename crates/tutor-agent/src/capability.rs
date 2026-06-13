@@ -5,6 +5,7 @@ use llm_harness_types::ExecutionEnv;
 
 use crate::error::{Result, TutorError};
 use crate::governance::GovernanceConfig;
+use crate::llm_provider::LlmConfig;
 
 /// Supported teaching modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,22 +34,15 @@ impl FromStr for Capability {
 /// Entry point for all capabilities.
 pub struct CapabilityRouter {
     pub env: Arc<dyn ExecutionEnv>,
-    pub model: String,
-    pub anthropic_api_key: String,
+    pub llm: LlmConfig,
     pub governance: GovernanceConfig,
 }
 
 impl CapabilityRouter {
-    pub fn new(
-        env: Arc<dyn ExecutionEnv>,
-        model: impl Into<String>,
-        anthropic_api_key: impl Into<String>,
-        governance: GovernanceConfig,
-    ) -> Self {
+    pub fn new(env: Arc<dyn ExecutionEnv>, llm: LlmConfig, governance: GovernanceConfig) -> Self {
         Self {
             env,
-            model: model.into(),
-            anthropic_api_key: anthropic_api_key.into(),
+            llm,
             governance,
         }
     }
@@ -61,7 +55,7 @@ impl CapabilityRouter {
                 let mut orchestrator = crate::solve_orchestrator::SolveOrchestrator::new(
                     question,
                     self.env.clone(),
-                    &self.model,
+                    self.llm.clone(),
                     self.governance.clone(),
                 );
                 orchestrator.run(None).await

@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::{
-    ContentBlock, EnvError, ExecutionEnv, ShellOptions, Tool, ToolContext, ToolError, ToolResult,
-};
+use llm_harness_types::{ContentBlock, ExecutionEnv, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -81,9 +79,9 @@ impl Tool for CodeExecTool {
             let env = OsEnv::new(&work_dir);
 
             // Write source file
-            let (filename, run_cmd) = match language {
-                "python" => ("script.py", "python3 script.py".to_string()),
-                "bash" => ("script.sh", "bash script.sh".to_string()),
+            let (filename, program, run_args) = match language {
+                "python" => ("script.py", python_command(), vec!["script.py"]),
+                "bash" => ("script.sh", "bash", vec!["script.sh"]),
                 other => {
                     return Err(ToolError::InvalidArguments(format!(
                         "unsupported language: {other}"
@@ -100,22 +98,22 @@ impl Tool for CodeExecTool {
             .map_err(|e| ToolError::Execution(e.to_string()))?;
 
             // Execute — ShellFailed means non-zero exit, NOT a system error
-            let opts = ShellOptions {
-                cwd: Some(&work_dir),
-                timeout: Some(self.timeout),
-                abort: ctx.abort.clone(),
-                env: vec![],
-                on_stdout: None,
-                on_stderr: None,
-            };
+            let output = tokio::time::timeout(
+                self.timeout,
+                tokio::process::Command::new(program)
+                    .args(run_args)
+                    .current_dir(&work_dir)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output(),
+            )
+            .await
+            .map_err(|_| ToolError::Execution("timeout".into()))?
+            .map_err(|e| ToolError::Execution(format!("io error: {e}")))?;
 
-            let (stdout, stderr, exit_code) = match env.execute_shell(&run_cmd, opts).await {
-                Ok(out) => (out.stdout, out.stderr, out.exit_code),
-                Err(EnvError::ShellFailed { exit_code, stderr }) => {
-                    (String::new(), stderr, exit_code)
-                }
-                Err(e) => return Err(ToolError::Execution(e.to_string())),
-            };
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(-1);
 
             let output = format!(
                 "exit_code: {exit_code}\n\
@@ -140,6 +138,10 @@ impl Tool for CodeExecTool {
             })
         })
     }
+}
+
+fn python_command() -> &'static str {
+    if cfg!(windows) { "python" } else { "python3" }
 }
 
 #[cfg(test)]

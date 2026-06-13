@@ -1,5 +1,7 @@
 // Run with: cargo test --test deep_solve_integration -- --ignored
-// Requires ANTHROPIC_API_KEY to be set.
+// Requires provider env vars to be set.
+// Example DeepSeek:
+//   LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... LLM_MODEL=deepseek-v4-flash
 
 use std::sync::Arc;
 
@@ -7,7 +9,7 @@ use llm_harness_runtime::budget::BudgetControlAdapter;
 use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_sandbox_os::OsEnv;
 use tutor_agent::governance::GovernanceConfig;
-use tutor_agent::{Capability, CapabilityRouter};
+use tutor_agent::{Capability, CapabilityRouter, LlmConfig};
 
 struct NoOpPricing;
 impl PricingProvider for NoOpPricing {
@@ -27,13 +29,13 @@ fn make_governance() -> GovernanceConfig {
 }
 
 #[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY and network"]
+#[ignore = "requires LLM provider API key and network"]
 async fn deep_solve_end_to_end() {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY required");
+    let llm = LlmConfig::from_env().expect("LLM provider config required");
     let tmp = tempfile::tempdir().unwrap();
     let env = Arc::new(OsEnv::new(tmp.path()));
     let gov = make_governance();
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key, gov);
+    let router = CapabilityRouter::new(env, llm, gov);
 
     let result = router
         .run(
@@ -48,13 +50,13 @@ async fn deep_solve_end_to_end() {
 }
 
 #[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY and network"]
+#[ignore = "requires LLM provider API key and network"]
 async fn deep_solve_replan_triggers_and_recovers() {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY required");
+    let llm = LlmConfig::from_env().expect("LLM provider config required");
     let tmp = tempfile::tempdir().unwrap();
     let env = Arc::new(OsEnv::new(tmp.path()));
     let gov = make_governance();
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key, gov);
+    let router = CapabilityRouter::new(env, llm, gov);
 
     let result = router
         .run(

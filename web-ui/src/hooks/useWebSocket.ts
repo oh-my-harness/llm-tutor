@@ -12,6 +12,7 @@ interface UseWebSocketOptions {
 
 export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
+  const pendingRef = useRef<string[]>([])
   const optsRef = useRef(opts)
   optsRef.current = opts
 
@@ -20,6 +21,13 @@ export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions
 
     const ws = new WebSocket(`ws://localhost:8080/ws/sessions/${sessionId}`)
     wsRef.current = ws
+
+    ws.onopen = () => {
+      for (const item of pendingRef.current) {
+        ws.send(item)
+      }
+      pendingRef.current = []
+    }
 
     ws.onmessage = (e) => {
       try {
@@ -34,7 +42,13 @@ export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions
   }, [sessionId])
 
   const send = useCallback((msg: unknown) => {
-    wsRef.current?.send(JSON.stringify(msg))
+    const payload = JSON.stringify(msg)
+    const ws = wsRef.current
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(payload)
+    } else {
+      pendingRef.current.push(payload)
+    }
   }, [])
 
   return { send }

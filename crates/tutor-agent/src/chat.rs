@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use llm_adapter::anthropic::AnthropicProvider;
 use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-use llm_harness_runtime_auth::EnvAuthHook;
-use llm_harness_types::{AgentEvent, ContentBlock};
+use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
 use tutor_tools::{RagSearchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
@@ -20,25 +18,26 @@ pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<Strin
     let gov = &router.governance;
 
     let opts = AgentHarnessOptions {
-        model: router.model.clone(),
+        model: router.llm.model.clone(),
         tools,
         system_prompt: Some(
             "You are a knowledgeable tutor. Use rag_search to find relevant course material, \
              web_search for supplementary information, then answer clearly and concisely."
                 .into(),
         ),
-        auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+        auth: router
+            .llm
+            .auth_hook()
+            .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
         hooks: HarnessHooks {
             after_provider_response: Some(gov.budget.clone()),
             should_stop: Some(gov.budget.clone()),
             ..HarnessHooks::none()
         },
-        ..AgentHarnessOptions::new(router.model.clone())
+        ..AgentHarnessOptions::new(router.llm.model.clone())
     };
 
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| crate::error::TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
-    let client = Arc::new(AnthropicProvider::builder(api_key).build());
+    let client = router.llm.build_client();
 
     let harness = AgentHarness::new_in_memory(client, router.env.clone(), opts).await;
     let mut rx = harness.subscribe();

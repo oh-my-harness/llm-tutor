@@ -4,9 +4,12 @@ import { ChatBox } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
+import { SettingsPage } from './components/SettingsPage'
 import { useWebSocket } from './hooks/useWebSocket'
+import { loadLlmSettings, saveLlmSettings, settingsForSession } from './settings'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec'
+type View = 'chat' | 'settings'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -14,7 +17,9 @@ interface Message {
 }
 
 export default function App() {
+  const [view, setView] = useState<View>('chat')
   const [capability, setCapability] = useState<Capability>('chat')
+  const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
@@ -70,7 +75,10 @@ export default function App() {
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ capability }),
+        body: JSON.stringify({
+          capability,
+          llm: settingsForSession(llmSettings),
+        }),
       })
       const data = await res.json()
       sid = data.id as string
@@ -80,7 +88,13 @@ export default function App() {
     setMessages((prev) => [...prev, { role: 'user', text }])
     setRunning(true)
     send({ type: 'message', content: text })
-  }, [sessionId, capability, send])
+  }, [sessionId, capability, llmSettings, send])
+
+  const handleSettingsChange = (nextSettings: typeof llmSettings) => {
+    setLlmSettings(nextSettings)
+    saveLlmSettings(nextSettings)
+    setSessionId(null)
+  }
 
   const handleApproval = (requestId: string, approved: boolean) => {
     send({ type: 'approval_response', request_id: requestId, approved })
@@ -92,26 +106,45 @@ export default function App() {
       {/* Header */}
       <header className="bg-white border-b px-6 py-3 flex items-center gap-4">
         <h1 className="text-lg font-semibold text-gray-900">Tutor Agent</h1>
-        <CapabilitySelector value={capability} onChange={(c) => { setCapability(c); setSessionId(null) }} />
+        <nav className="flex border border-gray-200 text-sm">
+          <button
+            className={`px-4 py-2 ${view === 'chat' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+            onClick={() => setView('chat')}
+          >
+            Chat
+          </button>
+          <button
+            className={`px-4 py-2 ${view === 'settings' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+            onClick={() => setView('settings')}
+          >
+            Settings
+          </button>
+        </nav>
+        {view === 'chat' && (
+          <CapabilitySelector value={capability} onChange={(c) => { setCapability(c); setSessionId(null) }} />
+        )}
         <div className="ml-auto">
-          <BudgetPanel spent={budgetSpent} limit={2.0} warning={budgetWarning} />
+          <BudgetPanel spent={budgetSpent} limit={llmSettings.budgetLimitUsd} warning={budgetWarning} />
         </div>
       </header>
 
-      {/* Main */}
-      <div className="flex flex-1 min-h-0">
-        <main className="flex-1">
-          <ChatBox
-            messages={messages}
-            streamingText={streamingText}
-            onSend={handleSend}
-            disabled={running}
-          />
-        </main>
-        <aside className="w-72 border-l bg-white">
-          <TracePanel entries={traceEntries} />
-        </aside>
-      </div>
+      {view === 'settings' ? (
+        <SettingsPage settings={llmSettings} onChange={handleSettingsChange} />
+      ) : (
+        <div className="flex flex-1 min-h-0">
+          <main className="flex-1">
+            <ChatBox
+              messages={messages}
+              streamingText={streamingText}
+              onSend={handleSend}
+              disabled={running}
+            />
+          </main>
+          <aside className="w-72 border-l bg-white">
+            <TracePanel entries={traceEntries} />
+          </aside>
+        </div>
+      )}
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />
     </div>

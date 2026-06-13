@@ -12,6 +12,7 @@ path = "src/main.rs"
 tutor-agent = { path = "../tutor-agent" }
 llm-harness-runtime = { workspace = true }
 llm-harness-runtime-audit-jsonl = { workspace = true }
+llm-harness-runtime-sandbox-os = { workspace = true }
 anyhow.workspace = true
 futures.workspace = true
 serde.workspace = true

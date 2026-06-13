@@ -6,13 +6,14 @@ use llm_harness_types::ExecutionEnv;
 
 use crate::error::{Result, TutorError};
 use crate::governance::GovernanceConfig;
+use crate::llm_provider::LlmConfig;
 use crate::solve_context::{Plan, SolveContext, StepResult};
 
 /// Drives the four-phase Deep Solve pipeline.
 pub struct SolveOrchestrator {
     context: Arc<Mutex<SolveContext>>,
     env: Arc<dyn ExecutionEnv>,
-    model: String,
+    llm: LlmConfig,
     governance: GovernanceConfig,
 }
 
@@ -20,13 +21,13 @@ impl SolveOrchestrator {
     pub fn new(
         question: impl Into<String>,
         env: Arc<dyn ExecutionEnv>,
-        model: impl Into<String>,
+        llm: LlmConfig,
         governance: GovernanceConfig,
     ) -> Self {
         Self {
             context: Arc::new(Mutex::new(SolveContext::new(question))),
             env,
-            model: model.into(),
+            llm,
             governance,
         }
     }
@@ -66,10 +67,8 @@ impl SolveOrchestrator {
     }
 
     async fn run_plan(&mut self) -> Result<()> {
-        use llm_adapter::anthropic::AnthropicProvider;
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_runtime_auth::EnvAuthHook;
-        use llm_harness_types::{AgentEvent, ContentBlock};
+        use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
         use std::sync::Arc;
 
         crate::governance::record_audit(
@@ -114,25 +113,26 @@ impl SolveOrchestrator {
             )
         };
 
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
-        let client = Arc::new(AnthropicProvider::builder(api_key).build());
+        let client = self.llm.build_client();
 
         let opts = AgentHarnessOptions {
-            model: self.model.clone(),
+            model: self.llm.model.clone(),
             tools: vec![],
             system_prompt: Some(
                 "You are a math tutor planning a structured solution. \
                  Respond only with the requested JSON."
                     .into(),
             ),
-            auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+            auth: self
+                .llm
+                .auth_hook()
+                .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
             hooks: HarnessHooks {
                 after_provider_response: Some(self.governance.budget.clone()),
                 should_stop: Some(self.governance.budget.clone()),
                 ..HarnessHooks::none()
             },
-            ..AgentHarnessOptions::new(self.model.clone())
+            ..AgentHarnessOptions::new(self.llm.model.clone())
         };
 
         let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
@@ -172,19 +172,14 @@ impl SolveOrchestrator {
     }
 
     async fn run_solve_steps(&mut self) -> Result<()> {
-        use llm_adapter::anthropic::AnthropicProvider;
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_runtime_auth::EnvAuthHook;
-        use llm_harness_types::{AgentEvent, BeforeToolCallHook, ContentBlock};
+        use llm_harness_types::{AgentEvent, AuthHook, BeforeToolCallHook, ContentBlock};
         use std::sync::Arc;
         use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
 
         use crate::phase_manager::PhaseManager;
         use crate::replan_hook::ReplanHook;
         use crate::replan_tool::ReplanTool;
-
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
 
         let steps = self
             .context
@@ -234,7 +229,7 @@ impl SolveOrchestrator {
             ]));
 
             let opts = AgentHarnessOptions {
-                model: self.model.clone(),
+                model: self.llm.model.clone(),
                 tools: solve_tools,
                 system_prompt: Some(format!(
                     "You are solving step {id}: {goal}\n\
@@ -245,7 +240,10 @@ impl SolveOrchestrator {
                     id = step.id,
                     goal = step.goal,
                 )),
-                auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+                auth: self
+                    .llm
+                    .auth_hook()
+                    .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
                 hooks: HarnessHooks {
                     after_provider_response: Some(self.governance.budget.clone()),
                     should_stop: Some(self.governance.budget.clone()),
@@ -253,10 +251,10 @@ impl SolveOrchestrator {
                     prepare_next_turn: Some(phase_mgr),
                     ..HarnessHooks::none()
                 },
-                ..AgentHarnessOptions::new(self.model.clone())
+                ..AgentHarnessOptions::new(self.llm.model.clone())
             };
 
-            let client = Arc::new(AnthropicProvider::builder(api_key.clone()).build());
+            let client = self.llm.build_client();
             let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
             let mut rx = harness.subscribe();
 
@@ -310,10 +308,8 @@ impl SolveOrchestrator {
     }
 
     async fn run_synthesize(&mut self) -> Result<String> {
-        use llm_adapter::anthropic::AnthropicProvider;
         use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_runtime_auth::EnvAuthHook;
-        use llm_harness_types::{AgentEvent, ContentBlock};
+        use llm_harness_types::{AgentEvent, AuthHook, ContentBlock};
         use std::sync::Arc;
 
         crate::governance::record_audit(
@@ -334,25 +330,26 @@ impl SolveOrchestrator {
             question
         );
 
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| TutorError::Internal("ANTHROPIC_API_KEY not set".into()))?;
-        let client = Arc::new(AnthropicProvider::builder(api_key).build());
+        let client = self.llm.build_client();
 
         let opts = AgentHarnessOptions {
-            model: self.model.clone(),
+            model: self.llm.model.clone(),
             tools: vec![],
             system_prompt: Some(
                 "You are a math tutor writing a final answer synthesis. \
                  Be clear, structured, and educational."
                     .into(),
             ),
-            auth: Some(Arc::new(EnvAuthHook::for_provider("anthropic"))),
+            auth: self
+                .llm
+                .auth_hook()
+                .map(|hook| Arc::new(hook) as Arc<dyn AuthHook>),
             hooks: HarnessHooks {
                 after_provider_response: Some(self.governance.budget.clone()),
                 should_stop: Some(self.governance.budget.clone()),
                 ..HarnessHooks::none()
             },
-            ..AgentHarnessOptions::new(self.model.clone())
+            ..AgentHarnessOptions::new(self.llm.model.clone())
         };
 
         let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;

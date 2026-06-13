@@ -1869,6 +1869,7 @@ dependencies = [
  "futures",
  "llm-harness-runtime",
  "llm-harness-runtime-audit-jsonl",
+ "llm-harness-runtime-sandbox-os",
  "serde",
  "serde_json",
  "thiserror",

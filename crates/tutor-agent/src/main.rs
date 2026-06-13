@@ -5,7 +5,7 @@ use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use tutor_agent::governance::GovernanceConfig;
-use tutor_agent::{Capability, CapabilityRouter};
+use tutor_agent::{Capability, CapabilityRouter, LlmConfig};
 
 /// Zero-cost pricing provider for v0.1 development.
 struct NoOpPricing;
@@ -22,19 +22,16 @@ impl PricingProvider for NoOpPricing {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let question = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "What is integration by parts?".into());
-
-    // EnvAuthHook reads ANTHROPIC_API_KEY at harness call time.
-    if std::env::var("ANTHROPIC_API_KEY").is_err() {
-        eprintln!("Error: ANTHROPIC_API_KEY not set");
-        std::process::exit(1);
-    }
+    let (capability, question) = parse_args()?;
 
     let env = Arc::new(OsEnv::new(std::env::current_dir()?));
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .expect("ANTHROPIC_API_KEY environment variable required");
+    let llm = match LlmConfig::from_env() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            std::process::exit(1);
+        }
+    };
 
     // Governance: $2.00 session budget + JSONL audit log
     let budget = Arc::new(BudgetControlAdapter::new(Arc::new(NoOpPricing), 2.00, None));
@@ -44,11 +41,41 @@ async fn main() -> anyhow::Result<()> {
 
     let governance = GovernanceConfig::new(budget, Some(audit), false);
 
-    let router = CapabilityRouter::new(env, "claude-haiku-4-5-20251001", api_key, governance);
+    let router = CapabilityRouter::new(env, llm, governance);
 
     println!("Question: {question}");
-    let answer = router.run(Capability::Chat, &question).await?;
+    let answer = router.run(capability, &question).await?;
     println!("Answer:\n{answer}");
 
     Ok(())
+}
+
+fn parse_args() -> anyhow::Result<(Capability, String)> {
+    let mut capability = Capability::Chat;
+    let mut question_parts = Vec::new();
+    let mut args = std::env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--capability" | "-c" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing value for {arg}"))?;
+                capability = value.parse()?;
+            }
+            "--help" | "-h" => {
+                println!("Usage: tutor-agent [--capability chat|deep_solve|code_exec] <question>");
+                std::process::exit(0);
+            }
+            _ => question_parts.push(arg),
+        }
+    }
+
+    let question = if question_parts.is_empty() {
+        "What is integration by parts?".into()
+    } else {
+        question_parts.join(" ")
+    };
+
+    Ok((capability, question))
 }
