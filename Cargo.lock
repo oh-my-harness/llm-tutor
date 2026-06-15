@@ -891,6 +891,7 @@ dependencies = [
  "chrono",
  "futures",
  "llm-harness",
+ "llm-harness-loop 0.1.0 (git+https://github.com/oh-my-harness/llm-harness-core?rev=9ad7292c67c1d7828a907a7fd270a007b5d1f750)",
  "llm-harness-types",
  "serde",
  "serde_json",
