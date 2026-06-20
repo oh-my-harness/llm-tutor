@@ -1,5 +1,6 @@
 use serde::Serialize;
 use tokio::sync::broadcast;
+use tutor_agent::event_sink::EventSink;
 
 /// Events pushed from the agent harness to the WebSocket handler.
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +58,19 @@ impl TutorStream {
             kind: kind.to_string(),
             data: serde_json::to_value(data).unwrap_or_default(),
         });
+    }
+}
+
+impl EventSink for TutorStream {
+    fn trace(
+        &self,
+        kind: String,
+        data: serde_json::Value,
+    ) -> futures::future::BoxFuture<'static, ()> {
+        let stream = self.clone();
+        Box::pin(async move {
+            stream.trace(&kind, data).await;
+        })
     }
 }
 

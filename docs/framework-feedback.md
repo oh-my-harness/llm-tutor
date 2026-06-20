@@ -28,6 +28,16 @@
 - **`SolveOrchestrator` patterns repeat harness setup code across four phases**
   - Not a framework bug, but notable: every harness call repeats `AnthropicProvider::builder`, `AgentHarness::new_in_memory`, `subscribe`, event loop. A shared harness factory or builder pattern would reduce boilerplate.
 
+- **Session option/metadata types are not re-exported from the root facade**
+  - Expected: common session types used with `JsonlSessionRepo` can be imported from `llm_harness_agent::{...}` or the prelude.
+  - Actual: `JsonlSessionRepo`, `Session`, and `SessionRepo` are root exports, but `CreateSessionOptions`, `ListSessionOptions`, and `SessionMetadata` require `llm_harness_agent::session::{...}`.
+  - Suggestion: re-export these common session types at the root/prelude for a smoother app-layer integration.
+
+- **`SessionInfo` entries do not appear to update session metadata name via `Session::append`**
+  - Expected: appending `SessionEntryPayload::SessionInfo { name }` updates `SessionMetadata.name`, matching the type comment that the most recent `SessionInfo` wins.
+  - Actual: `Session::append` updates model metadata for `ModelChange`, but not name metadata for `SessionInfo`, so apps still need a separate title derivation path.
+  - Suggestion: update metadata name in `Session::append` when a `SessionInfo` payload is appended, or expose a public high-level `Session::set_name`.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** chains ReplanHook and HumanApprovalWrapper cleanly — allows layering domain-specific + cross-cutting hooks
@@ -41,6 +51,8 @@
 | Gap | Description | Severity |
 |-----|-------------|----------|
 | No test-helper constructors for hook context types | Building `BeforeToolCallCtx` in tests is unnecessarily hard | Medium |
+| Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
+| SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
 | No shared harness builder in the public API | Every call site repeats `new_in_memory`, `subscribe`, event loop | Low |
 
@@ -49,3 +61,5 @@
 1. Add `BeforeToolCallCtx::new_test(name, args)` that uses a dummy assistant message internally
 2. Make `AuditEntry.hash` and `AuditEntry.prev_hash` optional with internal fill-in, or split into payload vs entry types
 3. Consider adding `AgentHarnessBuilder` that caches provider/client construction and event subscription setup
+4. Re-export common session repo option and metadata types from the facade/prelude
+5. Add `Session::set_name` or metadata updates for `SessionInfo`

@@ -10,7 +10,9 @@ path = "src/main.rs"
 
 [dependencies]
 tutor-agent = { path = "../tutor-agent" }
+llm-harness-agent = { workspace = true }
 llm-harness-runtime = { workspace = true }
+llm-harness-types = { workspace = true }
 llm-harness-runtime-audit-jsonl = { workspace = true }
 llm-harness-runtime-sandbox-os = { workspace = true }
 anyhow.workspace = true
@@ -23,3 +25,4 @@ tokio-util.workspace = true
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"

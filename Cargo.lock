@@ -832,13 +832,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "llm-harness"
-version = "0.1.0"
+name = "llm-harness-agent"
+version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "llm-harness-loop 0.1.0",
+ "llm-harness-loop",
  "llm-harness-types",
  "serde",
  "serde_json",
@@ -849,25 +850,8 @@ dependencies = [
 
 [[package]]
 name = "llm-harness-loop"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "chrono",
- "futures",
- "llm-harness-types",
- "llm_adapter",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "uuid",
-]
-
-[[package]]
-name = "llm-harness-loop"
-version = "0.1.0"
-source = "git+https://github.com/oh-my-harness/llm-harness-core?rev=9ad7292c67c1d7828a907a7fd270a007b5d1f750#9ad7292c67c1d7828a907a7fd270a007b5d1f750"
+version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -885,13 +869,14 @@ dependencies = [
 [[package]]
 name = "llm-harness-runtime"
 version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "futures",
- "llm-harness",
- "llm-harness-loop 0.1.0 (git+https://github.com/oh-my-harness/llm-harness-core?rev=9ad7292c67c1d7828a907a7fd270a007b5d1f750)",
+ "llm-harness-agent",
+ "llm-harness-loop",
  "llm-harness-types",
  "serde",
  "serde_json",
@@ -904,6 +889,7 @@ dependencies = [
 [[package]]
 name = "llm-harness-runtime-audit-jsonl"
 version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "anyhow",
  "futures",
@@ -917,6 +903,7 @@ dependencies = [
 [[package]]
 name = "llm-harness-runtime-auth"
 version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "futures",
  "llm-harness-runtime",
@@ -929,6 +916,7 @@ dependencies = [
 [[package]]
 name = "llm-harness-runtime-sandbox-os"
 version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "chrono",
  "futures",
@@ -942,7 +930,8 @@ dependencies = [
 
 [[package]]
 name = "llm-harness-types"
-version = "0.1.0"
+version = "0.2.0"
+source = "git+https://github.com/oh-my-harness/llm-harness-runtime.git?rev=bbdb7b7f223715e82db23d74919cfbddf7479b87#bbdb7b7f223715e82db23d74919cfbddf7479b87"
 dependencies = [
  "anyhow",
  "chrono",
@@ -958,6 +947,7 @@ dependencies = [
 [[package]]
 name = "llm_adapter"
 version = "0.1.0"
+source = "git+https://github.com/oh-my-harness/llm-api-adapter.git?rev=c1d2cb87cb2bb94803144cfc28133a394b7fca18#c1d2cb87cb2bb94803144cfc28133a394b7fca18"
 dependencies = [
  "async-trait",
  "eventsource-stream",
@@ -1845,8 +1835,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "llm-harness",
- "llm-harness-loop 0.1.0 (git+https://github.com/oh-my-harness/llm-harness-core?rev=9ad7292c67c1d7828a907a7fd270a007b5d1f750)",
+ "llm-harness-agent",
+ "llm-harness-loop",
  "llm-harness-runtime",
  "llm-harness-runtime-audit-jsonl",
  "llm-harness-runtime-auth",
@@ -1886,10 +1876,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "futures",
+ "llm-harness-agent",
  "llm-harness-runtime",
  "llm-harness-runtime-audit-jsonl",
  "llm-harness-runtime-sandbox-os",
+ "llm-harness-types",
  "serde",
  "serde_json",
  "thiserror",
@@ -1956,7 +1949,6 @@ checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
- "serde_core",
  "wasm-bindgen",
 ]
 

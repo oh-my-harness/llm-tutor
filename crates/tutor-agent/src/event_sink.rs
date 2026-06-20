@@ -1,0 +1,21 @@
+use std::sync::Arc;
+
+use futures::future::BoxFuture;
+use serde::Serialize;
+
+/// Optional event bridge used by web sessions to receive agent trace events.
+pub trait EventSink: Send + Sync {
+    fn trace(&self, kind: String, data: serde_json::Value) -> BoxFuture<'static, ()>;
+}
+
+pub type SharedEventSink = Arc<dyn EventSink>;
+
+pub async fn emit_trace(sink: &Option<SharedEventSink>, kind: &str, data: impl Serialize) {
+    if let Some(sink) = sink {
+        sink.trace(
+            kind.to_string(),
+            serde_json::to_value(data).unwrap_or_default(),
+        )
+        .await;
+    }
+}

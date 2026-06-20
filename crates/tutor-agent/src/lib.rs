@@ -1,6 +1,8 @@
 pub mod capability;
 pub mod chat;
+pub mod code_exec;
 pub mod error;
+pub mod event_sink;
 pub mod governance;
 pub mod llm_provider;
 pub mod phase_manager;

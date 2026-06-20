@@ -1,13 +1,20 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
-use llm_harness_loop::test_utils::{MockLlmClient, MockResponse, NoOpEnv};
+use futures::future::BoxFuture;
+use llm_harness_loop::{
+    LlmError,
+    test_utils::{MockLlmClient, MockResponse, NoOpEnv},
+};
 use llm_harness_runtime::audit::AuditSink;
 use llm_harness_runtime::budget::BudgetControlAdapter;
 use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
+use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::ExecutionEnv;
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
+use tutor_agent::event_sink::EventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{CapabilityRouter, LlmConfig};
 
@@ -35,12 +42,59 @@ fn make_router(responses: Vec<MockResponse>, governance: GovernanceConfig) -> Ca
     CapabilityRouter::new(env, llm, governance).with_client(client)
 }
 
+fn make_router_with_env(
+    responses: Vec<MockResponse>,
+    governance: GovernanceConfig,
+    env: Arc<dyn ExecutionEnv>,
+) -> CapabilityRouter {
+    let client = Arc::new(MockLlmClient::new(responses));
+    let llm = LlmConfig::anthropic("mock-model", "");
+    CapabilityRouter::new(env, llm, governance).with_client(client)
+}
+
+#[derive(Default)]
+struct TraceRecorder {
+    events: Mutex<Vec<(String, serde_json::Value)>>,
+}
+
+impl TraceRecorder {
+    fn events(&self) -> Vec<(String, serde_json::Value)> {
+        self.events.lock().unwrap().clone()
+    }
+}
+
+impl EventSink for TraceRecorder {
+    fn trace(&self, kind: String, data: serde_json::Value) -> BoxFuture<'static, ()> {
+        self.events.lock().unwrap().push((kind, data));
+        Box::pin(async {})
+    }
+}
+
 #[tokio::test]
 async fn smoke_chat_text_only() {
     let responses = vec![MockResponse::text("Hello from mock tutor.")];
     let router = make_router(responses, make_governance(None));
     let answer = router.run(Capability::Chat, "what is 2+2?").await.unwrap();
     assert!(!answer.is_empty());
+}
+
+#[tokio::test]
+async fn chat_returns_error_instead_of_no_response() {
+    let responses = vec![MockResponse {
+        events: vec![Err(LlmError::InvalidRequest("bad request".into()))],
+        model: "mock-model".into(),
+    }];
+    let router = make_router(responses, make_governance(None));
+
+    let err = router
+        .run(Capability::Chat, "trigger error")
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("bad request"),
+        "expected provider error to be surfaced, got {err}"
+    );
 }
 
 #[tokio::test]
@@ -111,8 +165,50 @@ async fn audit_captures_deep_solve_state_transitions() {
 }
 
 #[tokio::test]
-async fn code_exec_returns_unsupported() {
-    let router = make_router(vec![], make_governance(None));
-    let result = router.run(Capability::CodeExec, "run some code").await;
-    assert!(result.is_err());
+async fn code_exec_runs_tool_and_explains_result() {
+    let dir = TempDir::new().unwrap();
+    let responses = vec![
+        MockResponse::tool_use(
+            "exec-1",
+            "code_exec",
+            r#"{"language":"python","code":"print('hello code exec')"}"#,
+        ),
+        MockResponse::text("The script printed hello code exec."),
+    ];
+    let router = make_router_with_env(
+        responses,
+        make_governance(None),
+        Arc::new(OsEnv::new(dir.path())) as Arc<dyn ExecutionEnv>,
+    );
+    let answer = router
+        .run(Capability::CodeExec, "run python that prints hello")
+        .await
+        .unwrap();
+    assert!(answer.contains("hello code exec"));
+}
+
+#[tokio::test]
+async fn chat_emits_trace_events() {
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![MockResponse::text("traced answer")],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone());
+
+    router.run(Capability::Chat, "trace this").await.unwrap();
+
+    let events = sink.events();
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "phase_start" && data["capability"] == "chat" }),
+        "missing chat phase_start trace: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "phase_end" && data["capability"] == "chat" }),
+        "missing chat phase_end trace: {events:?}"
+    );
 }

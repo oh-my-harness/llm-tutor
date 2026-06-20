@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 tutor-tools = { path = "../tutor-tools" }
-llm-harness        = { workspace = true }
+llm-harness-agent  = { workspace = true }
 llm-harness-types  = { workspace = true }
 llm-harness-runtime = { workspace = true }
 llm-harness-runtime-auth = { workspace = true }

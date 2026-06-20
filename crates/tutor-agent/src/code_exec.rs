@@ -3,38 +3,42 @@ use std::sync::Arc;
 use llm_harness_agent::{
     AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks, Session,
 };
+use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
 use llm_harness_types::{
-    AfterProviderResponseHook, AgentEvent, AgentMessage, AssistantMessage, ContentBlock,
-    StopReason, UserMessage,
+    AfterProviderResponseHook, AgentEvent, AgentMessage, BeforeToolCallHook, ContentBlock,
 };
-use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
+use tutor_tools::CodeExecTool;
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
 use crate::event_sink::emit_trace;
 
-/// Run a single Chat turn: question → [rag_search + web_search] → answer.
-/// Creates a fresh in-memory harness per call (stateless in v0.1).
-pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<String> {
-    run_chat_with_messages(router, vec![user_message(question)]).await
+/// Run code execution as an agent turn: the model calls `code_exec`, then explains the result.
+pub async fn run_code_exec(router: &CapabilityRouter, request: &str) -> Result<String> {
+    run_code_exec_with_messages(router, vec![crate::chat::user_message(request)]).await
 }
 
-pub async fn run_chat_with_messages(
+pub async fn run_code_exec_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(router, Some(messages), None).await
+    run_code_exec_inner(router, Some(messages), None).await
 }
 
-pub async fn run_chat_with_session(
+pub async fn run_code_exec_with_session(
     router: &CapabilityRouter,
     session: Session,
-    question: &str,
+    request: &str,
 ) -> Result<String> {
-    run_chat_inner(router, Some(vec![user_message(question)]), Some(session)).await
+    run_code_exec_inner(
+        router,
+        Some(vec![crate::chat::user_message(request)]),
+        Some(session),
+    )
+    .await
 }
 
-async fn run_chat_inner(
+async fn run_code_exec_inner(
     router: &CapabilityRouter,
     messages: Option<Vec<AgentMessage>>,
     session: Option<Session>,
@@ -42,40 +46,43 @@ async fn run_chat_inner(
     emit_trace(
         &router.event_sink,
         "phase_start",
-        serde_json::json!({ "capability": "chat", "phase": "respond" }),
+        serde_json::json!({ "capability": "code_exec", "phase": "execute" }),
     )
     .await;
 
-    let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
-        Arc::new(RagSearchTool::new()),
-        Arc::new(WebSearchTool::new()),
-        Arc::new(CodeExecTool::new()),
-    ];
-
-    let gov = &router.governance;
+    let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![Arc::new(CodeExecTool::new())];
+    let before_tool_call: Vec<Arc<dyn BeforeToolCallHook>> =
+        if let Some(approval) = &router.governance.approval {
+            vec![Arc::new(CompositeBeforeToolCallHook::new(vec![
+                approval.clone() as Arc<dyn BeforeToolCallHook>,
+            ]))]
+        } else {
+            vec![]
+        };
 
     let opts = AgentHarnessOptions {
         model: router.llm.model.clone(),
         tools,
         system_prompt: Some(
-            "You are a knowledgeable tutor. Use rag_search to find relevant course material, \
-             web_search for supplementary information, and code_exec when the user asks to run \
-             or verify code. For non-trivial numeric calculations, approximations, transcendental \
-             functions, statistics, simulations, or any answer where exact arithmetic matters, call \
-             code_exec with Python to compute or verify the result before answering. Answer clearly \
-             and concisely."
+            "You are a code execution tutor. When the user asks to run code, \
+             call code_exec with the correct language and code, then explain stdout, stderr, \
+             and exit code clearly. For non-trivial numeric calculations or approximations, \
+             call code_exec with Python to compute or verify the result before answering. If no \
+             runnable code or computable task is provided, ask for the missing details."
                 .into(),
         ),
         auth: router.auth_hook(),
         hooks: HarnessHooks {
-            after_provider_response: vec![gov.budget.clone() as Arc<dyn AfterProviderResponseHook>],
+            after_provider_response: vec![
+                router.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
+            ],
+            before_tool_call,
             ..HarnessHooks::none()
         },
         ..AgentHarnessOptions::new(router.llm.model.clone())
     };
 
     let client = router.make_client();
-
     let harness = if let Some(session) = session {
         AgentHarness::with_session(client, router.env.clone(), session, opts)
     } else {
@@ -87,7 +94,6 @@ async fn run_chat_inner(
         .prompt_with_messages(messages.unwrap_or_default())
         .await?;
 
-    // Collect the last complete assistant message.
     let mut last_text = String::new();
     let mut last_error: Option<String> = None;
     loop {
@@ -97,7 +103,7 @@ async fn run_chat_inner(
                 emit_trace(
                     &router.event_sink,
                     "event_lagged",
-                    serde_json::json!({ "capability": "chat", "skipped": skipped }),
+                    serde_json::json!({ "capability": "code_exec", "skipped": skipped }),
                 )
                 .await;
                 continue;
@@ -125,7 +131,7 @@ async fn run_chat_inner(
                     &router.event_sink,
                     "tool_call",
                     serde_json::json!({
-                        "capability": "chat",
+                        "capability": "code_exec",
                         "tool_use_id": tool_use_id,
                         "tool": tool_name,
                         "args": args,
@@ -141,7 +147,7 @@ async fn run_chat_inner(
                     &router.event_sink,
                     "tool_result",
                     serde_json::json!({
-                        "capability": "chat",
+                        "capability": "code_exec",
                         "tool_use_id": tool_use_id,
                         "ok": result.is_ok(),
                     }),
@@ -164,7 +170,7 @@ async fn run_chat_inner(
     emit_trace(
         &router.event_sink,
         "phase_end",
-        serde_json::json!({ "capability": "chat", "phase": "respond" }),
+        serde_json::json!({ "capability": "code_exec", "phase": "execute" }),
     )
     .await;
 
@@ -179,30 +185,6 @@ async fn run_chat_inner(
     }
 
     Ok(last_text)
-}
-
-pub fn user_message(text: &str) -> AgentMessage {
-    AgentMessage::User(UserMessage {
-        content: vec![ContentBlock::Text {
-            text: text.to_string(),
-        }],
-        timestamp: chrono::Utc::now(),
-    })
-}
-
-pub fn assistant_message(text: &str) -> AgentMessage {
-    AgentMessage::Assistant(AssistantMessage {
-        content: vec![ContentBlock::Text {
-            text: text.to_string(),
-        }],
-        stop_reason: Some(StopReason::EndTurn),
-        timestamp: chrono::Utc::now(),
-        provider: None,
-        api: None,
-        model: None,
-        usage: None,
-        error_message: None,
-    })
 }
 
 fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {

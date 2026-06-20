@@ -6,6 +6,7 @@ use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
 use llm_harness_types::ExecutionEnv;
 
 use crate::error::{Result, TutorError};
+use crate::event_sink::{SharedEventSink, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use crate::solve_context::{Plan, SolveContext, StepResult};
@@ -16,6 +17,7 @@ pub struct SolveOrchestrator {
     env: Arc<dyn ExecutionEnv>,
     llm: LlmConfig,
     governance: GovernanceConfig,
+    event_sink: Option<SharedEventSink>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -31,6 +33,7 @@ impl SolveOrchestrator {
             env,
             llm,
             governance,
+            event_sink: None,
             client: None,
         }
     }
@@ -38,6 +41,11 @@ impl SolveOrchestrator {
     /// Inject a custom LLM client; skips `LlmConfig::build_client()` and auth.
     pub fn with_client(mut self, client: Arc<dyn Provider>) -> Self {
         self.client = Some(client);
+        self
+    }
+
+    pub fn with_event_sink(mut self, sink: Option<SharedEventSink>) -> Self {
+        self.event_sink = sink;
         self
     }
 
@@ -79,6 +87,13 @@ impl SolveOrchestrator {
     }
 
     async fn run_pre_retrieve(&mut self, kb: &str) -> Result<()> {
+        emit_trace(
+            &self.event_sink,
+            "phase_start",
+            serde_json::json!({ "capability": "deep_solve", "phase": "pre_retrieve" }),
+        )
+        .await;
+
         // v0.1 stub for pre-retrieve phase
         self.context.lock().unwrap().kb_summary = Some(format!("[KB summary for: {kb}]"));
 
@@ -89,17 +104,32 @@ impl SolveOrchestrator {
         )
         .await;
 
+        emit_trace(
+            &self.event_sink,
+            "phase_end",
+            serde_json::json!({ "capability": "deep_solve", "phase": "pre_retrieve" }),
+        )
+        .await;
+
         Ok(())
     }
 
     async fn run_plan(&mut self) -> Result<()> {
-        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, ContentBlock};
+        use llm_harness_agent::{
+            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
+        };
+        use llm_harness_types::{AfterProviderResponseHook, AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
             AuditEventType::StateTransition,
             serde_json::json!({"phase": "plan"}),
+        )
+        .await;
+        emit_trace(
+            &self.event_sink,
+            "phase_start",
+            serde_json::json!({"capability": "deep_solve", "phase": "plan"}),
         )
         .await;
 
@@ -150,7 +180,9 @@ impl SolveOrchestrator {
             ),
             auth: self.auth_hook(),
             hooks: HarnessHooks {
-                after_provider_response: Some(self.governance.budget.clone()),
+                after_provider_response: vec![
+                    self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
+                ],
                 ..HarnessHooks::none()
             },
             ..AgentHarnessOptions::new(self.llm.model.clone())
@@ -189,12 +221,34 @@ impl SolveOrchestrator {
             .map_err(|e| TutorError::Internal(format!("plan parse error: {e}\nraw: {raw}")))?;
 
         self.context.lock().unwrap().plan = Some(plan);
+        let step_count = self
+            .context
+            .lock()
+            .unwrap()
+            .plan
+            .as_ref()
+            .map_or(0, |p| p.steps.len());
+        emit_trace(
+            &self.event_sink,
+            "phase_end",
+            serde_json::json!({
+                "capability": "deep_solve",
+                "phase": "plan",
+                "step_count": step_count,
+            }),
+        )
+        .await;
         Ok(())
     }
 
     async fn run_solve_steps(&mut self) -> Result<()> {
-        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, BeforeToolCallHook, ContentBlock};
+        use llm_harness_agent::{
+            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
+        };
+        use llm_harness_types::{
+            AfterProviderResponseHook, AgentEvent, BeforeToolCallHook, ContentBlock,
+            PrepareNextTurnHook,
+        };
         use std::sync::Arc;
         use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
 
@@ -218,23 +272,45 @@ impl SolveOrchestrator {
             serde_json::json!({"phase": "solve_steps", "step_count": steps.len()}),
         )
         .await;
+        emit_trace(
+            &self.event_sink,
+            "phase_start",
+            serde_json::json!({
+                "capability": "deep_solve",
+                "phase": "solve_steps",
+                "step_count": steps.len(),
+            }),
+        )
+        .await;
 
         // ReplanHook shares the orchestrator's context directly via Arc.
         let replan_hook = Arc::new(ReplanHook::new(self.context.clone()));
 
         // Compose hooks: approval wrapper (if configured) then replan hook
-        let before_tool_call: Option<Arc<dyn BeforeToolCallHook>> = {
+        let before_tool_call: Vec<Arc<dyn BeforeToolCallHook>> = {
             if let Some(approval) = &self.governance.approval {
-                Some(Arc::new(CompositeBeforeToolCallHook::new(vec![
+                vec![Arc::new(CompositeBeforeToolCallHook::new(vec![
                     approval.clone() as Arc<dyn BeforeToolCallHook>,
                     replan_hook.clone() as Arc<dyn BeforeToolCallHook>,
-                ])))
+                ]))]
             } else {
-                Some(replan_hook.clone() as Arc<dyn BeforeToolCallHook>)
+                vec![replan_hook.clone() as Arc<dyn BeforeToolCallHook>]
             }
         };
 
         for step in &steps {
+            emit_trace(
+                &self.event_sink,
+                "phase_start",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "phase": "solve_step",
+                    "step_id": step.id,
+                    "goal": step.goal,
+                }),
+            )
+            .await;
+
             let solve_tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
                 Arc::new(RagSearchTool::new()),
                 Arc::new(WebSearchTool::new()),
@@ -255,6 +331,8 @@ impl SolveOrchestrator {
                 system_prompt: Some(format!(
                     "You are solving step {id}: {goal}\n\
                      Use rag_search and web_search for information, code_exec to run code.\n\
+                     For non-trivial numeric calculations, approximations, transcendental functions, \
+                     statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
                      If the current plan is fundamentally wrong, call replan(reason) — \
                      this aborts the step and triggers a new plan.\n\
                      When done, write FINISH: followed by your conclusion for this step.",
@@ -263,9 +341,11 @@ impl SolveOrchestrator {
                 )),
                 auth: self.auth_hook(),
                 hooks: HarnessHooks {
-                    after_provider_response: Some(self.governance.budget.clone()),
+                    after_provider_response: vec![
+                        self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
+                    ],
                     before_tool_call: before_tool_call.clone(),
-                    prepare_next_turn: Some(phase_mgr),
+                    prepare_next_turn: vec![phase_mgr as Arc<dyn PrepareNextTurnHook>],
                     ..HarnessHooks::none()
                 },
                 ..AgentHarnessOptions::new(self.llm.model.clone())
@@ -289,6 +369,42 @@ impl SolveOrchestrator {
                             }
                         }
                     }
+                    AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
+                        tool_use_id,
+                        tool_name,
+                        args,
+                    }) => {
+                        emit_trace(
+                            &self.event_sink,
+                            "tool_call",
+                            serde_json::json!({
+                                "capability": "deep_solve",
+                                "phase": "solve_step",
+                                "step_id": step.id,
+                                "tool_use_id": tool_use_id,
+                                "tool": tool_name,
+                                "args": args,
+                            }),
+                        )
+                        .await;
+                    }
+                    AgentHarnessEvent::Agent(AgentEvent::ToolExecutionEnd {
+                        tool_use_id,
+                        result,
+                    }) => {
+                        emit_trace(
+                            &self.event_sink,
+                            "tool_result",
+                            serde_json::json!({
+                                "capability": "deep_solve",
+                                "phase": "solve_step",
+                                "step_id": step.id,
+                                "tool_use_id": tool_use_id,
+                                "ok": result.is_ok(),
+                            }),
+                        )
+                        .await;
+                    }
                     AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
                     _ => {}
                 }
@@ -301,6 +417,16 @@ impl SolveOrchestrator {
                     &self.governance.audit,
                     AuditEventType::StateTransition,
                     serde_json::json!({"event": "replan", "step": step.id}),
+                )
+                .await;
+                emit_trace(
+                    &self.event_sink,
+                    "replan",
+                    serde_json::json!({
+                        "capability": "deep_solve",
+                        "step_id": step.id,
+                        "reason": step_reason,
+                    }),
                 )
                 .await;
                 return Ok(());
@@ -320,18 +446,45 @@ impl SolveOrchestrator {
                     finish_text
                 },
             });
+            emit_trace(
+                &self.event_sink,
+                "phase_end",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "phase": "solve_step",
+                    "step_id": step.id,
+                }),
+            )
+            .await;
         }
+        emit_trace(
+            &self.event_sink,
+            "phase_end",
+            serde_json::json!({
+                "capability": "deep_solve",
+                "phase": "solve_steps",
+            }),
+        )
+        .await;
         Ok(())
     }
 
     async fn run_synthesize(&mut self) -> Result<String> {
-        use llm_harness::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks};
-        use llm_harness_types::{AgentEvent, ContentBlock};
+        use llm_harness_agent::{
+            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
+        };
+        use llm_harness_types::{AfterProviderResponseHook, AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
             AuditEventType::StateTransition,
             serde_json::json!({"phase": "synthesize"}),
+        )
+        .await;
+        emit_trace(
+            &self.event_sink,
+            "phase_start",
+            serde_json::json!({"capability": "deep_solve", "phase": "synthesize"}),
         )
         .await;
 
@@ -358,7 +511,9 @@ impl SolveOrchestrator {
             ),
             auth: self.auth_hook(),
             hooks: HarnessHooks {
-                after_provider_response: Some(self.governance.budget.clone()),
+                after_provider_response: vec![
+                    self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
+                ],
                 ..HarnessHooks::none()
             },
             ..AgentHarnessOptions::new(self.llm.model.clone())
@@ -383,6 +538,13 @@ impl SolveOrchestrator {
                 _ => {}
             }
         }
+
+        emit_trace(
+            &self.event_sink,
+            "phase_end",
+            serde_json::json!({"capability": "deep_solve", "phase": "synthesize"}),
+        )
+        .await;
 
         Ok(if last_text.is_empty() {
             "No synthesis generated.".into()

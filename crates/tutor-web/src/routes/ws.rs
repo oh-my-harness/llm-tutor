@@ -13,6 +13,7 @@ use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use serde::Deserialize;
+use tutor_agent::event_sink::SharedEventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
 
@@ -49,7 +50,7 @@ async fn ws_handler(
 }
 
 async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: String) {
-    let entry = match pool.get(&session_id) {
+    let entry = match pool.ensure_entry(&session_id).await {
         Some(e) => e,
         None => return,
     };
@@ -76,7 +77,11 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 match parsed {
                     Ok(ClientMessage::Message { content }) => {
-                        run_tutor_message(entry.clone(), content).await;
+                        let active_entry = pool
+                            .ensure_entry(&session_id)
+                            .await
+                            .unwrap_or_else(|| entry.clone());
+                        run_tutor_message(pool.clone(), active_entry, content).await;
                     }
                     Ok(ClientMessage::ApprovalResponse {
                         request_id,
@@ -120,9 +125,25 @@ pub fn ws_router(pool: Arc<SessionPool>) -> Router {
         .with_state(pool)
 }
 
-async fn run_tutor_message(entry: SessionEntry, content: String) {
+async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content: String) {
+    let history_len = pool.history_len(&entry.id).await + 1;
+    let _ = entry
+        .stream
+        .status(
+            "running",
+            serde_json::json!({
+                "capability": entry.capability,
+                "history_len": history_len,
+            }),
+        )
+        .await;
+
     let result = async {
         let capability: Capability = entry.capability.parse()?;
+        let runtime_session = pool
+            .open_runtime_session(&entry.id)
+            .await
+            .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
         let llm = llm_config_for_session(entry.llm.clone())?;
         let cwd = std::env::current_dir()
             .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
@@ -145,14 +166,28 @@ async fn run_tutor_message(entry: SessionEntry, content: String) {
             .map(|config| config.require_approval)
             .unwrap_or(false);
         let governance = GovernanceConfig::new(budget, Some(audit), require_approval);
-        let router = CapabilityRouter::new(env, llm, governance);
-        router.run(capability, &content).await
+        let sink: SharedEventSink = Arc::new(entry.stream.clone());
+        let router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
+        router
+            .run_with_session(capability, runtime_session, &content)
+            .await
     }
     .await;
 
     match result {
         Ok(answer) => {
             let _ = entry.stream.content(&answer, false).await;
+            let history_len = pool.history_len(&entry.id).await;
+            let _ = entry
+                .stream
+                .status(
+                    "done",
+                    serde_json::json!({
+                        "capability": entry.capability,
+                        "history_len": history_len,
+                    }),
+                )
+                .await;
         }
         Err(err) => {
             let _ = entry
