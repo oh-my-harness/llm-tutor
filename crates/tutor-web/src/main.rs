@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use tower_http::cors::{Any, CorsLayer};
 
+mod knowledge_store;
 mod routes;
 mod session;
 mod stream;
@@ -9,6 +10,7 @@ mod stream;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let pool = session::SessionPool::new();
+    let knowledge = knowledge_store::KnowledgeStore::new();
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -16,7 +18,8 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = axum::Router::new()
-        .merge(routes::sessions::sessions_router(pool.clone()))
+        .merge(routes::knowledge::knowledge_router(knowledge.clone()))
+        .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
         .merge(routes::ws::ws_router(pool.clone()))
         .layer(cors);
 

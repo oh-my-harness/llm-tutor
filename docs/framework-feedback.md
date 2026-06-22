@@ -38,6 +38,11 @@
   - Actual: `Session::append` updates model metadata for `ModelChange`, but not name metadata for `SessionInfo`, so apps still need a separate title derivation path.
   - Suggestion: update metadata name in `Session::append` when a `SessionInfo` payload is appended, or expose a public high-level `Session::set_name`.
 
+- **Runtime pins an older `llm-api-adapter`, blocking downstream embedding usage**
+  - Expected: once `llm-api-adapter` adds `EmbeddingProvider`, downstream apps can update and use it for RAG indexing.
+  - Actual: `llm-harness-runtime` still depends on the older adapter revision, so `llm-tutor` cannot independently bump `llm_adapter` without ending up with two incompatible `Provider` traits in the dependency graph.
+  - Suggestion: update `llm-harness-runtime` to the adapter revision that includes embedding support, then optionally re-export embedding traits/types from the runtime facade.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** chains ReplanHook and HumanApprovalWrapper cleanly — allows layering domain-specific + cross-cutting hooks
@@ -53,6 +58,7 @@
 | No test-helper constructors for hook context types | Building `BeforeToolCallCtx` in tests is unnecessarily hard | Medium |
 | Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
 | SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
+| Runtime adapter pin lacks embedding support | Downstream RAG work cannot use new adapter embedding APIs while sharing harness provider traits | High |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
 | No shared harness builder in the public API | Every call site repeats `new_in_memory`, `subscribe`, event loop | Low |
 
@@ -63,3 +69,4 @@
 3. Consider adding `AgentHarnessBuilder` that caches provider/client construction and event subscription setup
 4. Re-export common session repo option and metadata types from the facade/prelude
 5. Add `Session::set_name` or metadata updates for `SessionInfo`
+6. Align `llm-harness-runtime` with the adapter revision that includes `EmbeddingProvider`

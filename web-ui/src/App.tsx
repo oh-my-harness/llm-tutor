@@ -5,6 +5,7 @@ import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
 import { SettingsPage } from './components/SettingsPage'
+import { KnowledgePage } from './components/KnowledgePage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
 import { AgentStatus } from './agentStatus'
@@ -25,6 +26,11 @@ interface RecentSession {
   title: string
 }
 
+interface KnowledgeBaseOption {
+  id: string
+  name: string
+}
+
 interface SessionListResponse {
   sessions?: Array<{
     id: string
@@ -35,6 +41,7 @@ interface SessionListResponse {
 
 interface SessionDetailResponse {
   capability?: Capability
+  kb?: string | null
   messages?: Array<{
     role: 'user' | 'assistant'
     text: string
@@ -58,6 +65,8 @@ export default function App() {
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
   const [running, setRunning] = useState(false)
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
+  const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(false)
 
@@ -173,22 +182,42 @@ export default function App() {
     })))
   }, [])
 
+  const refreshKnowledgeBases = useCallback(async () => {
+    const res = await fetch('/api/knowledge-bases')
+    if (!res.ok) {
+      throw new Error(`failed to load knowledge bases: HTTP ${res.status}`)
+    }
+    const data = await res.json() as { knowledge_bases?: KnowledgeBaseOption[] }
+    const items = data.knowledge_bases ?? []
+    setKnowledgeBases(items.map((item) => ({ id: item.id, name: item.name })))
+    setSelectedKnowledgeBaseId((current) => {
+      if (current && items.some((item) => item.id === current)) return current
+      return ''
+    })
+  }, [])
+
   useEffect(() => {
     refreshSessions().catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Error', detail: message })
     })
-  }, [refreshSessions, pushStatus])
+    refreshKnowledgeBases().catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Error', detail: message })
+    })
+  }, [refreshSessions, refreshKnowledgeBases, pushStatus])
 
   const handleSend = useCallback(async (text: string) => {
     try {
       let sid = sessionId
       if (!sid) {
+        const kb = selectedKnowledgeBaseId || null
         const res = await fetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             capability,
+            kb,
             llm: settingsForSession(llmSettings),
           }),
         })
@@ -213,13 +242,32 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, capability, llmSettings, send, pushStatus, refreshSessions])
+  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, send, pushStatus, refreshSessions])
 
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     saveLlmSettings(nextSettings)
     setSessionId(null)
   }
+
+  const startNewChat = useCallback(() => {
+    setSessionId(null)
+    setMessages([])
+    setStreamingText('')
+    streamingRef.current = ''
+    setTraceEntries([])
+    setBudgetWarning(false)
+    setRunning(false)
+    setView('chat')
+  }, [])
+
+  const handleNavigate = useCallback((nextView: AppView) => {
+    if (nextView === 'chat') {
+      startNewChat()
+      return
+    }
+    setView(nextView)
+  }, [startNewChat])
 
   const handleCapabilityChange = useCallback(async (nextCapability: Capability) => {
     if (running) return
@@ -235,6 +283,26 @@ export default function App() {
       })
       if (!res.ok) {
         throw new Error(`failed to update session mode: HTTP ${res.status}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+    }
+  }, [running, sessionId])
+
+  const handleKnowledgeBaseChange = useCallback(async (nextKb: string) => {
+    if (running) return
+    setSelectedKnowledgeBaseId(nextKb)
+    if (!sessionId) return
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kb: nextKb }),
+      })
+      if (!res.ok) {
+        throw new Error(`failed to update session knowledge base: HTTP ${res.status}`)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -273,6 +341,7 @@ export default function App() {
         if (data.capability && isCapability(data.capability)) {
           setCapability(data.capability)
         }
+        setSelectedKnowledgeBaseId(data.kb ?? '')
         const title = data.metadata?.name || restored.find((message) => message.role === 'user')?.text
         if (title) {
           upsertRecentSession(setRecentSessions, id, sessionTitleFromMessage(title))
@@ -285,21 +354,75 @@ export default function App() {
     setView('chat')
   }
 
+  const handleRenameSession = async (id: string, title: string) => {
+    const previousSessions = recentSessions
+    setRecentSessions((prev) =>
+      prev.map((session) => (session.id === id ? { ...session, title } : session)),
+    )
+
+    try {
+      const res = await fetch(`/api/sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: title }),
+      })
+      if (!res.ok) {
+        throw new Error(`failed to rename session: HTTP ${res.status}`)
+      }
+      void refreshSessions()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setRecentSessions(previousSessions)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+    }
+  }
+
+  const handleDeleteSession = async (id: string) => {
+    const session = recentSessions.find((item) => item.id === id)
+    if (!window.confirm(`Delete "${session?.title ?? 'this session'}"?`)) return
+
+    const previousSessions = recentSessions
+    setRecentSessions((prev) => prev.filter((item) => item.id !== id))
+    if (sessionId === id) {
+      setSessionId(null)
+      setMessages([])
+      setStreamingText('')
+      streamingRef.current = ''
+      setTraceEntries([])
+    }
+
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        throw new Error(`failed to delete session: HTTP ${res.status}`)
+      }
+      void refreshSessions()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setRecentSessions(previousSessions)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+    }
+  }
+
+  const chatIsEmpty = view === 'chat' && messages.length === 0 && !streamingText && !sessionId
+
   return (
     <div className="flex h-screen bg-gray-50">
       <Sidebar
         activeView={view}
         collapsed={sidebarCollapsed}
         recentSessions={recentSessions}
-        onNavigate={setView}
+        onNavigate={handleNavigate}
         onSelectSession={handleSelectSession}
+        onRenameSession={handleRenameSession}
+        onDeleteSession={handleDeleteSession}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {view === 'chat' && (
           <>
-            <header className="flex items-center gap-4 border-b bg-white px-6 py-3">
+            <header className="flex items-center gap-4 bg-white px-6 py-3">
               <div>
                 <h1 className="text-lg font-semibold text-gray-900">聊天</h1>
                 <p className="text-xs text-gray-500">Ask questions, run code, and inspect traces.</p>
@@ -315,22 +438,27 @@ export default function App() {
                   streamingText={streamingText}
                   capability={capability}
                   modelLabel={llmSettings.model}
+                  knowledgeBases={knowledgeBases}
+                  selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   onSend={handleSend}
                   onCapabilityChange={handleCapabilityChange}
+                  onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   disabled={running}
                 />
               </main>
-              <aside
-                className={`shrink-0 border-l bg-white transition-[width] duration-200 ${
-                  traceCollapsed ? 'w-12' : 'w-72'
-                }`}
-              >
-                <TracePanel
-                  entries={traceEntries}
-                  collapsed={traceCollapsed}
-                  onToggleCollapsed={() => setTraceCollapsed((value) => !value)}
-                />
-              </aside>
+              {!chatIsEmpty && (
+                <aside
+                  className={`shrink-0 border-l bg-white transition-[width] duration-200 ${
+                    traceCollapsed ? 'w-12' : 'w-72'
+                  }`}
+                >
+                  <TracePanel
+                    entries={traceEntries}
+                    collapsed={traceCollapsed}
+                    onToggleCollapsed={() => setTraceCollapsed((value) => !value)}
+                  />
+                </aside>
+              )}
             </div>
           </>
         )}
@@ -357,10 +485,7 @@ export default function App() {
         )}
 
         {view === 'knowledge' && (
-          <PlaceholderPage
-            title="知识库"
-            description="管理课程资料、文档和检索索引。当前 RAG 工具还是占位实现，后续会在这里接入真实知识库。"
-          />
+          <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} />
         )}
 
         {view === 'space' && (

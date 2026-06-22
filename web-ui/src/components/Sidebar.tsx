@@ -1,7 +1,10 @@
+import { useState, type ReactNode } from 'react'
 import {
   BookOpen,
   Bot,
   Brain,
+  Check,
+  Edit3,
   FileText,
   Grid2X2,
   Library,
@@ -11,6 +14,8 @@ import {
   PencilLine,
   Settings,
   Sparkles,
+  Trash2,
+  X,
 } from 'lucide-react'
 
 export type AppView =
@@ -34,6 +39,8 @@ interface Props {
   recentSessions: RecentSession[]
   onNavigate: (view: AppView) => void
   onSelectSession: (id: string) => void
+  onRenameSession: (id: string, title: string) => void
+  onDeleteSession: (id: string) => void
   onToggleCollapsed: () => void
 }
 
@@ -57,8 +64,33 @@ export function Sidebar({
   recentSessions,
   onNavigate,
   onSelectSession,
+  onRenameSession,
+  onDeleteSession,
   onToggleCollapsed,
 }: Props) {
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+
+  const startEditing = (session: RecentSession) => {
+    setEditingSessionId(session.id)
+    setEditingTitle(session.title)
+  }
+
+  const submitEditing = () => {
+    if (!editingSessionId) return
+    const nextTitle = editingTitle.trim()
+    if (nextTitle) {
+      onRenameSession(editingSessionId, nextTitle)
+    }
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }
+
+  const cancelEditing = () => {
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }
+
   return (
     <aside
       className={`flex h-screen shrink-0 flex-col border-r border-gray-200 bg-white transition-[width] duration-200 ${
@@ -136,16 +168,55 @@ export function Sidebar({
           {recentSessions.length === 0 ? (
             <div className="rounded-lg px-3 py-2 text-sm text-gray-400">暂无历史会话</div>
           ) : (
-            recentSessions.map((session) => (
-              <button
-                key={session.id}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => onSelectSession(session.id)}
-              >
-                <FileText size={16} className="shrink-0 text-gray-500" />
-                <span className="truncate">{session.title}</span>
-              </button>
-            ))
+            recentSessions.map((session) => {
+              const editing = editingSessionId === session.id
+              return (
+                <div
+                  key={session.id}
+                  className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  <FileText size={16} className="shrink-0 text-gray-500" />
+                  {editing ? (
+                    <>
+                      <input
+                        className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-sm outline-none focus:border-gray-900"
+                        value={editingTitle}
+                        autoFocus
+                        onChange={(event) => setEditingTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') submitEditing()
+                          if (event.key === 'Escape') cancelEditing()
+                        }}
+                      />
+                      <IconButton label="Save session name" onClick={submitEditing}>
+                        <Check size={15} />
+                      </IconButton>
+                      <IconButton label="Cancel rename" onClick={cancelEditing}>
+                        <X size={15} />
+                      </IconButton>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 truncate text-left"
+                        onClick={() => onSelectSession(session.id)}
+                      >
+                        {session.title}
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        <IconButton label="Rename session" onClick={() => startEditing(session)}>
+                          <Edit3 size={15} />
+                        </IconButton>
+                        <IconButton label="Delete session" onClick={() => onDeleteSession(session.id)}>
+                          <Trash2 size={15} />
+                        </IconButton>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })
           )}
         </div>
           </>
@@ -170,5 +241,21 @@ export function Sidebar({
         {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v0.1.0</div>}
       </div>
     </aside>
+  )
+}
+
+function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      className="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-900"
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+    >
+      {children}
+    </button>
   )
 }

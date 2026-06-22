@@ -9,7 +9,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::knowledge_store::KnowledgeStore;
 use crate::session::{LlmSessionConfig, SessionPool, message_role, message_text};
+
+#[derive(Clone)]
+pub struct SessionsState {
+    pool: Arc<SessionPool>,
+    knowledge: Arc<KnowledgeStore>,
+}
 
 #[derive(Deserialize)]
 struct CreateSessionRequest {
@@ -37,12 +44,15 @@ struct CreateLlmConfig {
 #[derive(Deserialize)]
 struct UpdateSessionRequest {
     capability: Option<String>,
+    name: Option<String>,
+    kb: Option<String>,
 }
 
 async fn create_session(
-    State(pool): State<Arc<SessionPool>>,
+    State(state): State<Arc<SessionsState>>,
     Json(req): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
+    let pool = &state.pool;
     let llm = req.llm.map(|config| LlmSessionConfig {
         provider: config.provider,
         model: config.model,
@@ -52,7 +62,17 @@ async fn create_session(
         budget_limit_usd: config.budget_limit_usd,
         require_approval: config.require_approval.unwrap_or(false),
     });
-    match pool.create(&req.capability, req.kb, llm).await {
+    let (kb, embedding) = match knowledge_binding(&state.knowledge, req.kb) {
+        Ok(binding) => binding,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    match pool.create(&req.capability, kb, llm, embedding).await {
         Ok(id) => (StatusCode::CREATED, Json(CreateSessionResponse { id })).into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -62,7 +82,8 @@ async fn create_session(
     }
 }
 
-async fn list_sessions(State(pool): State<Arc<SessionPool>>) -> impl IntoResponse {
+async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResponse {
+    let pool = &state.pool;
     match pool.list(Some(50)).await {
         Ok(sessions) => {
             let mut items = Vec::with_capacity(sessions.len());
@@ -102,9 +123,10 @@ async fn list_sessions(State(pool): State<Arc<SessionPool>>) -> impl IntoRespons
 }
 
 async fn get_session(
-    State(pool): State<Arc<SessionPool>>,
+    State(state): State<Arc<SessionsState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    let pool = &state.pool;
     let Some(entry) = pool.ensure_entry(&id).await else {
         return (
             StatusCode::NOT_FOUND,
@@ -164,16 +186,26 @@ async fn get_session(
                 "budget_limit_usd": config.budget_limit_usd,
                 "require_approval": config.require_approval,
             })),
+            "embedding": entry.embedding.map(|config| serde_json::json!({
+                "provider": config.provider,
+                "model": config.model,
+                "api_key_configured": !config.api_key.trim().is_empty(),
+                "base_url": config.base_url,
+                "embeddings_path": config.embeddings_path,
+                "dimensions": config.dimensions,
+                "send_dimensions": config.send_dimensions,
+            })),
         })),
     )
         .into_response()
 }
 
 async fn update_session(
-    State(pool): State<Arc<SessionPool>>,
+    State(state): State<Arc<SessionsState>>,
     Path(id): Path<String>,
     Json(req): Json<UpdateSessionRequest>,
 ) -> impl IntoResponse {
+    let pool = &state.pool;
     if let Some(capability) = req.capability {
         if capability
             .parse::<tutor_agent::capability::Capability>()
@@ -195,6 +227,47 @@ async fn update_session(
         }
     }
 
+    if let Some(kb) = req.kb {
+        let normalized_kb = kb.trim().to_string();
+        let (kb, embedding) = if normalized_kb.is_empty() {
+            (None, None)
+        } else {
+            let Some(item) = state.knowledge.get(&normalized_kb) else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "knowledge base not found" })),
+                )
+                    .into_response();
+            };
+            (Some(item.id), Some(item.embedding))
+        };
+
+        let _ = pool.ensure_entry(&id).await;
+        if !pool.set_knowledge(&id, kb, embedding) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+    }
+
+    if let Some(name) = req.name {
+        let normalized = name.trim().to_string();
+        let next_name = if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        };
+        if let Err(err) = pool.rename(&id, next_name).await {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
     (
         StatusCode::OK,
         Json(serde_json::json!({ "id": id, "updated": true })),
@@ -202,11 +275,50 @@ async fn update_session(
         .into_response()
 }
 
-pub fn sessions_router(pool: Arc<SessionPool>) -> Router {
+async fn delete_session(
+    State(state): State<Arc<SessionsState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    match pool.delete(&id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -> Router {
+    let state = Arc::new(SessionsState { pool, knowledge });
     Router::new()
         .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/{id}", get(get_session).patch(update_session))
-        .with_state(pool)
+        .route(
+            "/api/sessions/{id}",
+            get(get_session)
+                .patch(update_session)
+                .delete(delete_session),
+        )
+        .with_state(state)
+}
+
+fn knowledge_binding(
+    knowledge: &KnowledgeStore,
+    kb: Option<String>,
+) -> Result<(Option<String>, Option<tutor_rag::EmbeddingConfig>), anyhow::Error> {
+    let Some(kb) = kb
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok((None, None));
+    };
+
+    let Some(item) = knowledge.get(&kb) else {
+        return Err(anyhow::anyhow!("knowledge base not found"));
+    };
+
+    Ok((Some(item.id), Some(item.embedding)))
 }
 
 fn title_from_messages(messages: &[llm_harness_types::AgentMessage]) -> Option<String> {

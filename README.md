@@ -17,6 +17,7 @@ A Rust-based AI tutor powered by [llm-harness-runtime](https://github.com/oh-my-
 - Rust 2024 edition (`rustup update stable`)
 - Node.js 20+ (for the web UI)
 - One supported LLM provider API key
+- Protobuf compiler (`protoc`) for LanceDB. On Windows: `winget install --id Google.Protobuf`
 
 ### Provider Configuration
 
@@ -89,8 +90,8 @@ Open `http://localhost:5173` in your browser.
 ### Run Tests
 
 ```bash
-# Rust unit tests (workspace-wide)
-cargo test --workspace
+# Rust unit tests (workspace-wide). Use -j 1 on low-memory Windows machines.
+cargo test --workspace -j 1
 
 # Deep Solve integration tests (requires a configured LLM provider API key)
 cargo test -p tutor-agent --test deep_solve_integration -- --ignored --nocapture
@@ -121,6 +122,7 @@ tutor-web (axum server)
       |-- RagSearchTool
       |-- WebSearchTool
       `-- CodeExecTool (OsEnv)
+  -> tutor-rag (LanceDB + embedding-backed retrieval)
   -> llm-harness-runtime
 ```
 
@@ -130,6 +132,7 @@ tutor-web (axum server)
 tutor_agent/
 |-- Cargo.toml                    (workspace)
 |-- crates/
+|   |-- tutor-rag/                (Embedding + LanceDB retrieval)
 |   |-- tutor-tools/              (Tool implementations)
 |   |   `-- src/
 |   |       |-- rag_search.rs
@@ -165,7 +168,7 @@ tutor_agent/
 
 ## v0.1 Scope Limits
 
-- RAG search is a stub (returns placeholder text); replace with real vector store in v0.2.
+- RAG supports text ingestion and LanceDB retrieval; file parsing and document management are still minimal.
 - Web search is a stub; replace with real HTTP search in v0.2.
 - Code execution uses OsEnvSandbox (no real isolation); add bwrap/seatbelt in v0.2.
 - Single-user only; no multi-user session isolation.

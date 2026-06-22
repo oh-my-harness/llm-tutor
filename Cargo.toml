@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/tutor-rag",
     "crates/tutor-tools",
     "crates/tutor-agent",
     "crates/tutor-web",
@@ -23,12 +24,17 @@ llm-harness-runtime-audit-jsonl = { git = "https://github.com/oh-my-harness/llm-
 
 # LLM provider adapter
 llm_adapter = { git = "https://github.com/oh-my-harness/llm-api-adapter.git", rev = "c1d2cb87cb2bb94803144cfc28133a394b7fca18" }
+llm_adapter_embedding = { package = "llm_adapter", git = "https://github.com/oh-my-harness/llm-api-adapter.git", rev = "0791e57fccb2afa884cf4799c8c01ec0340fe3dc" }
 
 # Common
 anyhow      = "1"
+async-trait = "0.1"
 futures     = "0.3"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 thiserror   = "2"
 tokio       = { version = "1", features = ["full"] }
 tokio-util  = { version = "0.7", features = ["rt"] }
+arrow-array = "58.3.0"
+arrow-schema = "58.3.0"
+lancedb = "0.30.0"

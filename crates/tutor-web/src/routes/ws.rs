@@ -167,7 +167,15 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             .unwrap_or(false);
         let governance = GovernanceConfig::new(budget, Some(audit), require_approval);
         let sink: SharedEventSink = Arc::new(entry.stream.clone());
-        let router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
+        let mut router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
+        if let Some(embedding) = entry.embedding.clone() {
+            let retriever =
+                tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), embedding);
+            router = router.with_retriever(Arc::new(retriever));
+        }
+        if let Some(kb) = entry.kb.clone() {
+            router = router.with_associated_kb(kb);
+        }
         router
             .run_with_session(capability, runtime_session, &content)
             .await

@@ -27,6 +27,7 @@ pub struct SessionEntry {
     pub capability: String,
     pub kb: Option<String>,
     pub llm: Option<LlmSessionConfig>,
+    pub embedding: Option<tutor_rag::EmbeddingConfig>,
     pub stream: TutorStream,
 }
 
@@ -69,6 +70,7 @@ impl SessionPool {
         capability: &str,
         kb: Option<String>,
         llm: Option<LlmSessionConfig>,
+        embedding: Option<tutor_rag::EmbeddingConfig>,
     ) -> Result<String, llm_harness_types::SessionError> {
         let storage = self
             .repo
@@ -86,6 +88,7 @@ impl SessionPool {
             capability: capability.to_string(),
             kb,
             llm,
+            embedding,
             stream: TutorStream::new(128),
         };
         self.sessions.lock().unwrap().insert(id.clone(), entry);
@@ -108,6 +111,7 @@ impl SessionPool {
             capability: "chat".into(),
             kb: None,
             llm: None,
+            embedding: None,
             stream: TutorStream::new(128),
         };
         self.sessions
@@ -187,6 +191,37 @@ impl SessionPool {
         entry.capability = capability.to_string();
         true
     }
+
+    pub fn set_knowledge(
+        &self,
+        id: &str,
+        kb: Option<String>,
+        embedding: Option<tutor_rag::EmbeddingConfig>,
+    ) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(entry) = sessions.get_mut(id) else {
+            return false;
+        };
+
+        entry.kb = kb;
+        entry.embedding = embedding;
+        true
+    }
+
+    pub async fn rename(
+        &self,
+        id: &str,
+        name: Option<String>,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        let storage = self.repo.open(id).await?;
+        storage.update_metadata_name(name).await
+    }
+
+    pub async fn delete(&self, id: &str) -> Result<(), llm_harness_types::SessionError> {
+        self.repo.delete(id).await?;
+        self.sessions.lock().unwrap().remove(id);
+        Ok(())
+    }
 }
 
 pub fn message_text(message: &llm_harness_types::AgentMessage) -> String {
@@ -236,7 +271,7 @@ mod tests {
     #[tokio::test]
     async fn session_pool_creates_and_retrieves() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None).await.unwrap();
+        let id = pool.create("chat", None, None, None).await.unwrap();
         let entry = pool.get(&id);
         assert!(entry.is_some());
         let entry = entry.unwrap();
@@ -247,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_session_persists_messages() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None).await.unwrap();
+        let id = pool.create("chat", None, None, None).await.unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
 
         session
@@ -263,7 +298,7 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_capability_without_replacing_runtime_session() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None).await.unwrap();
+        let id = pool.create("chat", None, None, None).await.unwrap();
         assert!(pool.set_capability(&id, "code_exec"));
 
         let updated = pool.get(&id).unwrap();
@@ -272,12 +307,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_pool_updates_knowledge_binding() {
+        let pool = test_pool();
+        let id = pool.create("chat", None, None, None).await.unwrap();
+        assert!(pool.set_knowledge(
+            &id,
+            Some("kb-1".into()),
+            Some(tutor_rag::EmbeddingConfig {
+                provider: "openai".into(),
+                model: "text-embedding-3-small".into(),
+                api_key: "sk-test".into(),
+                base_url: None,
+                embeddings_path: None,
+                dimensions: Some(1536),
+                send_dimensions: false,
+            }),
+        ));
+
+        let updated = pool.get(&id).unwrap();
+        assert_eq!(updated.kb.as_deref(), Some("kb-1"));
+        assert_eq!(
+            updated
+                .embedding
+                .as_ref()
+                .map(|config| config.model.as_str()),
+            Some("text-embedding-3-small")
+        );
+    }
+
+    #[tokio::test]
     async fn list_returns_runtime_sessions() {
         let pool = test_pool();
-        pool.create("chat", None, None).await.unwrap();
+        pool.create("chat", None, None, None).await.unwrap();
 
         let sessions = pool.list(Some(10)).await.unwrap();
         assert_eq!(sessions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rename_updates_runtime_metadata() {
+        let pool = test_pool();
+        let id = pool.create("chat", None, None, None).await.unwrap();
+
+        pool.rename(&id, Some("Algebra review".into()))
+            .await
+            .unwrap();
+
+        let meta = pool.metadata(&id).await.unwrap();
+        assert_eq!(meta.name.as_deref(), Some("Algebra review"));
+    }
+
+    #[tokio::test]
+    async fn delete_removes_runtime_session() {
+        let pool = test_pool();
+        let id = pool.create("chat", None, None, None).await.unwrap();
+
+        pool.delete(&id).await.unwrap();
+
+        assert!(pool.get(&id).is_none());
+        assert!(pool.open_runtime_session(&id).await.is_err());
     }
 
     #[test]

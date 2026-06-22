@@ -1,21 +1,20 @@
 [package]
-name = "tutor-tools"
+name = "tutor-rag"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tutor-rag = { path = "../tutor-rag" }
-llm-harness-types = { workspace = true }
-llm-harness-runtime-sandbox-os = { workspace = true }
 anyhow.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
 futures.workspace = true
+lancedb.workspace = true
+llm_adapter_embedding.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
-chrono = "0.4"

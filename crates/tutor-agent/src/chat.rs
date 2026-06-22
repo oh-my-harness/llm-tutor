@@ -46,8 +46,18 @@ async fn run_chat_inner(
     )
     .await;
 
+    let rag_tool = router
+        .retriever
+        .clone()
+        .map(RagSearchTool::with_retriever)
+        .unwrap_or_else(RagSearchTool::new);
+    let rag_tool = match &router.associated_kb {
+        Some(kb) => rag_tool.with_associated_kb(kb.clone()),
+        None => rag_tool,
+    };
+
     let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
-        Arc::new(RagSearchTool::new()),
+        Arc::new(rag_tool),
         Arc::new(WebSearchTool::new()),
         Arc::new(CodeExecTool::new()),
     ];

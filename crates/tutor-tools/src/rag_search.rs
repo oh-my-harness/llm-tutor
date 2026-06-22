@@ -1,17 +1,38 @@
 use futures::future::BoxFuture;
 use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
+use std::sync::Arc;
+use tutor_rag::KnowledgeRetriever;
 
 static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
 
-/// Stub RAG knowledge-base search tool.
-/// v0.1: returns a static snippet keyed on the query.
-/// Replace the body of `execute` with a real vector-store call in v0.2.
-pub struct RagSearchTool;
+/// RAG knowledge-base search tool backed by a product retriever.
+pub struct RagSearchTool {
+    retriever: Option<Arc<dyn KnowledgeRetriever>>,
+    associated_kb: Option<String>,
+}
 
 impl RagSearchTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            retriever: None,
+            associated_kb: None,
+        }
+    }
+
+    pub fn with_retriever(retriever: Arc<dyn KnowledgeRetriever>) -> Self {
+        Self {
+            retriever: Some(retriever),
+            associated_kb: None,
+        }
+    }
+
+    pub fn with_associated_kb(mut self, kb: impl Into<String>) -> Self {
+        let kb = kb.into();
+        if !kb.trim().is_empty() {
+            self.associated_kb = Some(kb);
+        }
+        self
     }
 }
 
@@ -50,15 +71,66 @@ impl Tool for RagSearchTool {
     ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
         Box::pin(async move {
             let query = args["query"].as_str().unwrap_or("").to_string();
-            let kb = args["kb"].as_str().unwrap_or("default").to_string();
-            // v0.1 stub: echo back query with a placeholder passage
-            let text = format!(
-                "[RAG:{kb}] Found passage for \"{query}\": \
-                 This is a stub result. Replace with real vector-store retrieval in v0.2."
-            );
+            let kb = args["kb"]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string)
+                .or_else(|| self.associated_kb.clone());
+
+            let Some(kb) = kb else {
+                return Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.".into(),
+                    }],
+                    details: json!({ "query": query, "kb": null, "hits": 0, "configured": false }),
+                    terminate: false,
+                });
+            };
+
+            let Some(retriever) = &self.retriever else {
+                return Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.".into(),
+                    }],
+                    details: json!({ "query": query, "kb": kb, "hits": 0, "configured": false }),
+                    terminate: false,
+                });
+            };
+
+            let hits = retriever
+                .search(Some(&kb), &query, 5)
+                .await
+                .map_err(|err| ToolError::Execution(err.to_string()))?;
+
+            if hits.is_empty() {
+                return Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: format!("[RAG:{kb}] No relevant passages found for \"{query}\"."),
+                    }],
+                    details: json!({ "query": query, "kb": kb, "hits": 0, "configured": true }),
+                    terminate: false,
+                });
+            }
+
+            let text = hits
+                .iter()
+                .enumerate()
+                .map(|(index, hit)| {
+                    format!(
+                        "[{}] source={} score={}\n{}",
+                        index + 1,
+                        hit.source,
+                        hit.score
+                            .map(|score| format!("{score:.4}"))
+                            .unwrap_or_else(|| "n/a".into()),
+                        hit.text
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
             Ok(ToolResult {
                 content: vec![ContentBlock::Text { text }],
-                details: json!({ "query": query, "kb": kb, "hits": 1 }),
+                details: json!({ "query": query, "kb": kb, "hits": hits.len(), "configured": true }),
                 terminate: false,
             })
         })
