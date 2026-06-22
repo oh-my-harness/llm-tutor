@@ -31,7 +31,11 @@ pub struct KnowledgeDocument {
     pub size_bytes: usize,
     pub chunks: usize,
     #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
     pub content_path: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -169,6 +173,28 @@ impl KnowledgeStore {
         Ok(relative.to_string_lossy().replace('\\', "/"))
     }
 
+    pub fn store_document_file(
+        &self,
+        kb: &str,
+        document_id: &str,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<String> {
+        let extension = PathBuf::from(file_name)
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("bin")
+            .to_ascii_lowercase();
+        let relative = PathBuf::from(kb).join(format!("{document_id}.{extension}"));
+        let path = self.documents_root.join(&relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, bytes)?;
+        Ok(relative.to_string_lossy().replace('\\', "/"))
+    }
+
     pub fn document_text(&self, kb: &str, document_id: &str) -> Result<Option<String>> {
         let Some(item) = self.get(kb) else {
             return Ok(None);
@@ -184,6 +210,23 @@ impl KnowledgeStore {
             return Ok(None);
         }
         Ok(Some(std::fs::read_to_string(path)?))
+    }
+
+    pub fn document_file(&self, kb: &str, document_id: &str) -> Result<Option<Vec<u8>>> {
+        let Some(item) = self.get(kb) else {
+            return Ok(None);
+        };
+        let Some(document) = item.documents.iter().find(|doc| doc.id == document_id) else {
+            return Ok(None);
+        };
+        let Some(relative) = &document.file_path else {
+            return Ok(None);
+        };
+        let path = self.documents_root.join(relative);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(std::fs::read(path)?))
     }
 
     fn persist_locked(&self, items: &[KnowledgeBase]) -> Result<()> {
@@ -303,7 +346,9 @@ mod tests {
             source: "doc.txt".into(),
             size_bytes: 15,
             chunks: 1,
+            mime_type: Some("text/plain".into()),
             content_path: Some(content_path),
+            file_path: None,
             created_at: Utc::now(),
         };
         store

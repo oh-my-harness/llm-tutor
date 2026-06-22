@@ -46,6 +46,8 @@ interface KnowledgeDocument {
   source: string
   size_bytes: number
   chunks: number
+  mime_type?: string | null
+  file_path?: string | null
   created_at: string
 }
 
@@ -57,6 +59,16 @@ interface SearchHit {
 }
 
 type TabKey = 'files' | 'upload' | 'indexes' | 'settings'
+type UploadStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error'
+
+interface UploadProgressItem {
+  id: string
+  name: string
+  size: number
+  progress: number
+  status: UploadStatus
+  message?: string
+}
 
 export function KnowledgePage({ settings, onChanged }: Props) {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([])
@@ -77,6 +89,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
   const [newKbEmbeddingId, setNewKbEmbeddingId] = useState(settings.activeEmbeddingConfigId ?? '')
   const [previewTextByDocId, setPreviewTextByDocId] = useState<Record<string, string>>({})
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const activeKb = knowledgeBases.find((item) => item.id === activeKbId) ?? knowledgeBases[0] ?? null
@@ -222,25 +235,31 @@ export function KnowledgePage({ settings, onChanged }: Props) {
     if (!activeKb || selectedFiles.length === 0 || busy) return
     setBusy(true)
     setStatus(`正在上传 ${selectedFiles.length} 个附件...`)
+    setUploadProgress(selectedFiles.map(fileToProgressItem))
     try {
       let latestKb: KnowledgeBaseItem | null = null
       let latestDoc: KnowledgeDocument | null = null
       const previews: Record<string, string> = {}
 
       for (const file of selectedFiles) {
-        const form = new FormData()
-        form.append('file', file)
-        const res = await fetch(`/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents/upload`, {
-          method: 'POST',
-          body: form,
+        const uploadId = uploadProgressId(file)
+        const data = await uploadKnowledgeFile(activeKb.id, file, (next) => {
+          setUploadProgress((prev) =>
+            prev.map((item) => (item.id === uploadId ? { ...item, ...next } : item)),
+          )
         })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
         latestKb = data.knowledge_base as KnowledgeBaseItem
         latestDoc = latestKb.documents[0] ?? null
         if (latestDoc && !isPdfFile(file)) {
           previews[latestDoc.id] = await file.text()
         }
+        setUploadProgress((prev) =>
+          prev.map((item) =>
+            item.id === uploadId
+              ? { ...item, progress: 100, status: 'done', message: `已入库 ${data.chunks ?? 0} 个片段` }
+              : item,
+          ),
+        )
       }
 
       if (latestKb) {
@@ -256,6 +275,12 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       setStatus('附件已入库')
       onChanged?.()
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setUploadProgress((prev) =>
+        prev.map((item) =>
+          item.status === 'done' ? item : { ...item, status: 'error', message },
+        ),
+      )
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -389,7 +414,11 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                           type="file"
                           multiple
                           accept=".pdf,.txt,.md,.markdown,.csv,.json,.log,application/pdf,text/*,application/json"
-                          onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files ?? [])
+                            setSelectedFiles(files)
+                            setUploadProgress(files.map(fileToProgressItem))
+                          }}
                         />
                         <button
                           className="flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-5 text-sm font-medium text-blue-700 shadow-sm ring-1 ring-blue-100 hover:bg-blue-50 disabled:opacity-60"
@@ -403,22 +432,18 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                         <p className="mt-2 text-xs text-gray-500">
                           当前支持 PDF 和 UTF-8 文本附件，例如 txt、md、csv、json、log。
                         </p>
-                        {selectedFiles.length > 0 && (
+                        {(selectedFiles.length > 0 || uploadProgress.length > 0) && (
                           <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
-                            <div className="space-y-2">
-                              {selectedFiles.map((file) => (
-                                <div key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-2 text-sm text-gray-700">
-                                  <FileText size={16} className="text-blue-600" />
-                                  <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                                  <span className="text-xs text-gray-500">{formatSize(file.size)}</span>
-                                </div>
+                            <div className="space-y-3">
+                              {(uploadProgress.length > 0 ? uploadProgress : selectedFiles.map(fileToProgressItem)).map((file) => (
+                                <UploadProgressRow key={file.id} item={file} />
                               ))}
                             </div>
                             <button
                               className={`${primaryButtonClassName} mt-3`}
                               type="button"
                               onClick={uploadFiles}
-                              disabled={busy}
+                              disabled={busy || selectedFiles.length === 0}
                             >
                               <Database size={17} />
                               上传并入库
@@ -499,7 +524,13 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                 </Panel>
               )}
 
-              {tab === 'files' && <FilePreview selectedDoc={selectedDoc} previewText={selectedPreviewText} />}
+              {tab === 'files' && (
+                <FilePreview
+                  kbId={activeKb.id}
+                  selectedDoc={selectedDoc}
+                  previewText={selectedPreviewText}
+                />
+              )}
             </section>
           </div>
         ) : (
@@ -772,7 +803,15 @@ function FileListPanel({
   )
 }
 
-function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocument | null; previewText?: string }) {
+function FilePreview({
+  kbId,
+  selectedDoc,
+  previewText,
+}: {
+  kbId: string
+  selectedDoc: KnowledgeDocument | null
+  previewText?: string
+}) {
   if (!selectedDoc) {
     return (
       <div className="flex h-full min-h-[460px] items-center justify-center px-8 text-center">
@@ -789,7 +828,7 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
 
   return (
     <Panel>
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
             <FileText size={20} />
@@ -801,7 +840,15 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
             </p>
           </div>
         </div>
-        {previewText ? (
+        {isPdfDocument(selectedDoc) && selectedDoc.file_path ? (
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+            <iframe
+              className="h-[72vh] w-full bg-white"
+              src={`/api/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(selectedDoc.id)}/file`}
+              title={selectedDoc.name}
+            />
+          </div>
+        ) : previewText ? (
           <pre className="whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-4 font-sans text-sm leading-6 text-gray-800">
             {previewText}
           </pre>
@@ -812,6 +859,32 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
         )}
       </div>
     </Panel>
+  )
+}
+
+function UploadProgressRow({ item }: { item: UploadProgressItem }) {
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <div className="flex items-center gap-2 text-sm text-gray-700">
+        <FileText size={16} className="shrink-0 text-blue-600" />
+        <span className="min-w-0 flex-1 truncate">{item.name}</span>
+        <span className="text-xs text-gray-500">{formatSize(item.size)}</span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
+        <div
+          className={`h-full rounded-full transition-all ${
+            item.status === 'error' ? 'bg-red-500' : item.status === 'done' ? 'bg-emerald-500' : 'bg-blue-600'
+          }`}
+          style={{ width: `${Math.max(4, item.progress)}%` }}
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-xs">
+        <span className={item.status === 'error' ? 'text-red-600' : 'text-gray-500'}>
+          {item.message ?? uploadStatusLabel(item.status)}
+        </span>
+        <span className="tabular-nums text-gray-500">{Math.round(item.progress)}%</span>
+      </div>
+    </div>
   )
 }
 
@@ -857,6 +930,57 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function uploadKnowledgeFile(
+  kbId: string,
+  file: File,
+  onProgress: (next: Partial<UploadProgressItem>) => void,
+): Promise<{ knowledge_base: KnowledgeBaseItem; chunks?: number }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const form = new FormData()
+    form.append('file', file)
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        onProgress({ status: 'uploading', progress: 15, message: '正在上传...' })
+        return
+      }
+      const progress = Math.min(95, Math.round((event.loaded / event.total) * 100))
+      onProgress({
+        status: progress >= 95 ? 'processing' : 'uploading',
+        progress,
+        message: progress >= 95 ? '正在解析并写入索引...' : '正在上传...',
+      })
+    }
+
+    xhr.onloadstart = () => {
+      onProgress({ status: 'uploading', progress: 5, message: '正在上传...' })
+    }
+
+    xhr.onload = () => {
+      let data: { knowledge_base?: KnowledgeBaseItem; chunks?: number; error?: string } = {}
+      try {
+        data = JSON.parse(xhr.responseText || '{}')
+      } catch {
+        reject(new Error('upload response is not valid JSON'))
+        return
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300 || !data.knowledge_base) {
+        reject(new Error(data.error || `HTTP ${xhr.status}`))
+        return
+      }
+
+      resolve({ knowledge_base: data.knowledge_base, chunks: data.chunks })
+    }
+
+    xhr.onerror = () => reject(new Error('upload failed'))
+    xhr.onabort = () => reject(new Error('upload aborted'))
+    xhr.open('POST', `/api/knowledge-bases/${encodeURIComponent(kbId)}/documents/upload`)
+    xhr.send(form)
+  })
+}
+
 async function safeJson(res: Response): Promise<Record<string, string>> {
   try {
     return await res.json()
@@ -885,6 +1009,37 @@ function formatTime(value: string) {
 
 function isPdfFile(file: File) {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
+function isPdfDocument(document: KnowledgeDocument) {
+  return (
+    document.mime_type === 'application/pdf' ||
+    document.name.toLowerCase().endsWith('.pdf') ||
+    document.source.toLowerCase().endsWith('.pdf')
+  )
+}
+
+function fileToProgressItem(file: File): UploadProgressItem {
+  return {
+    id: uploadProgressId(file),
+    name: file.name,
+    size: file.size,
+    progress: 0,
+    status: 'pending',
+    message: '等待上传',
+  }
+}
+
+function uploadProgressId(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`
+}
+
+function uploadStatusLabel(status: UploadStatus) {
+  if (status === 'uploading') return '正在上传...'
+  if (status === 'processing') return '正在解析并写入索引...'
+  if (status === 'done') return '已完成'
+  if (status === 'error') return '处理失败'
+  return '等待上传'
 }
 
 const iconButtonClassName =

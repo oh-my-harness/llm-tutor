@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Multipart, Path, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::IntoResponse,
     routing::{delete, get, post},
 };
@@ -140,7 +141,17 @@ async fn upload_document(
                 .into_response();
         }
 
-        return match ingest_text_document(store.as_ref(), &kb, &file_name, &text, size_bytes).await
+        let normalized_content_type = upload_mime_type(&file_name, content_type.as_deref());
+        return match ingest_upload_document(
+            store.as_ref(),
+            &kb,
+            &file_name,
+            &text,
+            size_bytes,
+            bytes.as_ref(),
+            normalized_content_type.as_deref(),
+        )
+        .await
         {
             Ok((updated, chunks)) => (
                 StatusCode::OK,
@@ -191,6 +202,13 @@ fn is_pdf_upload(file_name: &str, content_type: Option<&str>) -> bool {
         || content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/pdf"))
 }
 
+fn upload_mime_type(file_name: &str, content_type: Option<&str>) -> Option<String> {
+    if is_pdf_upload(file_name, content_type) {
+        return Some("application/pdf".to_string());
+    }
+    content_type.map(str::to_string)
+}
+
 async fn ingest_text_document(
     store: &KnowledgeStore,
     kb: &str,
@@ -212,7 +230,41 @@ async fn ingest_text_document(
         source: source.to_string(),
         size_bytes,
         chunks,
+        mime_type: Some("text/plain; charset=utf-8".to_string()),
         content_path: Some(content_path),
+        file_path: None,
+        created_at: Utc::now(),
+    };
+    Ok((store.add_document(kb, document)?, chunks))
+}
+
+async fn ingest_upload_document(
+    store: &KnowledgeStore,
+    kb: &str,
+    source: &str,
+    text: &str,
+    size_bytes: usize,
+    original_bytes: &[u8],
+    mime_type: Option<&str>,
+) -> anyhow::Result<(KnowledgeBaseView, usize)> {
+    let Some(item) = store.get(kb) else {
+        anyhow::bail!("knowledge base not found");
+    };
+
+    let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+    let chunks = rag.ingest_text(kb, source, text).await?;
+    let document_id = uuid::Uuid::new_v4().to_string();
+    let content_path = store.store_document_text(kb, &document_id, text)?;
+    let file_path = store.store_document_file(kb, &document_id, source, original_bytes)?;
+    let document = KnowledgeDocument {
+        id: document_id,
+        name: source.to_string(),
+        source: source.to_string(),
+        size_bytes,
+        chunks,
+        mime_type: mime_type.map(str::to_string),
+        content_path: Some(content_path),
+        file_path: Some(file_path),
         created_at: Utc::now(),
     };
     Ok((store.add_document(kb, document)?, chunks))
@@ -224,6 +276,60 @@ fn error_response(err: impl std::fmt::Display) -> axum::response::Response {
         Json(serde_json::json!({ "error": err.to_string() })),
     )
         .into_response()
+}
+
+async fn get_document_file(
+    State(store): State<Arc<KnowledgeStore>>,
+    Path((kb, document_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let Some(item) = store.get(&kb) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "knowledge base not found" })),
+        )
+            .into_response();
+    };
+    let Some(document) = item.documents.iter().find(|doc| doc.id == document_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" })),
+        )
+            .into_response();
+    };
+
+    match store.document_file(&kb, &document_id) {
+        Ok(Some(bytes)) => {
+            let content_type = document
+                .mime_type
+                .as_deref()
+                .unwrap_or("application/octet-stream");
+            let mut response = Body::from(bytes).into_response();
+            let headers = response.headers_mut();
+            headers.insert(
+                header::CONTENT_TYPE,
+                content_type
+                    .parse()
+                    .unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
+            );
+            headers.insert(
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{}\"", document.name.replace('"', ""))
+                    .parse()
+                    .unwrap_or(header::HeaderValue::from_static("inline")),
+            );
+            response
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document file not found" })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 async fn get_document_content(
@@ -302,6 +408,10 @@ pub fn knowledge_router(store: Arc<KnowledgeStore>) -> Router {
         .route(
             "/api/knowledge-bases/{kb}/documents/{document_id}/content",
             get(get_document_content),
+        )
+        .route(
+            "/api/knowledge-bases/{kb}/documents/{document_id}/file",
+            get(get_document_file),
         )
         .route("/api/knowledge-bases/{kb}/search", post(search_knowledge))
         .with_state(store)
