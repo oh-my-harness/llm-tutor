@@ -1,8 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, AtSign, Brain, ChevronDown, Database, Paperclip, Sparkles } from 'lucide-react'
+import type { ReactNode } from 'react'
+import {
+  ArrowUp,
+  AtSign,
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  Code2,
+  Database,
+  MessageSquare,
+  Paperclip,
+  Sparkles,
+} from 'lucide-react'
+import type { LlmModelConfig } from '../settings'
 import { MarkdownMessage } from './MarkdownMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec'
+type OpenMenu = 'mode' | 'knowledge' | 'model' | null
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -14,31 +28,50 @@ interface Props {
   messages: Message[]
   streamingText: string
   capability: Capability
-  modelLabel: string
+  llmConfigs: LlmModelConfig[]
+  activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
   onSend: (text: string) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
+  onLlmConfigChange: (id: string) => void
   disabled: boolean
 }
 
-const modeOptions: Array<{ value: Capability; label: string }> = [
-  { value: 'chat', label: '聊天' },
-  { value: 'deep_solve', label: '解题' },
-  { value: 'code_exec', label: '代码' },
+const modeOptions: Array<{ value: Capability; label: string; description: string; icon: ReactNode }> = [
+  {
+    value: 'chat',
+    label: '聊天',
+    description: '灵活对话，可使用任意工具',
+    icon: <MessageSquare size={21} />,
+  },
+  {
+    value: 'deep_solve',
+    label: '解题',
+    description: '多步推理与问题求解',
+    icon: <Brain size={21} />,
+  },
+  {
+    value: 'code_exec',
+    label: '代码',
+    description: '运行代码并验证结果',
+    icon: <Code2 size={21} />,
+  },
 ]
 
 export function ChatBox({
   messages,
   streamingText,
   capability,
-  modelLabel,
+  llmConfigs,
+  activeLlmConfigId,
   knowledgeBases,
   selectedKnowledgeBaseId,
   onSend,
   onCapabilityChange,
   onKnowledgeBaseChange,
+  onLlmConfigChange,
   disabled,
 }: Props) {
   const [input, setInput] = useState('')
@@ -80,11 +113,13 @@ export function ChatBox({
               input={input}
               setInput={setInput}
               capability={capability}
-              modelLabel={modelLabel}
+              llmConfigs={llmConfigs}
+              activeLlmConfigId={activeLlmConfigId}
               knowledgeBases={knowledgeBases}
               selectedKnowledgeBaseId={selectedKnowledgeBaseId}
               onCapabilityChange={onCapabilityChange}
               onKnowledgeBaseChange={onKnowledgeBaseChange}
+              onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
               disabled={disabled}
               variant="center"
@@ -122,11 +157,13 @@ export function ChatBox({
               input={input}
               setInput={setInput}
               capability={capability}
-              modelLabel={modelLabel}
+              llmConfigs={llmConfigs}
+              activeLlmConfigId={activeLlmConfigId}
               knowledgeBases={knowledgeBases}
               selectedKnowledgeBaseId={selectedKnowledgeBaseId}
               onCapabilityChange={onCapabilityChange}
               onKnowledgeBaseChange={onKnowledgeBaseChange}
+              onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
               disabled={disabled}
               variant="bottom"
@@ -142,11 +179,13 @@ function Composer({
   input,
   setInput,
   capability,
-  modelLabel,
+  llmConfigs,
+  activeLlmConfigId,
   knowledgeBases,
   selectedKnowledgeBaseId,
   onCapabilityChange,
   onKnowledgeBaseChange,
+  onLlmConfigChange,
   onSend,
   disabled,
   variant,
@@ -154,25 +193,51 @@ function Composer({
   input: string
   setInput: (value: string) => void
   capability: Capability
-  modelLabel: string
+  llmConfigs: LlmModelConfig[]
+  activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
+  onLlmConfigChange: (id: string) => void
   onSend: () => void
   disabled: boolean
   variant: 'center' | 'bottom'
 }) {
+  const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
+  const activeKnowledge = knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
+  const activeModel = llmConfigs.find((item) => item.id === activeLlmConfigId) ?? llmConfigs[0] ?? null
+  const knowledgeOptions = [
+    {
+      id: '',
+      name: '不关联知识库',
+      description: '仅使用当前对话上下文',
+      icon: <Database size={21} />,
+    },
+    ...knowledgeBases.map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: '关联此知识库进行检索',
+      icon: <Database size={21} />,
+    })),
+  ]
+
+  const toggleMenu = (menu: OpenMenu) => {
+    if (disabled) return
+    setOpenMenu((current) => (current === menu ? null : menu))
+  }
+
   return (
     <div
-      className={`overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm ${
-        variant === 'center' ? 'shadow-xl' : ''
+      className={`relative rounded-3xl border border-blue-100 bg-white shadow-sm ${
+        variant === 'center' ? 'shadow-xl shadow-blue-950/5' : ''
       }`}
     >
       <textarea
         className={`${
           variant === 'center' ? 'min-h-36 text-base' : 'min-h-16 text-sm'
-        } w-full resize-none px-5 py-4 outline-none placeholder:text-gray-400 disabled:bg-white`}
+        } w-full resize-none rounded-t-3xl px-5 py-4 outline-none placeholder:text-gray-400 disabled:bg-white`}
         value={input}
         onChange={(event) => setInput(event.target.value)}
         onKeyDown={(event) => {
@@ -184,52 +249,69 @@ function Composer({
         placeholder="今天我能帮您什么？"
         disabled={disabled}
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-2">
-        <label className="relative inline-flex items-center">
-          <Brain size={18} className="pointer-events-none absolute left-3 text-gray-700" />
-          <select
-            className="h-9 appearance-none rounded-full border border-gray-200 bg-white pl-9 pr-8 text-sm text-gray-800 outline-none hover:bg-gray-50 disabled:opacity-50"
-            value={capability}
-            onChange={(event) => onCapabilityChange(event.target.value as Capability)}
-            disabled={disabled}
-          >
-            {modeOptions.map((mode) => (
-              <option key={mode.value} value={mode.value}>
-                {mode.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={16} className="pointer-events-none absolute right-3 text-gray-500" />
-        </label>
+      <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
+        <div className="relative">
+          <ToolbarButton
+            active={openMenu === 'mode'}
+            icon={activeMode.icon}
+            label={activeMode.label}
+            onClick={() => toggleMenu('mode')}
+          />
+          {openMenu === 'mode' && (
+            <DropdownPanel widthClassName="w-[33rem]">
+              {modeOptions.map((mode) => (
+                <DropdownOption
+                  key={mode.value}
+                  selected={mode.value === capability}
+                  icon={mode.icon}
+                  title={mode.label}
+                  description={mode.description}
+                  onClick={() => {
+                    onCapabilityChange(mode.value)
+                    setOpenMenu(null)
+                  }}
+                />
+              ))}
+            </DropdownPanel>
+          )}
+        </div>
 
         <button
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50"
           type="button"
         >
           <Paperclip size={18} />
           附件
         </button>
 
-        <label className="relative inline-flex items-center">
-          <Database size={18} className="pointer-events-none absolute left-3 text-gray-600" />
-          <select
-            className="h-9 max-w-52 appearance-none rounded-full px-9 pr-8 text-sm text-gray-700 outline-none hover:bg-gray-100 disabled:text-gray-400"
-            value={selectedKnowledgeBaseId}
-            onChange={(event) => onKnowledgeBaseChange(event.target.value)}
-            disabled={disabled}
-          >
-            <option value="">不关联知识库</option>
-            {knowledgeBases.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={16} className="pointer-events-none absolute right-3 text-gray-500" />
-        </label>
+        <div className="relative">
+          <ToolbarButton
+            active={openMenu === 'knowledge'}
+            icon={<Database size={18} />}
+            label={activeKnowledge?.name ?? '不关联知识库'}
+            onClick={() => toggleMenu('knowledge')}
+          />
+          {openMenu === 'knowledge' && (
+            <DropdownPanel widthClassName="w-[28rem]">
+              {knowledgeOptions.map((item) => (
+                <DropdownOption
+                  key={item.id || 'none'}
+                  selected={item.id === selectedKnowledgeBaseId}
+                  icon={item.icon}
+                  title={item.name}
+                  description={item.description}
+                  onClick={() => {
+                    onKnowledgeBaseChange(item.id)
+                    setOpenMenu(null)
+                  }}
+                />
+              ))}
+            </DropdownPanel>
+          )}
+        </div>
 
         <button
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-gray-100"
+          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50"
           type="button"
         >
           <AtSign size={18} />
@@ -237,27 +319,131 @@ function Composer({
           <ChevronDown size={16} />
         </button>
 
-        <div className="ml-auto flex items-center gap-3">
-          <button
-            className="inline-flex h-9 max-w-52 items-center gap-2 rounded-full border border-gray-200 px-3 text-sm text-gray-700 hover:bg-gray-50"
-            type="button"
-          >
-            <Brain size={16} />
-            <span className="truncate">{modelLabel}</span>
-            <ChevronDown size={16} />
-          </button>
-          <button
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-900 text-white disabled:bg-gray-200 disabled:text-gray-400"
-            onClick={onSend}
-            disabled={disabled || !input.trim()}
-            type="button"
-            title="发送"
-          >
-            <ArrowUp size={20} />
-          </button>
+        <div className="relative ml-auto">
+          <ToolbarButton
+            active={openMenu === 'model'}
+            icon={<Brain size={16} />}
+            label={activeModel?.model ?? '选择模型'}
+            onClick={() => toggleMenu('model')}
+          />
+          {openMenu === 'model' && (
+            <DropdownPanel widthClassName="right-0 left-auto w-[30rem]">
+              {llmConfigs.length === 0 ? (
+                <DropdownOption
+                  selected
+                  icon={<Brain size={21} />}
+                  title="暂无模型配置"
+                  description="请先到设置中添加 LLM 配置"
+                  onClick={() => setOpenMenu(null)}
+                />
+              ) : (
+                llmConfigs.map((config) => (
+                  <DropdownOption
+                    key={config.id}
+                    selected={config.id === activeModel?.id}
+                    icon={<Brain size={21} />}
+                    title={config.name || config.model}
+                    description={`${llmApiModeLabel(config.provider)} · ${config.model}`}
+                    onClick={() => {
+                      onLlmConfigChange(config.id)
+                      setOpenMenu(null)
+                    }}
+                  />
+                ))
+              )}
+            </DropdownPanel>
+          )}
         </div>
+
+        <button
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+          onClick={onSend}
+          disabled={disabled || !input.trim()}
+          type="button"
+          title="发送"
+        >
+          <ArrowUp size={20} />
+        </button>
       </div>
     </div>
+  )
+}
+
+function llmApiModeLabel(provider: LlmModelConfig['provider']) {
+  if (provider === 'anthropic') return 'Anthropic Messages'
+  return 'OpenAI-compatible'
+}
+
+function ToolbarButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean
+  icon: ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`inline-flex h-9 max-w-56 items-center gap-2 rounded-full border px-3 text-sm transition ${
+        active
+          ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
+          : 'border-transparent text-gray-700 hover:bg-blue-50'
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{label}</span>
+      <ChevronDown size={16} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
+    </button>
+  )
+}
+
+function DropdownPanel({ children, widthClassName }: { children: ReactNode; widthClassName: string }) {
+  return (
+    <div
+      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-2xl border border-blue-100 bg-white py-2 shadow-2xl shadow-blue-950/10 ${widthClassName}`}
+    >
+      {children}
+    </div>
+  )
+}
+
+function DropdownOption({
+  selected,
+  icon,
+  title,
+  description,
+  onClick,
+}: {
+  selected: boolean
+  icon: ReactNode
+  title: string
+  description: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`flex w-full items-center gap-4 px-5 py-4 text-left transition ${
+        selected ? 'bg-blue-50' : 'hover:bg-gray-50'
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      <span className={`${selected ? 'text-blue-700' : 'text-gray-500'}`}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-base font-semibold text-gray-950">{title}</span>
+        <span className="mt-0.5 block truncate text-sm text-gray-500">{description}</span>
+      </span>
+      {selected ? (
+        <CheckCircle2 size={18} className="shrink-0 text-blue-600" />
+      ) : (
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-transparent" />
+      )}
+    </button>
   )
 }
 

@@ -6,10 +6,11 @@ use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
     session::{CreateSessionOptions, ListSessionOptions, SessionMetadata},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LlmSessionConfig {
     pub provider: String,
     pub model: String,
@@ -43,7 +44,17 @@ pub struct RuntimeSessionSummary {
 /// Thread-safe pool of active web session metadata plus runtime session repo.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
+    product_metadata: Mutex<HashMap<String, ProductSessionMetadata>>,
+    product_metadata_path: PathBuf,
     repo: Arc<JsonlSessionRepo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ProductSessionMetadata {
+    capability: String,
+    kb: Option<String>,
+    llm: Option<LlmSessionConfig>,
+    embedding: Option<tutor_rag::EmbeddingConfig>,
 }
 
 impl SessionPool {
@@ -58,8 +69,12 @@ impl SessionPool {
     pub fn new_with_root(root: impl Into<PathBuf>) -> Arc<Self> {
         let root = root.into();
         std::fs::create_dir_all(&root).expect("failed to create runtime session directory");
+        let product_metadata_path = root.join("product-metadata.json");
+        let product_metadata = read_product_metadata(&product_metadata_path).unwrap_or_default();
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
+            product_metadata: Mutex::new(product_metadata),
+            product_metadata_path,
             repo: Arc::new(JsonlSessionRepo::new(root)),
         })
     }
@@ -86,12 +101,21 @@ impl SessionPool {
         let entry = SessionEntry {
             id: id.clone(),
             capability: capability.to_string(),
-            kb,
-            llm,
-            embedding,
+            kb: kb.clone(),
+            llm: llm.clone(),
+            embedding: embedding.clone(),
             stream: TutorStream::new(128),
         };
         self.sessions.lock().unwrap().insert(id.clone(), entry);
+        self.upsert_product_metadata(
+            &id,
+            ProductSessionMetadata {
+                capability: capability.to_string(),
+                kb,
+                llm,
+                embedding,
+            },
+        );
         Ok(id)
     }
 
@@ -106,12 +130,16 @@ impl SessionPool {
 
         let storage = self.repo.open(id).await.ok()?;
         let meta = storage.metadata().await.ok()?;
+        let product = self.product_metadata.lock().unwrap().get(id).cloned();
         let entry = SessionEntry {
             id: meta.id.clone(),
-            capability: "chat".into(),
-            kb: None,
-            llm: None,
-            embedding: None,
+            capability: product
+                .as_ref()
+                .map(|value| value.capability.clone())
+                .unwrap_or_else(|| "chat".into()),
+            kb: product.as_ref().and_then(|value| value.kb.clone()),
+            llm: product.as_ref().and_then(|value| value.llm.clone()),
+            embedding: product.as_ref().and_then(|value| value.embedding.clone()),
             stream: TutorStream::new(128),
         };
         self.sessions
@@ -189,6 +217,10 @@ impl SessionPool {
         };
 
         entry.capability = capability.to_string();
+        drop(sessions);
+        self.update_product_metadata(id, |metadata| {
+            metadata.capability = capability.to_string();
+        });
         true
     }
 
@@ -205,6 +237,28 @@ impl SessionPool {
 
         entry.kb = kb;
         entry.embedding = embedding;
+        let kb = entry.kb.clone();
+        let embedding = entry.embedding.clone();
+        drop(sessions);
+        self.update_product_metadata(id, |metadata| {
+            metadata.kb = kb;
+            metadata.embedding = embedding;
+        });
+        true
+    }
+
+    pub fn set_llm(&self, id: &str, llm: Option<LlmSessionConfig>) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(entry) = sessions.get_mut(id) else {
+            return false;
+        };
+
+        entry.llm = llm;
+        let llm = entry.llm.clone();
+        drop(sessions);
+        self.update_product_metadata(id, |metadata| {
+            metadata.llm = llm;
+        });
         true
     }
 
@@ -220,7 +274,32 @@ impl SessionPool {
     pub async fn delete(&self, id: &str) -> Result<(), llm_harness_types::SessionError> {
         self.repo.delete(id).await?;
         self.sessions.lock().unwrap().remove(id);
+        {
+            let mut metadata = self.product_metadata.lock().unwrap();
+            metadata.remove(id);
+            let _ = persist_product_metadata(&self.product_metadata_path, &metadata);
+        }
         Ok(())
+    }
+
+    fn upsert_product_metadata(&self, id: &str, value: ProductSessionMetadata) {
+        let mut metadata = self.product_metadata.lock().unwrap();
+        metadata.insert(id.to_string(), value);
+        let _ = persist_product_metadata(&self.product_metadata_path, &metadata);
+    }
+
+    fn update_product_metadata(&self, id: &str, update: impl FnOnce(&mut ProductSessionMetadata)) {
+        let mut metadata = self.product_metadata.lock().unwrap();
+        let entry = metadata
+            .entry(id.to_string())
+            .or_insert_with(|| ProductSessionMetadata {
+                capability: "chat".into(),
+                kb: None,
+                llm: None,
+                embedding: None,
+            });
+        update(entry);
+        let _ = persist_product_metadata(&self.product_metadata_path, &metadata);
     }
 }
 
@@ -253,9 +332,35 @@ impl Default for SessionPool {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            product_metadata: Mutex::new(HashMap::new()),
+            product_metadata_path: PathBuf::from(".llm-tutor/session-product-metadata.json"),
             repo: Arc::new(JsonlSessionRepo::new(".llm-tutor/sessions")),
         }
     }
+}
+
+fn read_product_metadata(
+    path: &PathBuf,
+) -> anyhow::Result<HashMap<String, ProductSessionMetadata>> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let text = std::fs::read_to_string(path)?;
+    if text.trim().is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
+fn persist_product_metadata(
+    path: &PathBuf,
+    metadata: &HashMap<String, ProductSessionMetadata>,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(metadata)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -333,6 +438,52 @@ mod tests {
                 .map(|config| config.model.as_str()),
             Some("text-embedding-3-small")
         );
+    }
+
+    #[tokio::test]
+    async fn product_metadata_survives_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create(
+                "chat",
+                Some("kb-1".into()),
+                Some(LlmSessionConfig {
+                    provider: "deepseek".into(),
+                    model: "deepseek-v4-flash".into(),
+                    api_key: Some("sk-test".into()),
+                    base_url: Some("https://api.deepseek.com".into()),
+                    chat_path: Some("/chat/completions".into()),
+                    budget_limit_usd: Some(2.0),
+                    require_approval: false,
+                }),
+                Some(tutor_rag::EmbeddingConfig {
+                    provider: "openai".into(),
+                    model: "text-embedding-3-small".into(),
+                    api_key: "sk-embed".into(),
+                    base_url: None,
+                    embeddings_path: None,
+                    dimensions: Some(1536),
+                    send_dimensions: false,
+                }),
+            )
+            .await
+            .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let entry = reopened.ensure_entry(&id).await.unwrap();
+
+        assert_eq!(entry.kb.as_deref(), Some("kb-1"));
+        assert_eq!(
+            entry.llm.as_ref().map(|config| config.provider.as_str()),
+            Some("deepseek")
+        );
+        assert_eq!(
+            entry.embedding.as_ref().map(|config| config.model.as_str()),
+            Some("text-embedding-3-small")
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

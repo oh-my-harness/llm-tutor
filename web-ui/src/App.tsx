@@ -151,7 +151,6 @@ export default function App() {
         } else if (kind === 'error') {
           const message = typeof payload.message === 'string' ? payload.message : 'WebSocket error'
           pushStatus({ kind: 'error', label: 'Error', detail: message })
-          setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
           setRunning(false)
         }
       }
@@ -310,6 +309,28 @@ export default function App() {
     }
   }, [running, sessionId])
 
+  const handleLlmConfigChange = useCallback(async (id: string) => {
+    if (running) return
+    const nextSettings = { ...llmSettings, activeLlmConfigId: id }
+    setLlmSettings(nextSettings)
+    saveLlmSettings(nextSettings)
+    if (!sessionId) return
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llm: settingsForSession(nextSettings) }),
+      })
+      if (!res.ok) {
+        throw new Error(`failed to update session model: HTTP ${res.status}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+    }
+  }, [llmSettings, running, sessionId])
+
   const handleApproval = (requestId: string, approved: boolean) => {
     send({ type: 'approval_response', request_id: requestId, approved })
     setPendingApproval(null)
@@ -437,12 +458,14 @@ export default function App() {
                   messages={messages}
                   streamingText={streamingText}
                   capability={capability}
-                  modelLabel={llmSettings.model}
+                  llmConfigs={llmSettings.llmConfigs}
+                  activeLlmConfigId={llmSettings.activeLlmConfigId}
                   knowledgeBases={knowledgeBases}
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   onSend={handleSend}
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
+                  onLlmConfigChange={handleLlmConfigChange}
                   disabled={running}
                 />
               </main>

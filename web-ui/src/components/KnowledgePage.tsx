@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   CheckCircle2,
@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Star,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -77,6 +76,8 @@ export function KnowledgePage({ settings, onChanged }: Props) {
   const [newKbName, setNewKbName] = useState('')
   const [newKbEmbeddingId, setNewKbEmbeddingId] = useState(settings.activeEmbeddingConfigId ?? '')
   const [previewTextByDocId, setPreviewTextByDocId] = useState<Record<string, string>>({})
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const activeKb = knowledgeBases.find((item) => item.id === activeKbId) ?? knowledgeBases[0] ?? null
   const selectedDoc = activeKb?.documents.find((doc) => doc.id === selectedDocId) ?? null
@@ -217,6 +218,50 @@ export function KnowledgePage({ settings, onChanged }: Props) {
     }
   }
 
+  const uploadFiles = async () => {
+    if (!activeKb || selectedFiles.length === 0 || busy) return
+    setBusy(true)
+    setStatus(`正在上传 ${selectedFiles.length} 个附件...`)
+    try {
+      let latestKb: KnowledgeBaseItem | null = null
+      let latestDoc: KnowledgeDocument | null = null
+      const previews: Record<string, string> = {}
+
+      for (const file of selectedFiles) {
+        const form = new FormData()
+        form.append('file', file)
+        const res = await fetch(`/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents/upload`, {
+          method: 'POST',
+          body: form,
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        latestKb = data.knowledge_base as KnowledgeBaseItem
+        latestDoc = latestKb.documents[0] ?? null
+        if (latestDoc && !isPdfFile(file)) {
+          previews[latestDoc.id] = await file.text()
+        }
+      }
+
+      if (latestKb) {
+        setKnowledgeBases((prev) => prev.map((item) => (item.id === latestKb?.id ? latestKb! : item)))
+      }
+      if (latestDoc) {
+        setSelectedDocId(latestDoc.id)
+        setPreviewTextByDocId((prev) => ({ ...prev, ...previews }))
+      }
+      setSelectedFiles([])
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      setTab('files')
+      setStatus('附件已入库')
+      onChanged?.()
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const search = async () => {
     if (!activeKb || !query.trim() || busy) return
     setBusy(true)
@@ -264,7 +309,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       />
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-stone-200 px-5 pt-4">
+        <header className="border-b border-gray-200 bg-white px-5 pt-4">
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -272,17 +317,12 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                   {creating ? '新建知识库' : activeKb?.name ?? '知识库'}
                 </h1>
                 {activeKb && !creating && (
-                  <>
-                    <Badge tone="amber" icon={<Star size={14} className="fill-amber-500" />}>
-                      默认
-                    </Badge>
-                    <Badge tone="green" icon={<CheckCircle2 size={14} />}>
-                      {statusLabel(activeKb.status)}
-                    </Badge>
-                  </>
+                  <Badge tone="green" icon={<CheckCircle2 size={14} />}>
+                    {statusLabel(activeKb.status)}
+                  </Badge>
                 )}
               </div>
-              <p className="mt-1.5 text-xs text-stone-600">
+              <p className="mt-1.5 text-xs text-gray-600">
                 {creating
                   ? '创建时绑定嵌入模型，后续入库和检索都固定使用该配置。'
                   : activeKb
@@ -290,7 +330,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                     : '请先创建一个知识库。'}
               </p>
             </div>
-            <div className="text-xs text-stone-600">{status}</div>
+            <div className="text-xs text-gray-500">{status}</div>
           </div>
 
           <nav className="mt-4 flex gap-5">
@@ -338,10 +378,54 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                 <Panel>
                   <div className="max-w-3xl">
                     <h3 className="text-lg font-semibold text-gray-950">添加文档</h3>
-                    <p className="mt-1 text-sm text-stone-600">
+                    <p className="mt-1 text-sm text-gray-600">
                       将使用 {activeKb.embedding.model} 为文档生成向量。
                     </p>
                     <div className="mt-5 grid gap-4">
+                      <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-4">
+                        <input
+                          ref={fileInputRef}
+                          className="hidden"
+                          type="file"
+                          multiple
+                          accept=".pdf,.txt,.md,.markdown,.csv,.json,.log,application/pdf,text/*,application/json"
+                          onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+                        />
+                        <button
+                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-5 text-sm font-medium text-blue-700 shadow-sm ring-1 ring-blue-100 hover:bg-blue-50 disabled:opacity-60"
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={busy}
+                        >
+                          <Upload size={18} />
+                          选择附件
+                        </button>
+                        <p className="mt-2 text-xs text-gray-500">
+                          当前支持 PDF 和 UTF-8 文本附件，例如 txt、md、csv、json、log。
+                        </p>
+                        {selectedFiles.length > 0 && (
+                          <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
+                            <div className="space-y-2">
+                              {selectedFiles.map((file) => (
+                                <div key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-2 text-sm text-gray-700">
+                                  <FileText size={16} className="text-blue-600" />
+                                  <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                                  <span className="text-xs text-gray-500">{formatSize(file.size)}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <button
+                              className={`${primaryButtonClassName} mt-3`}
+                              type="button"
+                              onClick={uploadFiles}
+                              disabled={busy}
+                            >
+                              <Database size={17} />
+                              上传并入库
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <Field label="文件名">
                         <input
                           className={inputClassName}
@@ -370,7 +454,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                 <Panel>
                   <div className="max-w-3xl">
                     <h3 className="text-lg font-semibold text-gray-950">索引版本</h3>
-                    <p className="mt-1 text-sm text-stone-600">
+                    <p className="mt-1 text-sm text-gray-600">
                       当前版本绑定 {activeKb.embedding.model}，切换模型需要新建索引版本。
                     </p>
                     <div className="mt-5 flex gap-3">
@@ -387,8 +471,8 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                     </div>
                     <div className="mt-5 space-y-3">
                       {hits.map((hit) => (
-                        <article key={hit.id} className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-                          <div className="mb-2 flex items-center justify-between text-xs text-stone-500">
+                        <article key={hit.id} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                          <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                             <span className="truncate">{hit.source}</span>
                             <span>{typeof hit.score === 'number' ? hit.score.toFixed(4) : 'n/a'}</span>
                           </div>
@@ -404,7 +488,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                 <Panel>
                   <div className="max-w-2xl">
                     <h3 className="text-lg font-semibold text-gray-950">设置</h3>
-                    <dl className="mt-5 divide-y divide-stone-200 rounded-lg border border-stone-200">
+                    <dl className="mt-5 divide-y divide-gray-200 rounded-lg border border-gray-200">
                       <InfoRow label="嵌入模型" value={activeKb.embedding.model} />
                       <InfoRow label="Base URL" value={activeKb.embedding.base_url ?? '-'} />
                       <InfoRow label="端点" value={activeKb.embedding.embeddings_path ?? '-'} />
@@ -466,11 +550,11 @@ function KnowledgeListPanel({
 }) {
   if (collapsed) {
     return (
-      <section className="flex w-12 shrink-0 flex-col items-center border-r border-stone-200 bg-stone-50/70 py-3">
+      <section className="flex w-12 shrink-0 flex-col items-center border-r border-gray-200 bg-gray-50 py-3">
         <button className={iconButtonClassName} type="button" title="展开知识库列表" onClick={onExpand}>
           <PanelLeftOpen size={17} />
         </button>
-        <span className="mt-3 [writing-mode:vertical-rl] text-xs font-medium tracking-wide text-stone-500">
+        <span className="mt-3 [writing-mode:vertical-rl] text-xs font-medium tracking-wide text-gray-500">
           知识库
         </span>
       </section>
@@ -478,11 +562,13 @@ function KnowledgeListPanel({
   }
 
   return (
-    <section className="flex w-72 shrink-0 flex-col border-r border-stone-200 bg-stone-50/70">
+    <section className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-base font-semibold text-gray-950">知识库</h2>
-          <span className="rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-700">{totalCount}</span>
+          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            {totalCount}
+          </span>
         </div>
         <button className={iconButtonClassName} type="button" title="收起" onClick={onCollapse}>
           <PanelLeftClose size={17} />
@@ -491,7 +577,7 @@ function KnowledgeListPanel({
 
       <div className="px-4">
         <button
-          className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-700 text-sm font-medium text-white hover:bg-amber-800 disabled:bg-stone-300"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-medium text-white shadow-sm shadow-blue-950/10 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
           type="button"
           onClick={onCreate}
           disabled={!canCreate || busy}
@@ -500,9 +586,9 @@ function KnowledgeListPanel({
           新建知识库
         </button>
         <div className="relative mt-3">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
-            className="h-10 w-full rounded-lg border border-stone-200 bg-white pl-9 pr-3 text-sm outline-none placeholder:text-stone-500 focus:border-stone-400"
+            className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-50"
             value={search}
             onChange={(event) => onSearch(event.target.value)}
             placeholder="搜索知识库..."
@@ -515,23 +601,29 @@ function KnowledgeListPanel({
           <button
             key={item.id}
             className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left ${
-              item.id === activeId ? 'border-stone-200 bg-white shadow-sm' : 'border-transparent hover:bg-white'
+              item.id === activeId
+                ? 'border-blue-100 bg-white shadow-sm shadow-blue-950/5'
+                : 'border-transparent hover:bg-white'
             }`}
             type="button"
             onClick={() => onSelect(item)}
           >
-            <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            <span
+              className={`mt-1 h-2.5 w-2.5 rounded-full ${
+                item.status === 'ready' ? 'bg-emerald-500' : 'bg-gray-300'
+              }`}
+            />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2 font-medium text-gray-900">
-                <Star size={16} className="fill-amber-400 text-amber-500" />
+                <Database size={16} className="shrink-0 text-gray-500" />
                 <span className="truncate">{item.name}</span>
               </span>
-              <span className="mt-1 block text-xs text-stone-500">
+              <span className="mt-1 block text-xs text-gray-500">
                 {statusLabel(item.status)} · {item.documents.length} 个文档
               </span>
             </span>
             <span
-              className="rounded p-1 text-stone-400 opacity-0 hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100"
+              className="rounded p-1 text-gray-400 opacity-0 hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100"
               onClick={(event) => {
                 event.stopPropagation()
                 onDelete(item.id)
@@ -584,7 +676,7 @@ function CreatePanel({
             </select>
           </Field>
           {selectedEmbedding && (
-            <div className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
               创建后将固定使用 {selectedEmbedding.model}，维度 {selectedEmbedding.dimensions}。
             </div>
           )}
@@ -617,21 +709,21 @@ function FileListPanel({
 }) {
   if (collapsed) {
     return (
-      <aside className="flex w-12 shrink-0 flex-col items-center border-r border-stone-200 py-3">
+      <aside className="flex w-12 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-3">
         <button className={iconButtonClassName} type="button" title="展开文件列表" onClick={onToggleCollapsed}>
           <PanelLeftOpen size={16} />
         </button>
-        <span className="mt-3 [writing-mode:vertical-rl] text-xs font-medium tracking-wide text-stone-500">文件</span>
+        <span className="mt-3 [writing-mode:vertical-rl] text-xs font-medium tracking-wide text-gray-500">文件</span>
       </aside>
     )
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-stone-200">
-      <div className="flex h-12 items-center justify-between border-b border-stone-200 px-4">
+    <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-white">
+      <div className="flex h-12 items-center justify-between border-b border-gray-200 px-4">
         <div className="flex items-center gap-2">
           <span className="font-medium text-gray-900">文件</span>
-          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
+          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
             {activeKb.documents.length}
           </span>
         </div>
@@ -648,7 +740,7 @@ function FileListPanel({
       <div className="flex-1 overflow-y-auto p-3">
         {activeKb.documents.length === 0 ? (
           <button
-            className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-stone-300 p-3 text-left text-sm text-stone-600 hover:bg-stone-50"
+            className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-gray-300 p-3 text-left text-sm text-gray-600 hover:bg-blue-50"
             type="button"
             onClick={onUpload}
           >
@@ -659,16 +751,16 @@ function FileListPanel({
           activeKb.documents.map((doc) => (
             <button
               key={doc.id}
-              className={`flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left hover:bg-stone-50 ${
-                doc.id === selectedDocId ? 'bg-stone-100' : ''
+              className={`flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left hover:bg-blue-50 ${
+                doc.id === selectedDocId ? 'bg-blue-50 text-blue-900' : ''
               }`}
               type="button"
               onClick={() => onSelectDoc(doc.id)}
             >
-              <FileText size={18} className="mt-0.5 shrink-0 text-stone-600" />
+              <FileText size={18} className="mt-0.5 shrink-0 text-gray-600" />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-gray-900">{doc.name}</span>
-                <span className="mt-1 block text-xs text-stone-500">
+                <span className="mt-1 block text-xs text-gray-500">
                   {formatSize(doc.size_bytes)} · {formatTime(doc.created_at)}
                 </span>
               </span>
@@ -685,11 +777,11 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
     return (
       <div className="flex h-full min-h-[460px] items-center justify-center px-8 text-center">
         <div>
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-700">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
             <FileText size={24} />
           </div>
           <h3 className="mt-5 text-base font-semibold text-gray-950">请选择一个文件以预览</h3>
-          <p className="mt-2 max-w-sm text-sm leading-6 text-stone-600">从左侧列表选择任意文档，可在此处直接预览。</p>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-gray-600">从左侧列表选择任意文档，可在此处直接预览。</p>
         </div>
       </div>
     )
@@ -699,22 +791,22 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
     <Panel>
       <div className="mx-auto max-w-3xl">
         <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-stone-100 text-stone-700">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
             <FileText size={20} />
           </div>
           <div className="min-w-0">
             <h3 className="truncate text-lg font-semibold text-gray-950">{selectedDoc.name}</h3>
-            <p className="mt-0.5 text-xs text-stone-500">
+            <p className="mt-0.5 text-xs text-gray-500">
               {formatSize(selectedDoc.size_bytes)} · {formatTime(selectedDoc.created_at)}
             </p>
           </div>
         </div>
         {previewText ? (
-          <pre className="whitespace-pre-wrap rounded-lg border border-stone-200 bg-stone-50 p-4 font-sans text-sm leading-6 text-gray-800">
+          <pre className="whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-4 font-sans text-sm leading-6 text-gray-800">
             {previewText}
           </pre>
         ) : (
-          <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
             该文档已入库。当前版本只保存文档元数据和向量索引，刷新后不保留原文预览。
           </div>
         )}
@@ -723,8 +815,8 @@ function FilePreview({ selectedDoc, previewText }: { selectedDoc: KnowledgeDocum
   )
 }
 
-function Badge({ tone, icon, children }: { tone: 'amber' | 'green'; icon: ReactNode; children: ReactNode }) {
-  const toneClass = tone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+function Badge({ tone, icon, children }: { tone: 'green'; icon: ReactNode; children: ReactNode }) {
+  const toneClass = tone === 'green' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100' : ''
   return <span className={`inline-flex h-6 items-center gap-1 rounded-full px-2 text-xs font-medium ${toneClass}`}>{icon}{children}</span>
 }
 
@@ -732,7 +824,7 @@ function TabButton({ active, icon, children, onClick }: { active: boolean; icon:
   return (
     <button
       className={`flex h-10 items-center gap-1.5 border-b-2 text-sm font-medium ${
-        active ? 'border-amber-700 text-gray-950' : 'border-transparent text-stone-600 hover:text-gray-950'
+        active ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-600 hover:text-gray-950'
       }`}
       type="button"
       onClick={onClick}
@@ -750,7 +842,7 @@ function Panel({ children }: { children: ReactNode }) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-stone-700">{label}</span>
+      <span className="mb-1.5 block text-sm font-medium text-gray-700">{label}</span>
       {children}
     </label>
   )
@@ -759,7 +851,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-      <dt className="text-stone-500">{label}</dt>
+      <dt className="text-gray-500">{label}</dt>
       <dd className="truncate font-medium text-gray-900">{value}</dd>
     </div>
   )
@@ -791,11 +883,15 @@ function formatTime(value: string) {
   return date.toLocaleString()
 }
 
+function isPdfFile(file: File) {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
 const iconButtonClassName =
-  'inline-flex h-7 w-7 items-center justify-center rounded text-stone-500 hover:bg-stone-100 hover:text-stone-900'
+  'inline-flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-blue-50 hover:text-blue-700'
 
 const inputClassName =
-  'w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-stone-400 focus:border-stone-400 disabled:bg-stone-50'
+  'w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-50 disabled:bg-gray-50'
 
 const primaryButtonClassName =
-  'inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-gray-900 px-3.5 text-sm font-medium text-white disabled:bg-stone-200 disabled:text-stone-400'
+  'inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3.5 text-sm font-medium text-white shadow-sm shadow-blue-950/10 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400'

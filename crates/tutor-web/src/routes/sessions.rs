@@ -46,6 +46,7 @@ struct UpdateSessionRequest {
     capability: Option<String>,
     name: Option<String>,
     kb: Option<String>,
+    llm: Option<CreateLlmConfig>,
 }
 
 async fn create_session(
@@ -252,6 +253,18 @@ async fn update_session(
         }
     }
 
+    if let Some(llm) = req.llm {
+        let _ = pool.ensure_entry(&id).await;
+        let llm = Some(llm_config_from_request(llm));
+        if !pool.set_llm(&id, llm) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+    }
+
     if let Some(name) = req.name {
         let normalized = name.trim().to_string();
         let next_name = if normalized.is_empty() {
@@ -273,6 +286,18 @@ async fn update_session(
         Json(serde_json::json!({ "id": id, "updated": true })),
     )
         .into_response()
+}
+
+fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
+    LlmSessionConfig {
+        provider: config.provider,
+        model: config.model,
+        api_key: config.api_key.filter(|value| !value.trim().is_empty()),
+        base_url: config.base_url.filter(|value| !value.trim().is_empty()),
+        chat_path: config.chat_path.filter(|value| !value.trim().is_empty()),
+        budget_limit_usd: config.budget_limit_usd,
+        require_approval: config.require_approval.unwrap_or(false),
+    }
 }
 
 async fn delete_session(

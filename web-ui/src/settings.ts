@@ -1,5 +1,15 @@
-export type LlmProvider = 'anthropic' | 'deepseek' | 'openai'
+export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
+
+export interface LlmModelConfig {
+  id: string
+  name: string
+  provider: LlmProvider
+  model: string
+  apiKey: string
+  baseUrl: string
+  chatPath: string
+}
 
 export interface EmbeddingModelConfig {
   id: string
@@ -21,18 +31,22 @@ export interface LlmSettings {
   chatPath: string
   budgetLimitUsd: number
   requireApproval: boolean
+  llmConfigs: LlmModelConfig[]
+  activeLlmConfigId: string | null
   embeddingConfigs: EmbeddingModelConfig[]
   activeEmbeddingConfigId: string | null
 }
 
 export const defaultLlmSettings: LlmSettings = {
-  provider: 'deepseek',
+  provider: 'openai',
   model: 'deepseek-v4-flash',
   apiKey: '',
   baseUrl: 'https://api.deepseek.com',
   chatPath: '/chat/completions',
   budgetLimitUsd: 2,
   requireApproval: false,
+  llmConfigs: [],
+  activeLlmConfigId: null,
   embeddingConfigs: [],
   activeEmbeddingConfigId: null,
 }
@@ -43,16 +57,24 @@ export function loadLlmSettings(): LlmSettings {
 
   try {
     const parsed = JSON.parse(raw) as Partial<LlmSettings>
+    const llmConfigs = normalizeLlmConfigs(parsed.llmConfigs, parsed)
+    const activeLlmConfigId = normalizeActiveConfigId(parsed.activeLlmConfigId, llmConfigs)
+    const activeLlmConfig = llmConfigs.find((config) => config.id === activeLlmConfigId) ?? null
+    const embeddingConfigs = normalizeEmbeddingConfigs(parsed.embeddingConfigs)
+
     return {
       ...defaultLlmSettings,
       ...parsed,
+      ...(activeLlmConfig ? llmConfigToLegacyFields(activeLlmConfig) : {}),
+      provider: activeLlmConfig
+        ? activeLlmConfig.provider
+        : normalizeLlmProvider((parsed as { provider?: unknown }).provider),
       budgetLimitUsd: Number(parsed.budgetLimitUsd ?? defaultLlmSettings.budgetLimitUsd),
       requireApproval: Boolean(parsed.requireApproval),
-      embeddingConfigs: normalizeEmbeddingConfigs(parsed.embeddingConfigs),
-      activeEmbeddingConfigId: normalizeActiveEmbeddingConfigId(
-        parsed.activeEmbeddingConfigId,
-        parsed.embeddingConfigs,
-      ),
+      llmConfigs,
+      activeLlmConfigId,
+      embeddingConfigs,
+      activeEmbeddingConfigId: normalizeActiveConfigId(parsed.activeEmbeddingConfigId, embeddingConfigs),
     }
   } catch {
     return defaultLlmSettings
@@ -64,14 +86,32 @@ export function saveLlmSettings(settings: LlmSettings) {
 }
 
 export function settingsForSession(settings: LlmSettings) {
+  const config = activeLlmConfig(settings)
   return {
-    provider: settings.provider,
-    model: settings.model.trim(),
-    api_key: settings.apiKey.trim(),
-    base_url: settings.baseUrl.trim() || null,
-    chat_path: settings.chatPath.trim() || null,
+    provider: config?.provider ?? settings.provider,
+    model: (config?.model ?? settings.model).trim(),
+    api_key: (config?.apiKey ?? settings.apiKey).trim(),
+    base_url: (config?.baseUrl ?? settings.baseUrl).trim() || null,
+    chat_path: (config?.chatPath ?? settings.chatPath).trim() || null,
     budget_limit_usd: settings.budgetLimitUsd,
     require_approval: settings.requireApproval,
+  }
+}
+
+export function activeLlmConfig(settings: LlmSettings): LlmModelConfig | null {
+  return settings.llmConfigs.find((config) => config.id === settings.activeLlmConfigId) ?? null
+}
+
+export function createLlmConfig(provider: LlmProvider = 'openai'): LlmModelConfig {
+  const preset = llmProviderPreset(provider)
+  return {
+    id: crypto.randomUUID(),
+    name: preset.label,
+    provider,
+    model: preset.model,
+    apiKey: '',
+    baseUrl: preset.baseUrl,
+    chatPath: preset.chatPath,
   }
 }
 
@@ -105,6 +145,71 @@ export function embeddingForSession(config: EmbeddingModelConfig) {
   }
 }
 
+export function llmProviderPreset(provider: LlmProvider) {
+  if (provider === 'anthropic') {
+    return {
+      label: 'Anthropic',
+      model: 'claude-haiku-4-5-20251001',
+      baseUrl: 'https://api.anthropic.com',
+      chatPath: '',
+    }
+  }
+
+  return {
+    label: 'OpenAI-compatible',
+    model: 'gpt-4o-mini',
+    baseUrl: 'https://api.openai.com',
+    chatPath: '/v1/chat/completions',
+  }
+}
+
+function normalizeLlmConfigs(value: unknown, legacy: Partial<LlmSettings>): LlmModelConfig[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeLlmConfig(item))
+  }
+
+  if (legacy.model || legacy.apiKey || legacy.provider || legacy.baseUrl || legacy.chatPath) {
+    const legacyProvider = legacy.provider as unknown
+    const provider = normalizeLlmProvider(legacyProvider)
+    const legacyPresetLabel =
+      legacyProvider === 'deepseek' ? 'DeepSeek' : llmProviderPreset(provider).label
+
+    return [
+      {
+        id: crypto.randomUUID(),
+        name: legacyPresetLabel,
+        provider,
+        model: typeof legacy.model === 'string' ? legacy.model : defaultLlmSettings.model,
+        apiKey: typeof legacy.apiKey === 'string' ? legacy.apiKey : '',
+        baseUrl: typeof legacy.baseUrl === 'string' ? legacy.baseUrl : defaultLlmSettings.baseUrl,
+        chatPath: typeof legacy.chatPath === 'string' ? legacy.chatPath : defaultLlmSettings.chatPath,
+      },
+    ]
+  }
+
+  return []
+}
+
+function normalizeLlmConfig(value: unknown): LlmModelConfig {
+  const config = value as Partial<LlmModelConfig>
+  const provider = normalizeLlmProvider(config.provider)
+  const preset = llmProviderPreset(provider)
+  return {
+    id: typeof config.id === 'string' && config.id ? config.id : crypto.randomUUID(),
+    name: typeof config.name === 'string' && config.name ? config.name : preset.label,
+    provider,
+    model: typeof config.model === 'string' ? config.model : preset.model,
+    apiKey: typeof config.apiKey === 'string' ? config.apiKey : '',
+    baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : preset.baseUrl,
+    chatPath: typeof config.chatPath === 'string' ? config.chatPath : preset.chatPath,
+  }
+}
+
+function normalizeLlmProvider(value: unknown): LlmProvider {
+  if (value === 'anthropic') return 'anthropic'
+  return 'openai'
+}
+
 function normalizeEmbeddingConfigs(value: unknown): EmbeddingModelConfig[] {
   if (!Array.isArray(value)) return []
 
@@ -124,8 +229,17 @@ function normalizeEmbeddingConfigs(value: unknown): EmbeddingModelConfig[] {
   })
 }
 
-function normalizeActiveEmbeddingConfigId(value: unknown, configs: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = normalizeEmbeddingConfigs(configs)
-  return normalized.some((config) => config.id === value) ? value : null
+function normalizeActiveConfigId<T extends { id: string }>(value: unknown, configs: T[]): string | null {
+  if (typeof value !== 'string') return configs[0]?.id ?? null
+  return configs.some((config) => config.id === value) ? value : configs[0]?.id ?? null
+}
+
+function llmConfigToLegacyFields(config: LlmModelConfig) {
+  return {
+    provider: config.provider,
+    model: config.model,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl,
+    chatPath: config.chatPath,
+  }
 }
