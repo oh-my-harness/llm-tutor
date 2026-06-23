@@ -43,6 +43,11 @@
   - Actual: `llm-harness-runtime` still depends on the older adapter revision, so `llm-tutor` cannot independently bump `llm_adapter` without ending up with two incompatible `Provider` traits in the dependency graph.
   - Suggestion: update `llm-harness-runtime` to the adapter revision that includes embedding support, then optionally re-export embedding traits/types from the runtime facade.
 
+- **Structured-output generation still needs app-level boilerplate**
+  - Expected: product flows like quiz generation can ask the framework for typed JSON output with provider-aware schema support, retries, and validation error reporting.
+  - Actual: `llm-tutor` has to call `llm_adapter::ResponseFormat` directly, extract JSON from text, deserialize it, and implement validation/retry policy in product code.
+  - Suggestion: add a runtime or agent helper such as `generate_structured<T>(prompt, schema/options)` that uses provider capabilities, validates typed output, and returns structured errors suitable for UI display.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** chains ReplanHook and HumanApprovalWrapper cleanly — allows layering domain-specific + cross-cutting hooks
@@ -61,6 +66,7 @@
 | Runtime adapter pin lacks embedding support | Downstream RAG work cannot use new adapter embedding APIs while sharing harness provider traits | High |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
 | No shared harness builder in the public API | Every call site repeats `new_in_memory`, `subscribe`, event loop | Low |
+| No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 
 ## Proposed v0.3 Changes
 
@@ -70,3 +76,4 @@
 4. Re-export common session repo option and metadata types from the facade/prelude
 5. Add `Session::set_name` or metadata updates for `SessionInfo`
 6. Align `llm-harness-runtime` with the adapter revision that includes `EmbeddingProvider`
+7. Add a typed structured-output helper for provider-aware JSON/schema generation

@@ -249,8 +249,10 @@ V1 UI should stay simple:
 
 ### Phase 5: Runtime Feedback
 
-- [ ] If quiz generation needs better structured-output support, record feedback in `docs/framework-feedback.md`.
-- [ ] If runtime has suitable session custom entries, use them for quiz generation trace instead of parallel trace storage.
+- [x] If quiz generation needs better structured-output support, record feedback in `docs/framework-feedback.md`.
+- [x] If runtime has suitable session custom entries, use them for quiz generation trace instead of parallel trace storage.
+
+Note: V1 does not introduce separate quiz trace persistence. Future quiz generation trace should reuse runtime session/custom entries instead of adding another product-specific trace store.
 
 ## 8. Acceptance Criteria
 
