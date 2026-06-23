@@ -165,6 +165,65 @@ async fn audit_captures_deep_solve_state_transitions() {
 }
 
 #[tokio::test]
+async fn deep_solve_emits_structured_ux_events() {
+    let sink = Arc::new(TraceRecorder::default());
+    let plan_json =
+        r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;
+    let responses = vec![
+        MockResponse::text(plan_json),
+        MockResponse::text("FINISH: the answer is 4"),
+        MockResponse::text("The final answer is 4."),
+    ];
+    let router = make_router(responses, make_governance(None)).with_event_sink(sink.clone());
+
+    router
+        .run(Capability::DeepSolve, "what is 2+2?")
+        .await
+        .unwrap();
+
+    let events = sink.events();
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "deep_solve_stage_start"
+                && data["capability"] == "deep_solve"
+                && data["stage"] == "plan"
+        }),
+        "missing plan stage start: {events:?}"
+    );
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "deep_solve_plan"
+                && data["analysis"] == "simple addition"
+                && data["steps"]
+                    .as_array()
+                    .is_some_and(|steps| steps.len() == 1)
+        }),
+        "missing structured plan: {events:?}"
+    );
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "deep_solve_step_done"
+                && data["stage"] == "solve"
+                && data["step_id"] == "s1"
+                && data["summary"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("4"))
+        }),
+        "missing step done event: {events:?}"
+    );
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "deep_solve_final"
+                && data["stage"] == "synthesize"
+                && data["summary"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("final answer"))
+        }),
+        "missing final event: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn code_exec_runs_tool_and_explains_result() {
     let dir = TempDir::new().unwrap();
     let responses = vec![

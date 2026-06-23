@@ -1,6 +1,7 @@
 pub mod capability;
 pub mod chat;
 pub mod code_exec;
+pub mod deep_solve_events;
 pub mod error;
 pub mod event_sink;
 pub mod governance;

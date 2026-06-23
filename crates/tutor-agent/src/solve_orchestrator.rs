@@ -5,6 +5,7 @@ use llm_harness_runtime::audit::AuditEventType;
 use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
 use llm_harness_types::ExecutionEnv;
 
+use crate::deep_solve_events as deep_events;
 use crate::error::{Result, TutorError};
 use crate::event_sink::{SharedEventSink, emit_trace};
 use crate::governance::GovernanceConfig;
@@ -87,6 +88,12 @@ impl SolveOrchestrator {
     }
 
     async fn run_pre_retrieve(&mut self, kb: &str) -> Result<()> {
+        deep_events::stage_start(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Retrieve,
+            "Retrieve knowledge",
+        )
+        .await;
         emit_trace(
             &self.event_sink,
             "phase_start",
@@ -110,6 +117,13 @@ impl SolveOrchestrator {
             serde_json::json!({ "capability": "deep_solve", "phase": "pre_retrieve" }),
         )
         .await;
+        deep_events::stage_done(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Retrieve,
+            "Retrieve knowledge",
+            "Knowledge summary prepared",
+        )
+        .await;
 
         Ok(())
     }
@@ -124,6 +138,12 @@ impl SolveOrchestrator {
             &self.governance.audit,
             AuditEventType::StateTransition,
             serde_json::json!({"phase": "plan"}),
+        )
+        .await;
+        deep_events::stage_start(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Plan,
+            "Create solve plan",
         )
         .await;
         emit_trace(
@@ -220,6 +240,7 @@ impl SolveOrchestrator {
         let plan: Plan = serde_json::from_str(json_str)
             .map_err(|e| TutorError::Internal(format!("plan parse error: {e}\nraw: {raw}")))?;
 
+        deep_events::plan(&self.event_sink, &plan).await;
         self.context.lock().unwrap().plan = Some(plan);
         let step_count = self
             .context
@@ -236,6 +257,13 @@ impl SolveOrchestrator {
                 "phase": "plan",
                 "step_count": step_count,
             }),
+        )
+        .await;
+        deep_events::stage_done(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Plan,
+            "Create solve plan",
+            format!("Generated {step_count} solve steps"),
         )
         .await;
         Ok(())
@@ -272,6 +300,12 @@ impl SolveOrchestrator {
             serde_json::json!({"phase": "solve_steps", "step_count": steps.len()}),
         )
         .await;
+        deep_events::stage_start(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Solve,
+            "Solve step by step",
+        )
+        .await;
         emit_trace(
             &self.event_sink,
             "phase_start",
@@ -299,6 +333,7 @@ impl SolveOrchestrator {
         };
 
         for step in &steps {
+            deep_events::step_start(&self.event_sink, &step.id, &step.goal).await;
             emit_trace(
                 &self.event_sink,
                 "phase_start",
@@ -379,6 +414,7 @@ impl SolveOrchestrator {
                             "tool_call",
                             serde_json::json!({
                                 "capability": "deep_solve",
+                                "stage": "solve",
                                 "phase": "solve_step",
                                 "step_id": step.id,
                                 "tool_use_id": tool_use_id,
@@ -397,6 +433,7 @@ impl SolveOrchestrator {
                             "tool_result",
                             serde_json::json!({
                                 "capability": "deep_solve",
+                                "stage": "solve",
                                 "phase": "solve_step",
                                 "step_id": step.id,
                                 "tool_use_id": tool_use_id,
@@ -424,6 +461,7 @@ impl SolveOrchestrator {
                     "replan",
                     serde_json::json!({
                         "capability": "deep_solve",
+                        "stage": "solve",
                         "step_id": step.id,
                         "reason": step_reason,
                     }),
@@ -438,14 +476,16 @@ impl SolveOrchestrator {
                 .collect::<Vec<_>>()
                 .join("\n");
 
+            let final_step_text = if finish_text.is_empty() {
+                raw
+            } else {
+                finish_text
+            };
             self.context.lock().unwrap().step_results.push(StepResult {
                 step_id: step.id.clone(),
-                finish_text: if finish_text.is_empty() {
-                    raw
-                } else {
-                    finish_text
-                },
+                finish_text: final_step_text.clone(),
             });
+            deep_events::step_done(&self.event_sink, &step.id, &step.goal, final_step_text).await;
             emit_trace(
                 &self.event_sink,
                 "phase_end",
@@ -466,6 +506,13 @@ impl SolveOrchestrator {
             }),
         )
         .await;
+        deep_events::stage_done(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Solve,
+            "Solve step by step",
+            format!("Completed {} steps", steps.len()),
+        )
+        .await;
         Ok(())
     }
 
@@ -479,6 +526,12 @@ impl SolveOrchestrator {
             &self.governance.audit,
             AuditEventType::StateTransition,
             serde_json::json!({"phase": "synthesize"}),
+        )
+        .await;
+        deep_events::stage_start(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Synthesize,
+            "Synthesize final answer",
         )
         .await;
         emit_trace(
@@ -546,11 +599,21 @@ impl SolveOrchestrator {
         )
         .await;
 
-        Ok(if last_text.is_empty() {
+        let answer = if last_text.is_empty() {
             "No synthesis generated.".into()
         } else {
             last_text
-        })
+        };
+        deep_events::final_answer(&self.event_sink, &answer).await;
+        deep_events::stage_done(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Synthesize,
+            "Synthesize final answer",
+            "Final explanation generated",
+        )
+        .await;
+
+        Ok(answer)
     }
 }
 
