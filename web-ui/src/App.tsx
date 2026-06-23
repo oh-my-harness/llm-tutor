@@ -90,7 +90,7 @@ export default function App() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [traceCollapsed, setTraceCollapsed] = useState(false)
+  const [traceCollapsed, setTraceCollapsed] = useState(true)
 
   const pushStatus = useCallback((status: AgentStatus) => {
     if (status.kind === 'idle') return
@@ -531,7 +531,7 @@ export default function App() {
               </main>
               {!chatIsEmpty && (
                 <aside
-                  className={`shrink-0 border-l bg-white transition-[width] duration-200 ${
+                  className={`shrink-0 bg-white transition-[width] duration-200 ${
                     traceCollapsed ? 'w-12' : 'w-72'
                   }`}
                 >
