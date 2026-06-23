@@ -84,6 +84,7 @@ interface UploadProgressItem {
   progress: number
   status: UploadStatus
   message?: string
+  error?: string
 }
 
 export function KnowledgePage({ settings, onChanged }: Props) {
@@ -269,11 +270,24 @@ export function KnowledgePage({ settings, onChanged }: Props) {
 
       for (const file of selectedFiles) {
         const uploadId = uploadProgressId(file)
-        const data = await uploadKnowledgeFile(activeKb.id, file, (next) => {
+        let data: { knowledge_base: KnowledgeBaseItem; chunks?: number }
+        try {
+          data = await uploadKnowledgeFile(activeKb.id, file, (next) => {
+            setUploadProgress((prev) =>
+              prev.map((item) => (item.id === uploadId ? { ...item, ...next, error: undefined } : item)),
+            )
+          })
+        } catch (err) {
+          const message = uploadErrorMessage(err)
           setUploadProgress((prev) =>
-            prev.map((item) => (item.id === uploadId ? { ...item, ...next } : item)),
+            prev.map((item) =>
+              item.id === uploadId
+                ? { ...item, status: 'error', message: '上传失败', error: message }
+                : item,
+            ),
           )
-        })
+          throw new Error(`${file.name}: ${message}`)
+        }
         latestKb = data.knowledge_base as KnowledgeBaseItem
         latestDoc = latestKb.documents[0] ?? null
         if (latestDoc && !isPdfFile(file)) {
@@ -303,7 +317,9 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       const message = err instanceof Error ? err.message : String(err)
       setUploadProgress((prev) =>
         prev.map((item) =>
-          item.status === 'done' ? item : { ...item, status: 'error', message },
+          item.status === 'done' || item.status === 'error'
+            ? item
+            : { ...item, status: 'error', message: '未上传', error: message },
         ),
       )
       setStatus(err instanceof Error ? err.message : String(err))
@@ -1014,6 +1030,7 @@ function FilePreview({
 }
 
 function UploadProgressRow({ item }: { item: UploadProgressItem }) {
+  const error = item.status === 'error' ? item.error || item.message : null
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
       <div className="flex items-center gap-2 text-sm text-gray-700">
@@ -1030,11 +1047,16 @@ function UploadProgressRow({ item }: { item: UploadProgressItem }) {
         />
       </div>
       <div className="mt-1.5 flex items-center justify-between text-xs">
-        <span className={item.status === 'error' ? 'text-red-600' : 'text-gray-500'}>
+        <span className={item.status === 'error' ? 'text-red-600' : 'text-gray-500'} title={item.message}>
           {item.message ?? uploadStatusLabel(item.status)}
         </span>
         <span className="tabular-nums text-gray-500">{Math.round(item.progress)}%</span>
       </div>
+      {error && (
+        <div className="mt-2 rounded-md bg-red-50 px-2.5 py-2 text-xs leading-5 text-red-700" title={error}>
+          {error}
+        </div>
+      )}
     </div>
   )
 }
@@ -1090,6 +1112,7 @@ function uploadKnowledgeFile(
     const xhr = new XMLHttpRequest()
     const form = new FormData()
     form.append('file', file)
+    xhr.timeout = 120_000
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) {
@@ -1113,12 +1136,12 @@ function uploadKnowledgeFile(
       try {
         data = JSON.parse(xhr.responseText || '{}')
       } catch {
-        reject(new Error('upload response is not valid JSON'))
+        reject(new Error(`上传响应不是有效 JSON：${truncateText(xhr.responseText || 'empty response', 180)}`))
         return
       }
 
       if (xhr.status < 200 || xhr.status >= 300 || !data.job?.id) {
-        reject(new Error(data.error || `HTTP ${xhr.status}`))
+        reject(new Error(data.error || xhr.statusText || `HTTP ${xhr.status}`))
         return
       }
 
@@ -1136,8 +1159,11 @@ function uploadKnowledgeFile(
         .catch(reject)
     }
 
-    xhr.onerror = () => reject(new Error('upload failed'))
-    xhr.onabort = () => reject(new Error('upload aborted'))
+    xhr.onerror = () => {
+      reject(new Error('上传请求失败：网络连接中断或后端服务未响应，请检查 tutor-web 是否仍在运行，并查看服务端日志。'))
+    }
+    xhr.ontimeout = () => reject(new Error('上传请求超时：后端在 120 秒内没有返回入库任务。'))
+    xhr.onabort = () => reject(new Error('上传已取消。'))
     xhr.open('POST', `/api/knowledge-bases/${encodeURIComponent(kbId)}/documents/upload`)
     xhr.send(form)
   })
@@ -1155,6 +1181,16 @@ function errorMessage(data: Record<string, unknown>, status: number) {
   return typeof data.error === 'string' ? data.error : `HTTP ${status}`
 }
 
+function uploadErrorMessage(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.trim() || '上传失败：未返回错误详情'
+}
+
+function truncateText(text: string, maxLength: number) {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized
+}
+
 async function pollIngestionJob(
   jobId: string | undefined,
   onProgress?: (job: IngestionJob) => void,
@@ -1162,8 +1198,8 @@ async function pollIngestionJob(
   if (!jobId) throw new Error('ingestion job was not created')
   for (;;) {
     const res = await fetch(`/api/ingest-jobs/${encodeURIComponent(jobId)}`)
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(errorMessage(data, res.status))
     const job = data.job as IngestionJob
     onProgress?.(job)
     if (job.status === 'done') return job
