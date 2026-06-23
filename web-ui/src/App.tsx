@@ -595,6 +595,15 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
     }
   }
 
+  if (kind === 'rag_citations') {
+    const details = payload.details as { hits?: unknown } | undefined
+    return {
+      kind: 'tool',
+      label: 'Sources attached',
+      detail: typeof details?.hits === 'number' ? `${details.hits} citations` : capability,
+    }
+  }
+
   if (kind === 'replan') {
     return {
       kind: 'thinking',
@@ -615,7 +624,9 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
 }
 
 function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
-  if (payload.kind !== 'tool_result' || payload.tool !== 'rag_search') return []
+  const isRagToolResult = payload.kind === 'tool_result' && payload.tool === 'rag_search'
+  const isRagCitationEvent = payload.kind === 'rag_citations'
+  if (!isRagToolResult && !isRagCitationEvent) return []
   const details = payload.details
   if (!details || typeof details !== 'object') return []
   const sources = (details as { sources?: unknown }).sources

@@ -13,6 +13,7 @@ use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use serde::Deserialize;
+use tutor_rag::KnowledgeRetriever;
 use tutor_agent::event_sink::SharedEventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
@@ -184,6 +185,7 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
 
     match result {
         Ok(answer) => {
+            emit_rag_citations(&entry, &content).await;
             let _ = entry.stream.content(&answer, false).await;
             let history_len = pool.history_len(&entry.id).await;
             let _ = entry
@@ -210,6 +212,50 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
+}
+
+async fn emit_rag_citations(entry: &SessionEntry, query: &str) {
+    let (Some(kb), Some(embedding)) = (entry.kb.as_ref(), entry.embedding.clone()) else {
+        return;
+    };
+    let retriever = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), embedding);
+    let Ok(hits) = retriever.search(Some(kb), query, 5).await else {
+        return;
+    };
+    if hits.is_empty() {
+        return;
+    }
+    let sources = hits
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| {
+            serde_json::json!({
+                "index": index + 1,
+                "id": hit.id,
+                "kb": hit.kb,
+                "source": hit.source,
+                "text": hit.text,
+                "score": hit.score,
+            })
+        })
+        .collect::<Vec<_>>();
+    let _ = entry
+        .stream
+        .trace(
+            "rag_citations",
+            serde_json::json!({
+                "capability": entry.capability,
+                "tool": "rag_search",
+                "details": {
+                    "query": query,
+                    "kb": kb,
+                    "hits": sources.len(),
+                    "configured": true,
+                    "sources": sources,
+                }
+            }),
+        )
+        .await;
 }
 
 fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Result<LlmConfig> {
