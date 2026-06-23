@@ -58,6 +58,22 @@ interface SearchHit {
   score?: number | null
 }
 
+interface SourceChunk {
+  id: string
+  text: string
+}
+
+interface IngestionJob {
+  id: string
+  status: 'queued' | 'running' | 'done' | 'error'
+  stage: string
+  message: string
+  progress: number
+  chunks?: number | null
+  knowledge_base?: KnowledgeBaseItem | null
+  error?: string | null
+}
+
 type TabKey = 'files' | 'upload' | 'indexes' | 'settings'
 type UploadStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error'
 
@@ -88,6 +104,8 @@ export function KnowledgePage({ settings, onChanged }: Props) {
   const [newKbName, setNewKbName] = useState('')
   const [newKbEmbeddingId, setNewKbEmbeddingId] = useState(settings.activeEmbeddingConfigId ?? '')
   const [previewTextByDocId, setPreviewTextByDocId] = useState<Record<string, string>>({})
+  const [chunksByDocId, setChunksByDocId] = useState<Record<string, SourceChunk[]>>({})
+  const [chunkLoadingDocId, setChunkLoadingDocId] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [uploadProgress, setUploadProgress] = useState<UploadProgressItem[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -149,6 +167,11 @@ export function KnowledgePage({ settings, onChanged }: Props) {
     }
   }
 
+  const applyUpdatedKnowledgeBase = (updated: KnowledgeBaseItem) => {
+    setKnowledgeBases((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    onChanged?.()
+  }
+
   const createKnowledgeBase = async () => {
     if (!selectedNewEmbedding || busy) return
     setBusy(true)
@@ -185,7 +208,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       const res = await fetch(`/api/knowledge-bases/${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 404) {
         const data = await safeJson(res)
-        throw new Error(data.error || `HTTP ${res.status}`)
+        throw new Error(errorMessage(data, res.status))
       }
       setKnowledgeBases((prev) => prev.filter((item) => item.id !== id))
       if (activeKbId === id) {
@@ -204,7 +227,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
   const ingest = async () => {
     if (!activeKb || !text.trim() || busy) return
     setBusy(true)
-    setStatus('正在入库...')
+    setStatus('正在创建入库任务...')
     try {
       const res = await fetch(`/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents`, {
         method: 'POST',
@@ -213,17 +236,20 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      const updated = data.knowledge_base as KnowledgeBaseItem
+      const job = await pollIngestionJob(data.job?.id, (next) => {
+        setStatus(`${stageLabel(next.stage)} · ${next.message}`)
+      })
+      if (!job.knowledge_base) throw new Error('ingestion finished without knowledge base')
+      const updated = job.knowledge_base
       const doc = updated.documents[0]
-      setKnowledgeBases((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      applyUpdatedKnowledgeBase(updated)
       if (doc) {
         setSelectedDocId(doc.id)
         setPreviewTextByDocId((prev) => ({ ...prev, [doc.id]: text }))
       }
       setTab('files')
       setText('')
-      setStatus(`已入库 ${data.chunks ?? 0} 个片段`)
-      onChanged?.()
+      setStatus(`已入库 ${job.chunks ?? 0} 个片段`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -263,7 +289,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       }
 
       if (latestKb) {
-        setKnowledgeBases((prev) => prev.map((item) => (item.id === latestKb?.id ? latestKb! : item)))
+        applyUpdatedKnowledgeBase(latestKb)
       }
       if (latestDoc) {
         setSelectedDocId(latestDoc.id)
@@ -273,7 +299,6 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       if (fileInputRef.current) fileInputRef.current.value = ''
       setTab('files')
       setStatus('附件已入库')
-      onChanged?.()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setUploadProgress((prev) =>
@@ -305,6 +330,73 @@ export function KnowledgePage({ settings, onChanged }: Props) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const deleteDocument = async (documentId: string) => {
+    if (!activeKb || busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(
+        `/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents/${encodeURIComponent(documentId)}`,
+        { method: 'DELETE' },
+      )
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      if (data.knowledge_base) {
+        applyUpdatedKnowledgeBase(data.knowledge_base as unknown as KnowledgeBaseItem)
+      } else {
+        await loadKnowledgeBases()
+      }
+      setSelectedDocId((current) => (current === documentId ? null : current))
+      setPreviewTextByDocId((prev) => omitKey(prev, documentId))
+      setChunksByDocId((prev) => omitKey(prev, documentId))
+      setStatus('文档已删除')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const reindexDocument = async (documentId: string) => {
+    if (!activeKb || busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(
+        `/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents/${encodeURIComponent(documentId)}/reindex`,
+        { method: 'POST' },
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const job = await pollIngestionJob(data.job?.id, (next) => {
+        setStatus(`${stageLabel(next.stage)} · ${next.message}`)
+      })
+      if (job.knowledge_base) applyUpdatedKnowledgeBase(job.knowledge_base)
+      setChunksByDocId((prev) => omitKey(prev, documentId))
+      setStatus(`已重建 ${job.chunks ?? 0} 个片段`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const loadDocumentChunks = async (documentId: string) => {
+    if (!activeKb || busy) return
+    setChunkLoadingDocId(documentId)
+    try {
+      const res = await fetch(
+        `/api/knowledge-bases/${encodeURIComponent(activeKb.id)}/documents/${encodeURIComponent(documentId)}/chunks`,
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setChunksByDocId((prev) => ({ ...prev, [documentId]: data.chunks ?? [] }))
+      setStatus(`已加载 ${(data.chunks ?? []).length} 个片段`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setChunkLoadingDocId(null)
     }
   }
 
@@ -396,6 +488,8 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                 onUpload={() => setTab('upload')}
                 onReload={loadKnowledgeBases}
                 onToggleCollapsed={() => setFileListCollapsed((value) => !value)}
+                onDeleteDoc={deleteDocument}
+                onReindexDoc={reindexDocument}
               />
             )}
             <section className="min-w-0 flex-1 overflow-y-auto">
@@ -529,6 +623,9 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                   kbId={activeKb.id}
                   selectedDoc={selectedDoc}
                   previewText={selectedPreviewText}
+                  chunks={selectedDoc ? chunksByDocId[selectedDoc.id] : undefined}
+                  chunksLoading={selectedDoc ? chunkLoadingDocId === selectedDoc.id : false}
+                  onLoadChunks={selectedDoc ? () => loadDocumentChunks(selectedDoc.id) : undefined}
                 />
               )}
             </section>
@@ -729,6 +826,8 @@ function FileListPanel({
   onUpload,
   onReload,
   onToggleCollapsed,
+  onDeleteDoc,
+  onReindexDoc,
 }: {
   activeKb: KnowledgeBaseItem
   selectedDocId: string | null
@@ -737,6 +836,8 @@ function FileListPanel({
   onUpload: () => void
   onReload: () => void
   onToggleCollapsed: () => void
+  onDeleteDoc: (id: string) => void
+  onReindexDoc: (id: string) => void
 }) {
   if (collapsed) {
     return (
@@ -782,17 +883,39 @@ function FileListPanel({
           activeKb.documents.map((doc) => (
             <button
               key={doc.id}
-              className={`flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left hover:bg-blue-50 ${
+              className={`group flex w-full items-start gap-2.5 rounded-lg p-2.5 text-left hover:bg-blue-50 ${
                 doc.id === selectedDocId ? 'bg-blue-50 text-blue-900' : ''
               }`}
               type="button"
               onClick={() => onSelectDoc(doc.id)}
             >
               <FileText size={18} className="mt-0.5 shrink-0 text-gray-600" />
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-gray-900">{doc.name}</span>
                 <span className="mt-1 block text-xs text-gray-500">
-                  {formatSize(doc.size_bytes)} · {formatTime(doc.created_at)}
+                  {formatSize(doc.size_bytes)} · {doc.chunks} chunks · {formatTime(doc.created_at)}
+                </span>
+              </span>
+              <span className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100">
+                <span
+                  className="rounded p-1 text-gray-400 hover:bg-blue-100 hover:text-blue-700"
+                  title="重建索引"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onReindexDoc(doc.id)
+                  }}
+                >
+                  <RefreshCw size={15} />
+                </span>
+                <span
+                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  title="删除文档"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDeleteDoc(doc.id)
+                  }}
+                >
+                  <Trash2 size={15} />
                 </span>
               </span>
             </button>
@@ -807,10 +930,16 @@ function FilePreview({
   kbId,
   selectedDoc,
   previewText,
+  chunks,
+  chunksLoading,
+  onLoadChunks,
 }: {
   kbId: string
   selectedDoc: KnowledgeDocument | null
   previewText?: string
+  chunks?: SourceChunk[]
+  chunksLoading?: boolean
+  onLoadChunks?: () => void
 }) {
   if (!selectedDoc) {
     return (
@@ -836,10 +965,32 @@ function FilePreview({
           <div className="min-w-0">
             <h3 className="truncate text-lg font-semibold text-gray-950">{selectedDoc.name}</h3>
             <p className="mt-0.5 text-xs text-gray-500">
-              {formatSize(selectedDoc.size_bytes)} · {formatTime(selectedDoc.created_at)}
+              {formatSize(selectedDoc.size_bytes)} · {selectedDoc.chunks} chunks · {formatTime(selectedDoc.created_at)}
             </p>
           </div>
+          <button
+            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-60"
+            type="button"
+            onClick={onLoadChunks}
+            disabled={!onLoadChunks || chunksLoading}
+          >
+            <Layers size={15} />
+            {chunksLoading ? '加载中' : '查看片段'}
+          </button>
         </div>
+        {chunks && (
+          <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+            <div className="mb-2 text-xs font-medium text-blue-800">索引片段 · {chunks.length}</div>
+            <div className="max-h-72 space-y-2 overflow-y-auto">
+              {chunks.map((chunk, index) => (
+                <article key={chunk.id} className="rounded-md border border-blue-100 bg-white p-3">
+                  <div className="mb-1 text-xs font-medium text-gray-500">Chunk {index + 1}</div>
+                  <p className="text-sm leading-6 text-gray-700">{chunk.text}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
         {isPdfDocument(selectedDoc) && selectedDoc.file_path ? (
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             <iframe
@@ -945,11 +1096,11 @@ function uploadKnowledgeFile(
         onProgress({ status: 'uploading', progress: 15, message: '正在上传...' })
         return
       }
-      const progress = Math.min(95, Math.round((event.loaded / event.total) * 100))
+      const progress = Math.min(35, Math.round((event.loaded / event.total) * 35))
       onProgress({
-        status: progress >= 95 ? 'processing' : 'uploading',
+        status: progress >= 35 ? 'processing' : 'uploading',
         progress,
-        message: progress >= 95 ? '正在解析并写入索引...' : '正在上传...',
+        message: progress >= 35 ? '等待后端处理...' : '正在上传...',
       })
     }
 
@@ -958,7 +1109,7 @@ function uploadKnowledgeFile(
     }
 
     xhr.onload = () => {
-      let data: { knowledge_base?: KnowledgeBaseItem; chunks?: number; error?: string } = {}
+      let data: { job?: IngestionJob; error?: string } = {}
       try {
         data = JSON.parse(xhr.responseText || '{}')
       } catch {
@@ -966,12 +1117,23 @@ function uploadKnowledgeFile(
         return
       }
 
-      if (xhr.status < 200 || xhr.status >= 300 || !data.knowledge_base) {
+      if (xhr.status < 200 || xhr.status >= 300 || !data.job?.id) {
         reject(new Error(data.error || `HTTP ${xhr.status}`))
         return
       }
 
-      resolve({ knowledge_base: data.knowledge_base, chunks: data.chunks })
+      pollIngestionJob(data.job.id, (job) => {
+        onProgress({
+          status: job.status === 'error' ? 'error' : job.status === 'done' ? 'done' : 'processing',
+          progress: Math.max(35, job.progress),
+          message: `${stageLabel(job.stage)} · ${job.message}`,
+        })
+      })
+        .then((job) => {
+          if (!job.knowledge_base) throw new Error('ingestion finished without knowledge base')
+          resolve({ knowledge_base: job.knowledge_base, chunks: job.chunks ?? undefined })
+        })
+        .catch(reject)
     }
 
     xhr.onerror = () => reject(new Error('upload failed'))
@@ -981,12 +1143,58 @@ function uploadKnowledgeFile(
   })
 }
 
-async function safeJson(res: Response): Promise<Record<string, string>> {
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
   try {
     return await res.json()
   } catch {
     return {}
   }
+}
+
+function errorMessage(data: Record<string, unknown>, status: number) {
+  return typeof data.error === 'string' ? data.error : `HTTP ${status}`
+}
+
+async function pollIngestionJob(
+  jobId: string | undefined,
+  onProgress?: (job: IngestionJob) => void,
+): Promise<IngestionJob> {
+  if (!jobId) throw new Error('ingestion job was not created')
+  for (;;) {
+    const res = await fetch(`/api/ingest-jobs/${encodeURIComponent(jobId)}`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    const job = data.job as IngestionJob
+    onProgress?.(job)
+    if (job.status === 'done') return job
+    if (job.status === 'error') throw new Error(job.error || job.message || 'ingestion failed')
+    await delay(500)
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function stageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    queued: '排队',
+    parse: '解析',
+    chunk: '分片',
+    embed: '嵌入',
+    index: '写入索引',
+    store: '保存',
+    delete: '清理',
+    done: '完成',
+    error: '失败',
+  }
+  return labels[stage] ?? stage
+}
+
+function omitKey<T>(value: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...value }
+  delete next[key]
+  return next
 }
 
 function statusLabel(status: KnowledgeBaseItem['status']) {

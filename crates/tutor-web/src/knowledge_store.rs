@@ -28,6 +28,8 @@ pub struct KnowledgeDocument {
     pub id: String,
     pub name: String,
     pub source: String,
+    #[serde(default)]
+    pub index_source: Option<String>,
     pub size_bytes: usize,
     pub chunks: usize,
     #[serde(default)]
@@ -145,6 +147,7 @@ impl KnowledgeStore {
         let deleted = items.len() != original_len;
         if deleted {
             self.persist_locked(&items)?;
+            let _ = std::fs::remove_dir_all(self.documents_root.join(id));
         }
         Ok(deleted)
     }
@@ -158,6 +161,69 @@ impl KnowledgeStore {
         item.status = KnowledgeBaseStatus::Ready;
         item.updated_at = Utc::now();
         item.documents.insert(0, document);
+        let view = KnowledgeBaseView::from(item.clone());
+        self.persist_locked(&items)?;
+        Ok(view)
+    }
+
+    pub fn delete_document(&self, kb: &str, document_id: &str) -> Result<Option<KnowledgeDocument>> {
+        let mut items = self.items.lock().unwrap();
+        let Some(item) = items.iter_mut().find(|item| item.id == kb) else {
+            return Err(anyhow!("knowledge base not found"));
+        };
+        let Some(index) = item.documents.iter().position(|doc| doc.id == document_id) else {
+            return Ok(None);
+        };
+        let document = item.documents.remove(index);
+        item.status = if item.documents.is_empty() {
+            KnowledgeBaseStatus::Draft
+        } else {
+            KnowledgeBaseStatus::Ready
+        };
+        item.updated_at = Utc::now();
+        self.persist_locked(&items)?;
+        self.remove_document_files(&document);
+        Ok(Some(document))
+    }
+
+    pub fn update_document_chunks(
+        &self,
+        kb: &str,
+        document_id: &str,
+        chunks: usize,
+    ) -> Result<KnowledgeBaseView> {
+        let mut items = self.items.lock().unwrap();
+        let Some(item) = items.iter_mut().find(|item| item.id == kb) else {
+            return Err(anyhow!("knowledge base not found"));
+        };
+        let Some(document) = item.documents.iter_mut().find(|doc| doc.id == document_id) else {
+            return Err(anyhow!("document not found"));
+        };
+        document.chunks = chunks;
+        item.status = KnowledgeBaseStatus::Ready;
+        item.updated_at = Utc::now();
+        let view = KnowledgeBaseView::from(item.clone());
+        self.persist_locked(&items)?;
+        Ok(view)
+    }
+
+    pub fn update_document_file_metadata(
+        &self,
+        kb: &str,
+        document_id: &str,
+        file_path: String,
+        mime_type: Option<String>,
+    ) -> Result<KnowledgeBaseView> {
+        let mut items = self.items.lock().unwrap();
+        let Some(item) = items.iter_mut().find(|item| item.id == kb) else {
+            return Err(anyhow!("knowledge base not found"));
+        };
+        let Some(document) = item.documents.iter_mut().find(|doc| doc.id == document_id) else {
+            return Err(anyhow!("document not found"));
+        };
+        document.file_path = Some(file_path);
+        document.mime_type = mime_type;
+        item.updated_at = Utc::now();
         let view = KnowledgeBaseView::from(item.clone());
         self.persist_locked(&items)?;
         Ok(view)
@@ -227,6 +293,15 @@ impl KnowledgeStore {
             return Ok(None);
         }
         Ok(Some(std::fs::read(path)?))
+    }
+
+    fn remove_document_files(&self, document: &KnowledgeDocument) {
+        if let Some(relative) = &document.content_path {
+            let _ = std::fs::remove_file(self.documents_root.join(relative));
+        }
+        if let Some(relative) = &document.file_path {
+            let _ = std::fs::remove_file(self.documents_root.join(relative));
+        }
     }
 
     fn persist_locked(&self, items: &[KnowledgeBase]) -> Result<()> {
@@ -344,6 +419,7 @@ mod tests {
             id: "doc-1".into(),
             name: "doc.txt".into(),
             source: "doc.txt".into(),
+            index_source: None,
             size_bytes: 15,
             chunks: 1,
             mime_type: Some("text/plain".into()),

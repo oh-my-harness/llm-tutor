@@ -37,6 +37,29 @@ pub struct SearchHit {
     pub score: Option<f32>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SourceChunk {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct IngestProgress {
+    pub stage: IngestStage,
+    pub message: String,
+    pub progress: u8,
+    pub chunks: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestStage {
+    Chunk,
+    Embed,
+    Index,
+    Done,
+}
+
 pub trait KnowledgeRetriever: Send + Sync {
     fn search<'a>(
         &'a self,
@@ -68,12 +91,48 @@ impl LanceDbRag {
     }
 
     pub async fn ingest_text(&self, kb: &str, source: &str, text: &str) -> Result<usize> {
+        self.ingest_text_with_progress(kb, source, text, |_| {}).await
+    }
+
+    pub async fn ingest_text_with_progress(
+        &self,
+        kb: &str,
+        source: &str,
+        text: &str,
+        mut on_progress: impl FnMut(IngestProgress),
+    ) -> Result<usize> {
+        on_progress(IngestProgress {
+            stage: IngestStage::Chunk,
+            message: "Splitting document into chunks".into(),
+            progress: 25,
+            chunks: None,
+        });
         let chunks = chunk_text(text, 900, 160);
         if chunks.is_empty() {
+            on_progress(IngestProgress {
+                stage: IngestStage::Done,
+                message: "Document did not produce chunks".into(),
+                progress: 100,
+                chunks: Some(0),
+            });
             return Ok(0);
         }
+        let chunk_count = chunks.len();
 
+        on_progress(IngestProgress {
+            stage: IngestStage::Embed,
+            message: format!("Embedding {chunk_count} chunks"),
+            progress: 45,
+            chunks: Some(chunk_count),
+        });
         let vectors = self.embed_texts(chunks.clone()).await?;
+
+        on_progress(IngestProgress {
+            stage: IngestStage::Index,
+            message: "Writing chunks to LanceDB".into(),
+            progress: 78,
+            chunks: Some(chunk_count),
+        });
         let batch = chunks_to_batch(kb, source, chunks, vectors)?;
         let db = connect_db(&self.root).await?;
 
@@ -86,7 +145,65 @@ impl LanceDbRag {
             }
         }
 
-        Ok(batch_count(text, 900, 160))
+        on_progress(IngestProgress {
+            stage: IngestStage::Done,
+            message: "Indexed document".into(),
+            progress: 92,
+            chunks: Some(chunk_count),
+        });
+        Ok(chunk_count)
+    }
+
+    pub async fn delete_source(&self, kb: &str, source: &str) -> Result<usize> {
+        let db = connect_db(&self.root).await?;
+        let table = match db.open_table(TABLE_NAME).execute().await {
+            Ok(table) => table,
+            Err(_) => return Ok(0),
+        };
+        let predicate = source_predicate(kb, source);
+        let before = table.count_rows(Some(predicate.clone())).await?;
+        if before > 0 {
+            table.delete(&predicate).await?;
+        }
+        Ok(before)
+    }
+
+    pub async fn delete_kb(&self, kb: &str) -> Result<usize> {
+        let db = connect_db(&self.root).await?;
+        let table = match db.open_table(TABLE_NAME).execute().await {
+            Ok(table) => table,
+            Err(_) => return Ok(0),
+        };
+        let predicate = kb_predicate(kb);
+        let before = table.count_rows(Some(predicate.clone())).await?;
+        if before > 0 {
+            table.delete(&predicate).await?;
+        }
+        Ok(before)
+    }
+
+    pub async fn chunks_for_source(
+        &self,
+        kb: &str,
+        source: &str,
+        limit: usize,
+    ) -> Result<Vec<SourceChunk>> {
+        let db = connect_db(&self.root).await?;
+        let table = match db.open_table(TABLE_NAME).execute().await {
+            Ok(table) => table,
+            Err(_) => return Ok(vec![]),
+        };
+
+        let batches = table
+            .query()
+            .select(Select::columns(&["id", "text"]))
+            .only_if(source_predicate(kb, source))
+            .limit(if limit == 0 { 100 } else { limit })
+            .execute()
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        Ok(source_chunks_from_batches(&batches))
     }
 
     async fn embed_texts(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
@@ -260,13 +377,38 @@ fn search_hits_from_batches(batches: &[RecordBatch]) -> Vec<SearchHit> {
             hits.push(SearchHit {
                 id: ids.value(row).to_string(),
                 kb: kbs.value(row).to_string(),
-                source: sources.value(row).to_string(),
+                source: display_source(sources.value(row)),
                 text: texts.value(row).to_string(),
                 score: scores.map(|array| array.value(row)),
             });
         }
     }
     hits
+}
+
+fn source_chunks_from_batches(batches: &[RecordBatch]) -> Vec<SourceChunk> {
+    let mut chunks = Vec::new();
+    for batch in batches {
+        let Some(ids) = batch
+            .column_by_name("id")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        let Some(texts) = batch
+            .column_by_name("text")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        for row in 0..batch.num_rows() {
+            chunks.push(SourceChunk {
+                id: ids.value(row).to_string(),
+                text: texts.value(row).to_string(),
+            });
+        }
+    }
+    chunks
 }
 
 fn chunk_text(text: &str, max_chars: usize, overlap_chars: usize) -> Vec<String> {
@@ -289,12 +431,27 @@ fn chunk_text(text: &str, max_chars: usize, overlap_chars: usize) -> Vec<String>
     chunks
 }
 
-fn batch_count(text: &str, max_chars: usize, overlap_chars: usize) -> usize {
-    chunk_text(text, max_chars, overlap_chars).len()
+fn source_predicate(kb: &str, source: &str) -> String {
+    format!(
+        "kb = '{}' AND source = '{}'",
+        escape_sql_string(kb),
+        escape_sql_string(source)
+    )
+}
+
+fn kb_predicate(kb: &str) -> String {
+    format!("kb = '{}'", escape_sql_string(kb))
 }
 
 fn escape_sql_string(value: &str) -> String {
     value.replace('\'', "''")
+}
+
+fn display_source(value: &str) -> String {
+    value
+        .split_once("::")
+        .map(|(_, source)| source.to_string())
+        .unwrap_or_else(|| value.to_string())
 }
 
 #[cfg(test)]
