@@ -239,6 +239,10 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
 }
 
 async fn emit_rag_citations(pool: &SessionPool, entry: &SessionEntry, query: &str) {
+    if !should_auto_attach_rag_citations(query) {
+        return;
+    }
+
     let (Some(kb), Some(embedding)) = (entry.kb.as_ref(), entry.embedding.clone()) else {
         return;
     };
@@ -280,6 +284,66 @@ async fn emit_rag_citations(pool: &SessionPool, entry: &SessionEntry, query: &st
     let _ = entry.stream.trace("rag_citations", payload).await;
 }
 
+fn should_auto_attach_rag_citations(query: &str) -> bool {
+    let normalized = query.trim().to_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let compact = normalized
+        .chars()
+        .filter(|ch| {
+            !ch.is_whitespace() && !matches!(ch, '。' | '，' | ',' | '.' | '!' | '！' | '?' | '？')
+        })
+        .collect::<String>();
+
+    let casual_exact = [
+        "hi", "hello", "hey", "你好", "您好", "嗨", "哈喽", "谢谢", "感谢", "好的", "ok", "嗯",
+        "嗯嗯", "在吗",
+    ];
+    if casual_exact.contains(&compact.as_str()) {
+        return false;
+    }
+
+    let meaningful_markers = [
+        "什么",
+        "为什么",
+        "怎么",
+        "如何",
+        "解释",
+        "说明",
+        "分析",
+        "总结",
+        "对比",
+        "区别",
+        "定义",
+        "原理",
+        "公式",
+        "证明",
+        "计算",
+        "求",
+        "讲",
+        "介绍",
+        "what",
+        "why",
+        "how",
+        "explain",
+        "summarize",
+        "compare",
+        "define",
+        "calculate",
+        "solve",
+    ];
+    if meaningful_markers
+        .iter()
+        .any(|marker| normalized.contains(marker))
+    {
+        return true;
+    }
+
+    compact.chars().count() >= 8
+}
+
 fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Result<LlmConfig> {
     let Some(config) = config else {
         return LlmConfig::from_env();
@@ -314,4 +378,34 @@ fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Resu
         config.base_url,
         config.chat_path,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_auto_attach_rag_citations;
+
+    #[test]
+    fn auto_citations_skip_casual_greetings() {
+        for query in ["你好", "您好！", "hello", "谢谢", "ok", "在吗？"] {
+            assert!(
+                !should_auto_attach_rag_citations(query),
+                "casual query should not trigger RAG citations: {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_citations_allow_learning_questions() {
+        for query in [
+            "什么是光刻模型？",
+            "请解释一下 DiLA 的核心原理",
+            "how does lithography simulation work?",
+            "compare OPC and computational lithography",
+        ] {
+            assert!(
+                should_auto_attach_rag_citations(query),
+                "learning query should trigger RAG citations: {query}"
+            );
+        }
+    }
 }
