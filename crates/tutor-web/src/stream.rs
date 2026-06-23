@@ -72,6 +72,13 @@ impl EventSink for TutorStream {
             stream.trace(&kind, data).await;
         })
     }
+
+    fn content(&self, text: String, chunk: bool) -> futures::future::BoxFuture<'static, ()> {
+        let stream = self.clone();
+        Box::pin(async move {
+            stream.content(&text, chunk).await;
+        })
+    }
 }
 
 #[cfg(test)]

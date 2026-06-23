@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use axum::{
     Router,
@@ -24,6 +27,7 @@ struct PersistedEventSink {
     pool: Arc<SessionPool>,
     session_id: String,
     stream: crate::stream::TutorStream,
+    streamed_content: Arc<AtomicBool>,
 }
 
 impl EventSink for PersistedEventSink {
@@ -34,6 +38,17 @@ impl EventSink for PersistedEventSink {
         Box::pin(async move {
             let _ = pool.append_trace(&session_id, &kind, data.clone()).await;
             stream.trace(&kind, data).await;
+        })
+    }
+
+    fn content(&self, text: String, chunk: bool) -> BoxFuture<'static, ()> {
+        let stream = self.stream.clone();
+        let streamed_content = self.streamed_content.clone();
+        Box::pin(async move {
+            if chunk {
+                streamed_content.store(true, Ordering::SeqCst);
+            }
+            stream.content(&text, chunk).await;
         })
     }
 }
@@ -157,7 +172,7 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
         )
         .await;
 
-    let result = async {
+    let result: tutor_agent::Result<(String, bool)> = async {
         let capability: Capability = entry.capability.parse()?;
         let runtime_session = pool
             .open_runtime_session(&entry.id)
@@ -185,10 +200,12 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             .map(|config| config.require_approval)
             .unwrap_or(false);
         let governance = GovernanceConfig::new(budget, Some(audit), require_approval);
+        let streamed_content = Arc::new(AtomicBool::new(false));
         let sink: SharedEventSink = Arc::new(PersistedEventSink {
             pool: pool.clone(),
             session_id: entry.id.clone(),
             stream: entry.stream.clone(),
+            streamed_content: streamed_content.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
         if let Some(embedding) = entry.embedding.clone() {
@@ -199,15 +216,17 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
         if let Some(kb) = entry.kb.clone() {
             router = router.with_associated_kb(kb);
         }
-        router
+        let answer = router
             .run_with_session(capability, runtime_session, &content)
-            .await
+            .await?;
+        Ok((answer, streamed_content.load(Ordering::SeqCst)))
     }
     .await;
 
     match result {
-        Ok(answer) => {
-            let _ = entry.stream.content(&answer, false).await;
+        Ok((answer, streamed)) => {
+            let final_text = if streamed { "" } else { &answer };
+            let _ = entry.stream.content(final_text, false).await;
             let _ = pool.refresh_compact_summary(&entry.id).await;
             let history_len = pool.history_len(&entry.id).await;
             let _ = entry

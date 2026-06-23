@@ -6,6 +6,10 @@ use serde::Serialize;
 /// Optional event bridge used by web sessions to receive agent trace events.
 pub trait EventSink: Send + Sync {
     fn trace(&self, kind: String, data: serde_json::Value) -> BoxFuture<'static, ()>;
+
+    fn content(&self, _text: String, _chunk: bool) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
 }
 
 pub type SharedEventSink = Arc<dyn EventSink>;
@@ -17,5 +21,11 @@ pub async fn emit_trace(sink: &Option<SharedEventSink>, kind: &str, data: impl S
             serde_json::to_value(data).unwrap_or_default(),
         )
         .await;
+    }
+}
+
+pub async fn emit_content(sink: &Option<SharedEventSink>, text: impl Into<String>, chunk: bool) {
+    if let Some(sink) = sink {
+        sink.content(text.into(), chunk).await;
     }
 }

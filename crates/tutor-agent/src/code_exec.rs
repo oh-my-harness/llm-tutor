@@ -11,7 +11,7 @@ use tutor_tools::CodeExecTool;
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
-use crate::event_sink::emit_trace;
+use crate::event_sink::{emit_content, emit_trace};
 
 /// Run code execution as an agent turn: the model calls `code_exec`, then explains the result.
 pub async fn run_code_exec(router: &CapabilityRouter, request: &str) -> Result<String> {
@@ -121,6 +121,7 @@ async fn run_code_exec_inner(
             }
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 last_text.push_str(text);
+                emit_content(&router.event_sink, text.clone(), true).await;
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
                 tool_use_id,

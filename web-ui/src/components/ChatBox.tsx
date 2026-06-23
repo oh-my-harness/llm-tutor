@@ -293,7 +293,6 @@ function Composer({
           }
         }}
         placeholder="今天我能帮您什么？"
-        disabled={disabled}
       />
       <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
         <div className="relative">

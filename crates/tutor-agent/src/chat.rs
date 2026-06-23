@@ -12,7 +12,7 @@ use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
-use crate::event_sink::emit_trace;
+use crate::event_sink::{emit_content, emit_trace};
 
 /// Run a single Chat turn: question → [rag_search + web_search] → answer.
 /// Creates a fresh in-memory harness per call (stateless in v0.1).
@@ -127,6 +127,7 @@ async fn run_chat_inner(
             }
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 last_text.push_str(text);
+                emit_content(&router.event_sink, text.clone(), true).await;
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
                 tool_use_id,

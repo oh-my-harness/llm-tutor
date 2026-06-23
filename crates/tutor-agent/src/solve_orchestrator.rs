@@ -7,7 +7,7 @@ use llm_harness_types::ExecutionEnv;
 
 use crate::deep_solve_events as deep_events;
 use crate::error::{Result, TutorError};
-use crate::event_sink::{SharedEventSink, emit_trace};
+use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use crate::solve_context::{Plan, SolveContext, StepResult};
@@ -605,6 +605,7 @@ impl SolveOrchestrator {
                 }
                 AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                     last_text.push_str(text);
+                    emit_content(&self.event_sink, text.clone(), true).await;
                 }
                 AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
                     if last_text.is_empty() {
