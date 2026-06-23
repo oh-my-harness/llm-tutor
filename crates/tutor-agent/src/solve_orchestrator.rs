@@ -223,6 +223,14 @@ impl SolveOrchestrator {
                         }
                     }
                 }
+                AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
+                    raw.push_str(text);
+                }
+                AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
+                    if raw.is_empty() {
+                        raw = last_assistant_text(new_messages).unwrap_or_default();
+                    }
+                }
                 AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
                 _ => {}
             }
@@ -402,6 +410,14 @@ impl SolveOrchestrator {
                             if let ContentBlock::Text { text } = block {
                                 raw = text.clone();
                             }
+                        }
+                    }
+                    AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
+                        raw.push_str(text);
+                    }
+                    AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
+                        if raw.is_empty() {
+                            raw = last_assistant_text(new_messages).unwrap_or_default();
                         }
                     }
                     AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -587,6 +603,14 @@ impl SolveOrchestrator {
                         }
                     }
                 }
+                AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
+                    last_text.push_str(text);
+                }
+                AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
+                    if last_text.is_empty() {
+                        last_text = last_assistant_text(new_messages).unwrap_or_default();
+                    }
+                }
                 AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
                 _ => {}
             }
@@ -628,6 +652,22 @@ fn format_step_results(results: &[StepResult]) -> String {
         .map(|r| format!("Step {}: {}", r.step_id, r.finish_text))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn last_assistant_text(messages: &[llm_harness_types::AgentMessage]) -> Option<String> {
+    messages.iter().rev().find_map(|message| {
+        let llm_harness_types::AgentMessage::Assistant(message) = message else {
+            return None;
+        };
+
+        message.content.iter().rev().find_map(|block| {
+            if let llm_harness_types::ContentBlock::Text { text } = block {
+                Some(text.clone())
+            } else {
+                None
+            }
+        })
+    })
 }
 
 #[cfg(test)]
