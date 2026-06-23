@@ -6,6 +6,7 @@ import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
+import { QuizPage } from './components/QuizPage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
@@ -569,6 +570,10 @@ export default function App() {
 
         {view === 'knowledge' && (
           <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} />
+        )}
+
+        {view === 'quiz' && (
+          <QuizPage knowledgeBases={knowledgeBases} onRefreshKnowledgeBases={refreshKnowledgeBases} />
         )}
 
         {view === 'space' && (
