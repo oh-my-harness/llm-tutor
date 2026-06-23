@@ -31,12 +31,22 @@ struct CreateQuizRequest {
     topic: Option<String>,
     difficulty: Option<QuizDifficulty>,
     question_count: Option<usize>,
+    llm: Option<CreateLlmConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SubmitAnswerRequest {
     question_id: String,
     selected_option_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateLlmConfig {
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    chat_path: Option<String>,
 }
 
 async fn list_quizzes(State(state): State<QuizState>) -> impl IntoResponse {
@@ -65,7 +75,7 @@ async fn create_quiz(
         Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
     };
 
-    match generate_questions(&state, quiz).await {
+    match generate_questions(&state, quiz, req.llm).await {
         Ok(quiz) => (
             StatusCode::CREATED,
             Json(serde_json::json!({ "quiz": quiz })),
@@ -133,7 +143,11 @@ fn quiz_router_with_rag_root(
         .with_state(state)
 }
 
-async fn generate_questions(state: &QuizState, quiz: QuizSession) -> anyhow::Result<QuizSession> {
+async fn generate_questions(
+    state: &QuizState,
+    quiz: QuizSession,
+    llm: Option<CreateLlmConfig>,
+) -> anyhow::Result<QuizSession> {
     let Some(kb) = state.knowledge.get(&quiz.kb_id) else {
         anyhow::bail!("knowledge base not found");
     };
@@ -152,8 +166,101 @@ async fn generate_questions(state: &QuizState, quiz: QuizSession) -> anyhow::Res
     if hits.is_empty() {
         anyhow::bail!("no source chunks found for quiz generation");
     }
-    let questions = questions_from_hits(&quiz.config, &hits);
+    let questions = if let Some(llm) = llm.and_then(llm_config_from_request) {
+        let sources = hits
+            .iter()
+            .map(|hit| tutor_agent::quiz::QuizSourceChunk {
+                source: hit.source.clone(),
+                text: hit.text.clone(),
+                score: hit.score,
+            })
+            .collect::<Vec<_>>();
+        let generated = tutor_agent::quiz::generate_quiz_questions(
+            &llm,
+            &tutor_agent::quiz::QuizGenerationConfig {
+                topic: quiz.config.topic.clone(),
+                difficulty: format!("{:?}", quiz.config.difficulty).to_ascii_lowercase(),
+                question_count: quiz.config.question_count,
+            },
+            &sources,
+        )
+        .await?;
+        questions_from_generated(&quiz.config, &hits, generated)
+    } else {
+        questions_from_hits(&quiz.config, &hits)
+    };
     state.store.replace_questions(&quiz.id, questions)
+}
+
+fn llm_config_from_request(config: CreateLlmConfig) -> Option<tutor_agent::LlmConfig> {
+    let api_key = config.api_key?.trim().to_string();
+    if api_key.is_empty() || config.model.trim().is_empty() {
+        return None;
+    }
+    let provider = match config.provider.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => tutor_agent::LlmProviderKind::Anthropic,
+        "deepseek" => tutor_agent::LlmProviderKind::DeepSeek,
+        "openai" | "openai-compatible" => tutor_agent::LlmProviderKind::OpenAI,
+        _ => return None,
+    };
+    Some(tutor_agent::LlmConfig::from_parts(
+        provider,
+        config.model.trim().to_string(),
+        api_key,
+        config.base_url.filter(|value| !value.trim().is_empty()),
+        config.chat_path.filter(|value| !value.trim().is_empty()),
+    ))
+}
+
+fn questions_from_generated(
+    config: &QuizConfig,
+    hits: &[tutor_rag::SearchHit],
+    generated: Vec<tutor_agent::quiz::GeneratedQuizQuestion>,
+) -> Vec<QuizQuestion> {
+    generated
+        .into_iter()
+        .enumerate()
+        .map(|(index, question)| {
+            let citations = question
+                .citation_indices
+                .iter()
+                .filter_map(|source_index| hits.get(*source_index))
+                .map(|hit| QuizCitation {
+                    source: hit.source.clone(),
+                    text: hit.text.clone(),
+                    score: hit.score,
+                })
+                .collect::<Vec<_>>();
+            let option_ids = ["A", "B", "C", "D", "E", "F"];
+            QuizQuestion {
+                id: format!("q{}", index + 1),
+                question_type: QuizQuestionType::SingleChoice,
+                stem: question.stem,
+                options: question
+                    .options
+                    .into_iter()
+                    .enumerate()
+                    .map(|(option_index, text)| QuizOption {
+                        id: option_ids
+                            .get(option_index)
+                            .copied()
+                            .unwrap_or("Z")
+                            .to_string(),
+                        text,
+                    })
+                    .collect(),
+                correct_option_id: option_ids
+                    .get(question.correct_option_index)
+                    .copied()
+                    .unwrap_or("A")
+                    .to_string(),
+                explanation: question.explanation,
+                citations,
+                tags: question.tags,
+                difficulty: config.difficulty.clone(),
+            }
+        })
+        .collect()
 }
 
 fn questions_from_hits(config: &QuizConfig, hits: &[tutor_rag::SearchHit]) -> Vec<QuizQuestion> {

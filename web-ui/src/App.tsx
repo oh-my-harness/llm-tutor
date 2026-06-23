@@ -573,7 +573,11 @@ export default function App() {
         )}
 
         {view === 'quiz' && (
-          <QuizPage knowledgeBases={knowledgeBases} onRefreshKnowledgeBases={refreshKnowledgeBases} />
+          <QuizPage
+            knowledgeBases={knowledgeBases}
+            settings={llmSettings}
+            onRefreshKnowledgeBases={refreshKnowledgeBases}
+          />
         )}
 
         {view === 'space' && (

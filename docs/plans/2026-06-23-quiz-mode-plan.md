@@ -234,11 +234,11 @@ V1 UI should stay simple:
 
 ### Phase 3: RAG-backed Generation
 
-- [ ] Retrieve source chunks from selected knowledge base.
-- [ ] Generate single-choice questions as strict JSON.
-- [ ] Validate generated questions.
-- [ ] Attach citations to questions.
-- [ ] Add non-real-LLM test with mock quiz generation.
+- [x] Retrieve source chunks from selected knowledge base.
+- [x] Generate single-choice questions as strict JSON.
+- [x] Validate generated questions.
+- [x] Attach citations to questions.
+- [x] Add non-real-LLM test with mock quiz generation.
 
 ### Phase 4: Review Experience
 

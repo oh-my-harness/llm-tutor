@@ -29,6 +29,7 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+async-trait.workspace = true
 chrono = "0.4"
 tempfile = "3"
 llm-harness-loop = { workspace = true, features = ["test-utils"] }

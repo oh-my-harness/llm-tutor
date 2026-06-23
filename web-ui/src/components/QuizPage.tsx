@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BookOpenCheck, CheckCircle2, Circle, FileQuestion, Play, RefreshCw, Trash2 } from 'lucide-react'
+import type { LlmSettings } from '../settings'
+import { settingsForSession } from '../settings'
 
 interface KnowledgeBaseOption {
   id: string
@@ -48,6 +50,7 @@ interface QuizAnswer {
 
 interface Props {
   knowledgeBases: KnowledgeBaseOption[]
+  settings: LlmSettings
   onRefreshKnowledgeBases?: () => void
 }
 
@@ -57,7 +60,7 @@ const difficultyOptions = [
   { value: 'hard', label: 'Hard' },
 ] as const
 
-export function QuizPage({ knowledgeBases, onRefreshKnowledgeBases }: Props) {
+export function QuizPage({ knowledgeBases, settings, onRefreshKnowledgeBases }: Props) {
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
   const [kbId, setKbId] = useState('')
@@ -118,6 +121,7 @@ export function QuizPage({ knowledgeBases, onRefreshKnowledgeBases }: Props) {
           topic: topic.trim() || null,
           difficulty,
           question_count: questionCount,
+          llm: settingsForSession(settings),
         }),
       })
       const data = await safeJson(res)
