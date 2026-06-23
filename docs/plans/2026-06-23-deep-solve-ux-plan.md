@@ -1,6 +1,6 @@
 # Deep Solve UX Plan
 
-> Status: planning | Date: 2026-06-23 | Scope: turn Deep Solve from a long chat answer into a structured guided solving workflow.
+> Status: in progress | Date: 2026-06-23 | Scope: turn Deep Solve from a long chat answer into a structured guided solving workflow.
 
 ## 1. Goal
 
@@ -69,14 +69,14 @@ Possible runtime feedback:
 
 Owns the Deep Solve workflow.
 
-It should emit structured events through `EventSink`:
+It emits structured events through `EventSink`:
 
 ```json
 {
   "kind": "deep_solve_stage_start",
   "capability": "deep_solve",
   "stage": "plan",
-  "title": "制定解题计划"
+  "title": "Create solve plan"
 }
 ```
 
@@ -85,7 +85,7 @@ It should emit structured events through `EventSink`:
   "kind": "deep_solve_stage_done",
   "capability": "deep_solve",
   "stage": "verify",
-  "summary": "已用代码验证结果"
+  "summary": "Verified result with code"
 }
 ```
 
@@ -154,9 +154,9 @@ Acceptance:
 
 ### Phase 2: Persist And Restore
 
-- [ ] Reuse `tutor-web` trace persistence for Deep Solve events.
-- [ ] Ensure restored session detail returns the Deep Solve event sequence.
-- [ ] Add backend test: run/store fake Deep Solve events -> reopen session -> restore events.
+- [x] Reuse `tutor-web` trace persistence for Deep Solve events.
+- [x] Ensure restored session detail returns the Deep Solve event sequence.
+- [x] Add backend test: run/store fake Deep Solve events -> reopen session -> restore events.
 
 Acceptance:
 
@@ -193,7 +193,7 @@ Acceptance:
 
 Acceptance:
 
-- User can ask “why this step?” without manually copying context.
+- User can ask why a step works without manually copying context.
 
 ## 6. Non-Goals For First Pass
 
@@ -211,9 +211,9 @@ Acceptance:
 
 ## 8. Recommended Next Task
 
-Start with Phase 1:
+Start with Phase 3:
 
-1. Add typed Deep Solve event helpers in `crates/tutor-agent`.
-2. Emit stage start/done events from `SolveOrchestrator`.
-3. Ensure `tutor-web` persists them through the existing persisted event sink.
-4. Add one mock test that verifies a Deep Solve run produces the expected stage sequence.
+1. Add a `DeepSolveMessage` or `DeepSolvePanel` component in `web-ui`.
+2. Transform restored/live Deep Solve trace events into a timeline view model.
+3. Render stage timeline, plan, step summaries, and final metadata.
+4. Keep raw trace available for debugging, but make the structured view primary.

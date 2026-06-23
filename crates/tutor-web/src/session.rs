@@ -581,6 +581,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deep_solve_trace_sequence_survives_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool.create("deep_solve", None, None, None).await.unwrap();
+
+        let sequence = [
+            (
+                "deep_solve_stage_start",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "stage": "plan",
+                    "title": "Create solve plan",
+                }),
+            ),
+            (
+                "deep_solve_plan",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "stage": "plan",
+                    "analysis": "use arithmetic",
+                    "steps": [{ "id": "s1", "goal": "compute 2 plus 2" }],
+                }),
+            ),
+            (
+                "deep_solve_step_done",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "stage": "solve",
+                    "step_id": "s1",
+                    "summary": "the answer is 4",
+                }),
+            ),
+            (
+                "deep_solve_final",
+                serde_json::json!({
+                    "capability": "deep_solve",
+                    "stage": "synthesize",
+                    "summary": "The final answer is 4.",
+                }),
+            ),
+        ];
+
+        for (kind, payload) in sequence {
+            pool.append_trace(&id, kind, payload).await.unwrap();
+        }
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let traces = reopened.traces(&id).await.unwrap();
+
+        let kinds = traces
+            .iter()
+            .map(|trace| trace.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                "deep_solve_stage_start",
+                "deep_solve_plan",
+                "deep_solve_step_done",
+                "deep_solve_final",
+            ]
+        );
+        assert_eq!(traces[1].payload["steps"][0]["id"], "s1");
+        assert_eq!(traces[2].payload["step_id"], "s1");
+        assert_eq!(traces[3].payload["stage"], "synthesize");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn compact_summary_survives_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
