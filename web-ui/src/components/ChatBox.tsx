@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import type { LlmModelConfig } from '../settings'
+import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage } from './MarkdownMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec'
@@ -23,6 +24,7 @@ interface Message {
   text: string
   kind?: 'idle' | 'thinking' | 'tool' | 'done' | 'error'
   citations?: Citation[]
+  deepSolve?: DeepSolveTraceEntry[]
 }
 
 interface Citation {
@@ -147,12 +149,21 @@ export function ChatBox({
                     <span>{msg.text}</span>
                   </div>
                 ) : msg.role === 'assistant' ? (
-                  <>
-                    <MarkdownMessage text={msg.text} />
-                    {msg.citations && msg.citations.length > 0 && (
-                      <CitationList citations={msg.citations} />
-                    )}
-                  </>
+                  msg.deepSolve && msg.deepSolve.length > 0 ? (
+                    <DeepSolveMessage
+                      text={msg.text}
+                      events={msg.deepSolve}
+                      citations={msg.citations}
+                      citationList={(citations) => <CitationList citations={citations} />}
+                    />
+                  ) : (
+                    <>
+                      <MarkdownMessage text={msg.text} />
+                      {msg.citations && msg.citations.length > 0 && (
+                        <CitationList citations={msg.citations} />
+                      )}
+                    </>
+                  )
                 ) : (
                   <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
                 )}

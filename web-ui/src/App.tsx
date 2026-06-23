@@ -8,6 +8,7 @@ import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
+import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
 import { loadLlmSettings, saveLlmSettings, settingsForSession } from './settings'
@@ -20,6 +21,7 @@ interface Message {
   kind?: AgentStatus['kind']
   transient?: boolean
   citations?: Citation[]
+  deepSolve?: DeepSolveTraceEntry[]
 }
 
 interface Citation {
@@ -79,6 +81,7 @@ export default function App() {
   const streamingRef = useRef('')
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
   const pendingCitationsRef = useRef<Citation[]>([])
+  const pendingDeepSolveRef = useRef<DeepSolveTraceEntry[]>([])
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -122,11 +125,18 @@ export default function App() {
         } else {
           const finalText = streamingRef.current + event.payload.text
           const citations = pendingCitationsRef.current
+          const deepSolve = pendingDeepSolveRef.current
           setMessages((prev) => [
             ...dropTrailingTransientStatus(prev),
-            { role: 'assistant', text: finalText, citations },
+            {
+              role: 'assistant',
+              text: finalText,
+              citations,
+              deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
+            },
           ])
           pendingCitationsRef.current = []
+          pendingDeepSolveRef.current = []
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
@@ -136,6 +146,10 @@ export default function App() {
         const citations = citationsFromTrace(event.payload as Record<string, unknown>)
         if (citations.length > 0) {
           pendingCitationsRef.current = citations
+        }
+        const deepSolveEvent = deepSolveEventFromTrace(event.payload as Record<string, unknown>)
+        if (deepSolveEvent) {
+          pendingDeepSolveRef.current = [...pendingDeepSolveRef.current, deepSolveEvent]
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -280,6 +294,7 @@ export default function App() {
     setStreamingText('')
     streamingRef.current = ''
     setTraceEntries([])
+    pendingDeepSolveRef.current = []
     setBudgetWarning(false)
     setRunning(false)
     setView('chat')
@@ -372,6 +387,7 @@ export default function App() {
       setStreamingText('')
       streamingRef.current = ''
       setTraceEntries([])
+      pendingDeepSolveRef.current = []
       setSessionId(id)
       try {
         const res = await fetch(`/api/sessions/${id}`)
@@ -380,13 +396,14 @@ export default function App() {
         }
         const data = await res.json() as SessionDetailResponse
         const restoredTrace = restoreTraceEntries(data.trace ?? [], data.compact_summary ?? null)
-        const restored = attachRestoredCitations(
+        const withCitations = attachRestoredCitations(
           (data.messages ?? []).map((message) => ({
-          role: message.role,
-          text: message.text,
+            role: message.role,
+            text: message.text,
           })),
           restoredTrace,
         )
+        const restored = attachRestoredDeepSolve(withCitations, restoredTrace)
         setMessages(restored)
         setTraceEntries(restoredTrace)
         if (data.capability && isCapability(data.capability)) {
@@ -440,6 +457,7 @@ export default function App() {
       setStreamingText('')
       streamingRef.current = ''
       setTraceEntries([])
+      pendingDeepSolveRef.current = []
     }
 
     try {
@@ -706,6 +724,48 @@ function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]
     const citations = citationGroups[citationIndex]
     citationIndex += 1
     return citations ? { ...message, citations } : message
+  })
+}
+
+function deepSolveEventFromTrace(payload: Record<string, unknown>, timestamp = Date.now()): DeepSolveTraceEntry | null {
+  const kind = typeof payload.kind === 'string' ? payload.kind : ''
+  const capability = typeof payload.capability === 'string' ? payload.capability : ''
+  if (!kind.startsWith('deep_solve_') && capability !== 'deep_solve') return null
+
+  return {
+    kind,
+    payload,
+    timestamp,
+  }
+}
+
+function attachRestoredDeepSolve(messages: Message[], traceEntries: TraceEntry[]): Message[] {
+  const deepSolveEvents = traceEntries
+    .map((entry) => deepSolveEventFromTrace(entry.payload, entry.timestamp))
+    .filter((entry): entry is DeepSolveTraceEntry => Boolean(entry))
+
+  if (deepSolveEvents.length === 0) return messages
+
+  const groups: DeepSolveTraceEntry[][] = []
+  let current: DeepSolveTraceEntry[] = []
+  for (const event of deepSolveEvents) {
+    current.push(event)
+    if (event.kind === 'deep_solve_final') {
+      groups.push(current)
+      current = []
+    }
+  }
+  if (current.length > 0) {
+    groups.push(current)
+  }
+
+  let groupIndex = 0
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    const group = groups[groupIndex]
+    if (!group) return message
+    groupIndex += 1
+    return { ...message, deepSolve: group }
   })
 }
 

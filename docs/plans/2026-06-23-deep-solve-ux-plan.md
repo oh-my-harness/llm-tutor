@@ -164,11 +164,11 @@ Acceptance:
 
 ### Phase 3: Build Deep Solve UI
 
-- [ ] Add `DeepSolvePanel` or `DeepSolveMessage` component.
-- [ ] Render stage timeline with collapsed details.
-- [ ] Render plan and step summaries.
+- [x] Add `DeepSolvePanel` or `DeepSolveMessage` component.
+- [x] Render stage timeline with collapsed details.
+- [x] Render plan and step summaries.
 - [ ] Attach tool results and citations to relevant stages.
-- [ ] Keep final answer as the main readable result.
+- [x] Keep final answer as the main readable result.
 
 Acceptance:
 
@@ -211,9 +211,9 @@ Acceptance:
 
 ## 8. Recommended Next Task
 
-Start with Phase 3:
+Continue Phase 3, then Phase 4:
 
-1. Add a `DeepSolveMessage` or `DeepSolvePanel` component in `web-ui`.
-2. Transform restored/live Deep Solve trace events into a timeline view model.
-3. Render stage timeline, plan, step summaries, and final metadata.
-4. Keep raw trace available for debugging, but make the structured view primary.
+1. Attach tool call/result details to the matching Deep Solve step.
+2. Group RAG citations by stage or final answer.
+3. Add a visual check with a real or mocked Deep Solve conversation.
+4. Then add step follow-up affordances.
