@@ -93,10 +93,11 @@ async fn run_chat_inner(
         AgentHarness::new_in_memory(client, router.env.clone(), opts).await
     };
     let mut rx = harness.subscribe();
-
-    harness
-        .prompt_with_messages(messages.unwrap_or_default())
-        .await?;
+    let prompt_task = tokio::spawn(async move {
+        harness
+            .prompt_with_messages(messages.unwrap_or_default())
+            .await
+    });
 
     // Collect the last complete assistant message.
     let mut last_text = String::new();
@@ -181,6 +182,9 @@ async fn run_chat_inner(
             _ => {}
         }
     }
+    prompt_task
+        .await
+        .map_err(|err| TutorError::Internal(format!("agent prompt task failed: {err}")))??;
 
     emit_trace(
         &router.event_sink,

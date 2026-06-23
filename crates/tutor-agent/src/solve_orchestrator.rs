@@ -210,8 +210,7 @@ impl SolveOrchestrator {
 
         let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
         let mut rx = harness.subscribe();
-
-        harness.prompt(prompt).await?;
+        let prompt_task = tokio::spawn(async move { harness.prompt(prompt).await });
 
         let mut raw = String::new();
         while let Ok(event) = rx.recv().await {
@@ -235,6 +234,9 @@ impl SolveOrchestrator {
                 _ => {}
             }
         }
+        prompt_task
+            .await
+            .map_err(|err| TutorError::Internal(format!("agent prompt task failed: {err}")))??;
 
         if raw.is_empty() {
             return Err(TutorError::Internal("no plan output".into()));
@@ -397,10 +399,8 @@ impl SolveOrchestrator {
             let client = self.make_client();
             let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
             let mut rx = harness.subscribe();
-
-            harness
-                .prompt(format!("Solve step {}: {}", step.id, step.goal))
-                .await?;
+            let step_prompt = format!("Solve step {}: {}", step.id, step.goal);
+            let prompt_task = tokio::spawn(async move { harness.prompt(step_prompt).await });
 
             let mut raw = String::new();
             while let Ok(event) = rx.recv().await {
@@ -462,6 +462,9 @@ impl SolveOrchestrator {
                     _ => {}
                 }
             }
+            prompt_task.await.map_err(|err| {
+                TutorError::Internal(format!("agent prompt task failed: {err}"))
+            })??;
 
             // Check if replan was triggered
             let step_reason = self.context.lock().unwrap().replan_reason.clone();
@@ -590,8 +593,7 @@ impl SolveOrchestrator {
 
         let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
         let mut rx = harness.subscribe();
-
-        harness.prompt(prompt).await?;
+        let prompt_task = tokio::spawn(async move { harness.prompt(prompt).await });
 
         let mut last_text = String::new();
         while let Ok(event) = rx.recv().await {
@@ -616,6 +618,9 @@ impl SolveOrchestrator {
                 _ => {}
             }
         }
+        prompt_task
+            .await
+            .map_err(|err| TutorError::Internal(format!("agent prompt task failed: {err}")))??;
 
         emit_trace(
             &self.event_sink,
