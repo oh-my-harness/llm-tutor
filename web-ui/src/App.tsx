@@ -19,6 +19,14 @@ interface Message {
   text: string
   kind?: AgentStatus['kind']
   transient?: boolean
+  citations?: Citation[]
+}
+
+interface Citation {
+  index: number
+  source: string
+  text: string
+  score?: number | null
 }
 
 interface RecentSession {
@@ -60,6 +68,7 @@ export default function App() {
   const [streamingText, setStreamingText] = useState('')
   const streamingRef = useRef('')
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
+  const pendingCitationsRef = useRef<Citation[]>([])
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -102,16 +111,22 @@ export default function App() {
           setStreamingText(streamingRef.current)
         } else {
           const finalText = streamingRef.current + event.payload.text
+          const citations = pendingCitationsRef.current
           setMessages((prev) => [
             ...dropTrailingTransientStatus(prev),
-            { role: 'assistant', text: finalText },
+            { role: 'assistant', text: finalText, citations },
           ])
+          pendingCitationsRef.current = []
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
           void refreshSessions()
         }
       } else if (event.type === 'trace') {
+        const citations = citationsFromTrace(event.payload as Record<string, unknown>)
+        if (citations.length > 0) {
+          pendingCitationsRef.current = citations
+        }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
           ...prev,
@@ -597,6 +612,26 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
   }
 
   return { kind: 'thinking', label: 'Working', detail: capability }
+}
+
+function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'rag_search') return []
+  const details = payload.details
+  if (!details || typeof details !== 'object') return []
+  const sources = (details as { sources?: unknown }).sources
+  if (!Array.isArray(sources)) return []
+  return sources
+    .map((source): Citation | null => {
+      if (!source || typeof source !== 'object') return null
+      const item = source as Record<string, unknown>
+      return {
+        index: typeof item.index === 'number' ? item.index : 0,
+        source: typeof item.source === 'string' ? item.source : 'source',
+        text: typeof item.text === 'string' ? item.text : '',
+        score: typeof item.score === 'number' ? item.score : null,
+      }
+    })
+    .filter((source): source is Citation => Boolean(source && source.text))
 }
 
 function capabilityLabel(value: string): string {

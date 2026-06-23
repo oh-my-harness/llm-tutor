@@ -22,6 +22,14 @@ interface Message {
   role: 'user' | 'assistant' | 'status'
   text: string
   kind?: 'idle' | 'thinking' | 'tool' | 'done' | 'error'
+  citations?: Citation[]
+}
+
+interface Citation {
+  index: number
+  source: string
+  text: string
+  score?: number | null
 }
 
 interface Props {
@@ -139,7 +147,12 @@ export function ChatBox({
                     <span>{msg.text}</span>
                   </div>
                 ) : msg.role === 'assistant' ? (
-                  <MarkdownMessage text={msg.text} />
+                  <>
+                    <MarkdownMessage text={msg.text} />
+                    {msg.citations && msg.citations.length > 0 && (
+                      <CitationList citations={msg.citations} />
+                    )}
+                  </>
                 ) : (
                   <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
                 )}
@@ -171,6 +184,25 @@ export function ChatBox({
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+function CitationList({ citations }: { citations: Citation[] }) {
+  return (
+    <div className="mt-3 border-t border-gray-200 pt-3">
+      <div className="mb-2 text-xs font-medium text-gray-500">引用来源</div>
+      <div className="space-y-2">
+        {citations.map((citation, index) => (
+          <details key={`${citation.source}-${index}`} className="rounded-md border border-blue-100 bg-white/70 p-2">
+            <summary className="cursor-pointer text-xs font-medium text-blue-700">
+              [{citation.index || index + 1}] {citation.source}
+              {typeof citation.score === 'number' ? ` · ${citation.score.toFixed(4)}` : ''}
+            </summary>
+            <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
+          </details>
+        ))}
+      </div>
     </div>
   )
 }

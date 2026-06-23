@@ -28,3 +28,7 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 pdf-extract = "0.10.0"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"

@@ -750,6 +750,9 @@ pub fn knowledge_router(store: Arc<KnowledgeStore>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request};
+    use tower::ServiceExt;
 
     #[test]
     fn detects_pdf_upload_by_extension_or_content_type() {
@@ -768,5 +771,133 @@ mod tests {
     fn rejects_non_utf8_non_pdf_upload() {
         let err = extract_upload_text("lesson.bin", None, &[0xff, 0xfe]).unwrap_err();
         assert!(err.to_string().contains("UTF-8 text attachments and PDF files"));
+    }
+
+    #[tokio::test]
+    async fn upload_search_and_chunks_work_without_real_llm() {
+        let root = tempfile::tempdir().unwrap();
+        let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
+        let app = knowledge_router(store);
+
+        let create_body = serde_json::json!({
+            "name": "Physics",
+            "embedding": {
+                "provider": "hash",
+                "model": "local-hash",
+                "api_key": "test",
+                "base_url": null,
+                "embeddings_path": null,
+                "dimensions": 32,
+                "send_dimensions": false
+            }
+        });
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/api/knowledge-bases", create_body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        let kb = body["knowledge_base"]["id"].as_str().unwrap().to_string();
+
+        let boundary = "X-LLM-TUTOR-BOUNDARY";
+        let upload_body = format!(
+            "--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"lesson.txt\"\r\n\
+             Content-Type: text/plain\r\n\r\n\
+             lithography photoresist wafer mask exposure alignment overlay\r\n\
+             --{boundary}--\r\n"
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/knowledge-bases/{kb}/documents/upload"))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(upload_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = response_json(response).await;
+        let job_id = body["job"]["id"].as_str().unwrap();
+
+        let mut completed = None;
+        for _ in 0..20 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(format!("/api/ingest-jobs/{job_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let body = response_json(response).await;
+            if body["job"]["status"] == "done" {
+                completed = Some(body);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let completed = completed.expect("ingestion job should complete");
+        let document_id = completed["job"]["knowledge_base"]["documents"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                Method::POST,
+                &format!("/api/knowledge-bases/{kb}/search"),
+                serde_json::json!({ "query": "photoresist wafer", "top_k": 3 }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let hits = body["hits"].as_array().unwrap();
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0]["source"], "lesson.txt");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/api/knowledge-bases/{kb}/documents/{document_id}/chunks"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let chunks = body["chunks"].as_array().unwrap();
+        assert!(!chunks.is_empty());
+        assert!(chunks[0]["text"].as_str().unwrap().contains("photoresist"));
+    }
+
+    fn json_request(method: Method, uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 }

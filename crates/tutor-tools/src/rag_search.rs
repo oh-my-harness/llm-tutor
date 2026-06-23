@@ -128,9 +128,30 @@ impl Tool for RagSearchTool {
                 })
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            let details_hits = hits
+                .iter()
+                .enumerate()
+                .map(|(index, hit)| {
+                    json!({
+                        "index": index + 1,
+                        "id": hit.id,
+                        "kb": hit.kb,
+                        "source": hit.source,
+                        "text": hit.text,
+                        "score": hit.score,
+                    })
+                })
+                .collect::<Vec<_>>();
+
             Ok(ToolResult {
                 content: vec![ContentBlock::Text { text }],
-                details: json!({ "query": query, "kb": kb, "hits": hits.len(), "configured": true }),
+                details: json!({
+                    "query": query,
+                    "kb": kb,
+                    "hits": hits.len(),
+                    "configured": true,
+                    "sources": details_hits,
+                }),
                 terminate: false,
             })
         })

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use llm_harness_agent::{
@@ -100,6 +101,7 @@ async fn run_chat_inner(
     // Collect the last complete assistant message.
     let mut last_text = String::new();
     let mut last_error: Option<String> = None;
+    let mut tool_names: HashMap<String, String> = HashMap::new();
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
@@ -131,6 +133,7 @@ async fn run_chat_inner(
                 tool_name,
                 args,
             }) => {
+                tool_names.insert(tool_use_id.clone(), tool_name.clone());
                 emit_trace(
                     &router.event_sink,
                     "tool_call",
@@ -147,13 +150,20 @@ async fn run_chat_inner(
                 tool_use_id,
                 result,
             }) => {
+                let tool_name = tool_names
+                    .get(tool_use_id)
+                    .cloned()
+                    .unwrap_or_else(|| "tool".into());
+                let details = result.as_ref().ok().map(|result| result.details.clone());
                 emit_trace(
                     &router.event_sink,
                     "tool_result",
                     serde_json::json!({
                         "capability": "chat",
                         "tool_use_id": tool_use_id,
+                        "tool": tool_name,
                         "ok": result.is_ok(),
+                        "details": details,
                     }),
                 )
                 .await;

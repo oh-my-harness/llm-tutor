@@ -207,6 +207,14 @@ impl LanceDbRag {
     }
 
     async fn embed_texts(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        if self.embedding.provider == "hash" || self.embedding.provider == "local-test" {
+            let dimensions = self.embedding.dimensions.unwrap_or(32).max(8);
+            return Ok(input
+                .iter()
+                .map(|text| hash_embedding(text, dimensions))
+                .collect());
+        }
+
         if self.embedding.provider != "openai" {
             return Err(anyhow!(
                 "unsupported embedding provider `{}`",
@@ -452,6 +460,29 @@ fn display_source(value: &str) -> String {
         .split_once("::")
         .map(|(_, source)| source.to_string())
         .unwrap_or_else(|| value.to_string())
+}
+
+fn hash_embedding(text: &str, dimensions: usize) -> Vec<f32> {
+    let mut vector = vec![0.0; dimensions];
+    for token in text
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+    {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in token.to_lowercase().bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        let index = (hash as usize) % dimensions;
+        vector[index] += 1.0;
+    }
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vector {
+            *value /= norm;
+        }
+    }
+    vector
 }
 
 #[cfg(test)]
