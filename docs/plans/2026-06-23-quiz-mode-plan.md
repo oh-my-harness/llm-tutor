@@ -242,10 +242,10 @@ V1 UI should stay simple:
 
 ### Phase 4: Review Experience
 
-- [ ] Show per-question explanation.
-- [ ] Show citations below explanations.
-- [ ] Add final score summary.
-- [ ] Add missed-question review list.
+- [x] Show per-question explanation.
+- [x] Show citations below explanations.
+- [x] Add final score summary.
+- [x] Add missed-question review list.
 
 ### Phase 5: Runtime Feedback
 

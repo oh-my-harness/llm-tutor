@@ -86,6 +86,13 @@ export function QuizPage({ knowledgeBases, settings, onRefreshKnowledgeBases }: 
       return answer && !answer.correct
     })
   }, [activeQuiz])
+  const weakTags = useMemo(() => {
+    const tags = new Map<string, number>()
+    missedQuestions.forEach((question) => {
+      question.tags.forEach((tag) => tags.set(tag, (tags.get(tag) ?? 0) + 1))
+    })
+    return [...tags.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
+  }, [missedQuestions])
 
   const refreshQuizzes = useCallback(async () => {
     const res = await fetch('/api/quizzes')
@@ -399,11 +406,35 @@ export function QuizPage({ knowledgeBases, settings, onRefreshKnowledgeBases }: 
                 <section className="mt-8 max-w-4xl rounded-lg border border-gray-200 bg-gray-50 p-5">
                   <h3 className="text-lg font-semibold text-gray-950">Summary</h3>
                   <p className="mt-2 text-sm text-gray-600">Final score: {score.correct}/{score.total}</p>
-                  {missedQuestions.length > 0 ? (
-                    <div className="mt-4 space-y-2">
-                      {missedQuestions.map((question) => (
-                        <div key={question.id} className="rounded-md bg-white p-3 text-sm text-gray-700">{question.stem}</div>
+                  {weakTags.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {weakTags.map(([tag, count]) => (
+                        <span key={tag} className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                          {tag} x {count}
+                        </span>
                       ))}
+                    </div>
+                  )}
+                  {missedQuestions.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {missedQuestions.map((question) => {
+                        const correctOption = question.options.find((option) => option.id === question.correct_option_id)
+                        const questionIndex = activeQuiz.questions.findIndex((item) => item.id === question.id)
+                        return (
+                          <button
+                            key={question.id}
+                            className="w-full rounded-md bg-white p-3 text-left text-sm text-gray-700 ring-1 ring-gray-100 hover:ring-blue-200"
+                            type="button"
+                            onClick={() => {
+                              if (questionIndex >= 0) setCurrentIndex(questionIndex)
+                            }}
+                          >
+                            <span className="block font-medium text-gray-950">{question.stem}</span>
+                            <span className="mt-2 block text-gray-600">Correct: {correctOption ? `${correctOption.id}. ${correctOption.text}` : question.correct_option_id}</span>
+                            <span className="mt-2 block leading-6 text-gray-500">{question.explanation}</span>
+                          </button>
+                        )
+                      })}
                     </div>
                   ) : (
                     <p className="mt-4 text-sm text-emerald-700">No missed questions.</p>
