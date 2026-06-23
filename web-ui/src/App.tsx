@@ -282,6 +282,17 @@ export default function App() {
     }
   }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, send, pushStatus, refreshSessions])
 
+  const handleAskDeepSolveStep = useCallback((step: { id: string; title: string; summary?: string }) => {
+    const prompt = [
+      `Please explain Deep Solve step ${step.id}: ${step.title}.`,
+      step.summary ? `Step summary: ${step.summary}` : '',
+      'Focus only on this step, clarify why it works, and connect it back to the original problem.',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    void handleSend(prompt)
+  }, [handleSend])
+
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     saveLlmSettings(nextSettings)
@@ -511,6 +522,7 @@ export default function App() {
                   knowledgeBases={knowledgeBases}
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   onSend={handleSend}
+                  onAskDeepSolveStep={handleAskDeepSolveStep}
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onLlmConfigChange={handleLlmConfigChange}

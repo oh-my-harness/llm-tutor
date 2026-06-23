@@ -43,6 +43,7 @@ interface Props {
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
   onSend: (text: string) => void
+  onAskDeepSolveStep?: (step: { id: string; title: string; summary?: string }) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
@@ -79,6 +80,7 @@ export function ChatBox({
   knowledgeBases,
   selectedKnowledgeBaseId,
   onSend,
+  onAskDeepSolveStep,
   onCapabilityChange,
   onKnowledgeBaseChange,
   onLlmConfigChange,
@@ -155,6 +157,7 @@ export function ChatBox({
                       events={msg.deepSolve}
                       citations={msg.citations}
                       citationList={(citations) => <CitationList citations={citations} />}
+                      onAskStep={onAskDeepSolveStep}
                     />
                   ) : (
                     <>
