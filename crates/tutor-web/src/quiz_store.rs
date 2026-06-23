@@ -148,14 +148,35 @@ impl QuizStore {
             created_at: now,
             updated_at: now,
         };
-        item.questions = sample_questions(&item.config);
-        item.status = QuizStatus::Active;
+        item.status = QuizStatus::Generating;
         item.score = Some(score_for(&item.questions, &item.answers));
 
         let mut items = self.items.lock().unwrap();
         items.push(item.clone());
         self.save_locked(&items)?;
         Ok(item)
+    }
+
+    pub fn replace_questions(
+        &self,
+        quiz_id: &str,
+        questions: Vec<QuizQuestion>,
+    ) -> Result<QuizSession> {
+        if questions.is_empty() {
+            return Err(anyhow!("quiz generation produced no questions"));
+        }
+        let mut items = self.items.lock().unwrap();
+        let Some(item) = items.iter_mut().find(|item| item.id == quiz_id) else {
+            return Err(anyhow!("quiz not found"));
+        };
+        item.questions = questions;
+        item.answers.clear();
+        item.score = Some(score_for(&item.questions, &item.answers));
+        item.status = QuizStatus::Active;
+        item.updated_at = Utc::now();
+        let updated = item.clone();
+        self.save_locked(&items)?;
+        Ok(updated)
     }
 
     pub fn submit_answer(
@@ -268,44 +289,6 @@ fn score_for(questions: &[QuizQuestion], answers: &[QuizAnswer]) -> QuizScore {
     }
 }
 
-fn sample_questions(config: &QuizConfig) -> Vec<QuizQuestion> {
-    let count = config.question_count.clamp(1, 10);
-    let topic = config.topic.as_deref().unwrap_or("selected knowledge base");
-    (0..count)
-        .map(|index| {
-            let id = format!("q{}", index + 1);
-            QuizQuestion {
-                id,
-                question_type: QuizQuestionType::SingleChoice,
-                stem: format!("Which statement best matches the key idea of {topic}?"),
-                options: vec![
-                    QuizOption {
-                        id: "A".into(),
-                        text: "It is a central concept supported by the selected material.".into(),
-                    },
-                    QuizOption {
-                        id: "B".into(),
-                        text: "It is unrelated to the selected knowledge base.".into(),
-                    },
-                    QuizOption {
-                        id: "C".into(),
-                        text: "It can only be answered without reading the source.".into(),
-                    },
-                    QuizOption {
-                        id: "D".into(),
-                        text: "It is a random distractor with no source grounding.".into(),
-                    },
-                ],
-                correct_option_id: "A".into(),
-                explanation: "This placeholder question proves the quiz session, answer, and scoring flow. RAG-backed generation will replace it in Phase 3.".into(),
-                citations: vec![],
-                tags: vec![topic.to_string()],
-                difficulty: config.difficulty.clone(),
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,7 +310,32 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(quiz.questions.len(), 2);
+        assert!(quiz.questions.is_empty());
+        let quiz = store
+            .replace_questions(
+                &quiz.id,
+                vec![QuizQuestion {
+                    id: "q1".into(),
+                    question_type: QuizQuestionType::SingleChoice,
+                    stem: "Question?".into(),
+                    options: vec![
+                        QuizOption {
+                            id: "A".into(),
+                            text: "Correct".into(),
+                        },
+                        QuizOption {
+                            id: "B".into(),
+                            text: "Wrong".into(),
+                        },
+                    ],
+                    correct_option_id: "A".into(),
+                    explanation: "Because A is correct.".into(),
+                    citations: vec![],
+                    tags: vec![],
+                    difficulty: QuizDifficulty::Medium,
+                }],
+            )
+            .unwrap();
         let updated = store
             .submit_answer(&quiz.id, &quiz.questions[0].id, "A")
             .unwrap();

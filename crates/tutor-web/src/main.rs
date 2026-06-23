@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = axum::Router::new()
         .merge(routes::knowledge::knowledge_router(knowledge.clone()))
-        .merge(routes::quiz::quiz_router(quizzes))
+        .merge(routes::quiz::quiz_router(quizzes, knowledge.clone()))
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
         .merge(routes::ws::ws_router(pool.clone()))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

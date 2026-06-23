@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -8,12 +9,19 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use tutor_rag::KnowledgeRetriever;
 
-use crate::quiz_store::{QuizConfig, QuizDifficulty, QuizQuestionType, QuizStore};
+use crate::knowledge_store::KnowledgeStore;
+use crate::quiz_store::{
+    QuizCitation, QuizConfig, QuizDifficulty, QuizOption, QuizQuestion, QuizQuestionType,
+    QuizSession, QuizStore,
+};
 
 #[derive(Clone)]
 struct QuizState {
     store: Arc<QuizStore>,
+    knowledge: Arc<KnowledgeStore>,
+    rag_root: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,10 +57,15 @@ async fn create_quiz(
         question_type: QuizQuestionType::SingleChoice,
     };
 
-    match state
+    let quiz = match state
         .store
         .create(req.title.unwrap_or_default(), req.kb_id, config)
     {
+        Ok(quiz) => quiz,
+        Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
+    };
+
+    match generate_questions(&state, quiz).await {
         Ok(quiz) => (
             StatusCode::CREATED,
             Json(serde_json::json!({ "quiz": quiz })),
@@ -98,14 +111,111 @@ async fn delete_quiz(State(state): State<QuizState>, Path(id): Path<String>) -> 
     }
 }
 
-pub fn quiz_router(store: Arc<QuizStore>) -> Router {
-    let state = QuizState { store };
+pub fn quiz_router(store: Arc<QuizStore>, knowledge: Arc<KnowledgeStore>) -> Router {
+    quiz_router_with_rag_root(store, knowledge, tutor_rag::LanceDbRag::default_root())
+}
+
+fn quiz_router_with_rag_root(
+    store: Arc<QuizStore>,
+    knowledge: Arc<KnowledgeStore>,
+    rag_root: impl Into<PathBuf>,
+) -> Router {
+    let state = QuizState {
+        store,
+        knowledge,
+        rag_root: rag_root.into(),
+    };
     Router::new()
         .route("/api/quizzes", get(list_quizzes).post(create_quiz))
         .route("/api/quizzes/{id}", get(get_quiz).delete(delete_quiz))
         .route("/api/quizzes/{id}/answers", post(submit_answer))
         .route("/api/quizzes/{id}/finish", post(finish_quiz))
         .with_state(state)
+}
+
+async fn generate_questions(state: &QuizState, quiz: QuizSession) -> anyhow::Result<QuizSession> {
+    let Some(kb) = state.knowledge.get(&quiz.kb_id) else {
+        anyhow::bail!("knowledge base not found");
+    };
+    if kb.documents.is_empty() {
+        anyhow::bail!("knowledge base has no documents");
+    }
+
+    let query = quiz
+        .config
+        .topic
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&kb.name);
+    let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), kb.embedding);
+    let hits = rag.search(Some(&quiz.kb_id), query, 12).await?;
+    if hits.is_empty() {
+        anyhow::bail!("no source chunks found for quiz generation");
+    }
+    let questions = questions_from_hits(&quiz.config, &hits);
+    state.store.replace_questions(&quiz.id, questions)
+}
+
+fn questions_from_hits(config: &QuizConfig, hits: &[tutor_rag::SearchHit]) -> Vec<QuizQuestion> {
+    let count = config.question_count.clamp(1, 10).min(hits.len().max(1));
+    let topic = config
+        .topic
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("the selected material");
+    (0..count)
+        .filter_map(|index| {
+            let hit = hits.get(index % hits.len())?;
+            let snippet = compact_text(&hit.text, 220);
+            let distractor = hits
+                .iter()
+                .find(|candidate| candidate.id != hit.id)
+                .map(|candidate| compact_text(&candidate.text, 140))
+                .unwrap_or_else(|| "A statement that is not supported by the cited source.".into());
+            Some(QuizQuestion {
+                id: format!("q{}", index + 1),
+                question_type: QuizQuestionType::SingleChoice,
+                stem: format!("According to the cited material, which statement is best supported about {topic}?"),
+                options: vec![
+                    QuizOption {
+                        id: "A".into(),
+                        text: snippet.clone(),
+                    },
+                    QuizOption {
+                        id: "B".into(),
+                        text: "The cited material says this topic is unrelated to the knowledge base.".into(),
+                    },
+                    QuizOption {
+                        id: "C".into(),
+                        text: distractor,
+                    },
+                    QuizOption {
+                        id: "D".into(),
+                        text: "The answer cannot be inferred from any retrieved source.".into(),
+                    },
+                ],
+                correct_option_id: "A".into(),
+                explanation: format!("Option A is grounded in the retrieved source chunk from {}.", hit.source),
+                citations: vec![QuizCitation {
+                    source: hit.source.clone(),
+                    text: hit.text.clone(),
+                    score: hit.score,
+                }],
+                tags: vec![topic.to_string(), hit.source.clone()],
+                difficulty: config.difficulty.clone(),
+            })
+        })
+        .collect()
+}
+
+fn compact_text(text: &str, max_chars: usize) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    let mut out = normalized.chars().take(max_chars).collect::<String>();
+    out.push_str("...");
+    out
 }
 
 fn error_response(err_status: StatusCode, err: impl std::fmt::Display) -> axum::response::Response {
@@ -121,16 +231,54 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Method, Request};
+    use chrono::Utc;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn creates_and_answers_quiz() {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
-        let app = quiz_router(store);
+        let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
+        let embedding = tutor_rag::EmbeddingConfig {
+            provider: "local-test".into(),
+            model: "hash".into(),
+            api_key: "test-key".into(),
+            base_url: None,
+            embeddings_path: None,
+            dimensions: Some(32),
+            send_dimensions: false,
+        };
+        let kb = knowledge.create("Quiz KB", embedding.clone()).unwrap();
+        knowledge
+            .add_document(
+                &kb.id,
+                crate::knowledge_store::KnowledgeDocument {
+                    id: "doc-1".into(),
+                    name: "source.md".into(),
+                    source: "source.md".into(),
+                    index_source: None,
+                    size_bytes: 64,
+                    chunks: 1,
+                    mime_type: Some("text/markdown".into()),
+                    content_path: None,
+                    file_path: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .unwrap();
+        let rag_root = dir.path().join("rag");
+        tutor_rag::LanceDbRag::new(&rag_root, embedding)
+            .ingest_text(
+                &kb.id,
+                "source.md",
+                "OPC corrects lithography mask patterns before wafer exposure.",
+            )
+            .await
+            .unwrap();
+        let app = quiz_router_with_rag_root(store, knowledge, rag_root);
 
         let create = serde_json::json!({
-            "kb_id": "kb-1",
+            "kb_id": kb.id,
             "topic": "OPC",
             "question_count": 1
         });

@@ -1,6 +1,6 @@
 # Quiz Mode Plan
 
-> Status: planned | Date: 2026-06-23 | Scope: add a knowledge-base driven quiz workspace with structured questions, answers, scoring, explanations, and citations.
+> Status: in progress | Date: 2026-06-23 | Scope: add a knowledge-base driven quiz workspace with structured questions, answers, scoring, explanations, and citations.
 
 ## 1. Goal
 
@@ -18,6 +18,13 @@ The user should be able to:
 ## 2. First Version Scope
 
 Start with a dedicated Quiz page, not chat-driven quiz.
+
+The Quiz page is a product workspace for assessment. It is different from chat:
+
+- chat is open-ended conversation,
+- quiz is a structured exercise flow,
+- every question has answer options, scoring, explanation, and source citations,
+- quiz sessions can be resumed and reviewed later.
 
 V1 supports:
 
@@ -202,21 +209,28 @@ Summary
 
 The page should keep the existing blue / white / gray visual style.
 
+V1 UI should stay simple:
+
+- left/top area: quiz configuration,
+- center area: current question and answer options,
+- bottom/right area: explanation, citations, and final review,
+- no separate marketing or landing page.
+
 ## 7. Implementation Phases
 
 ### Phase 1: Product Shell
 
-- [ ] Add Quiz navigation entry.
-- [ ] Add Quiz page route/view.
-- [ ] Add configuration panel.
-- [ ] Add empty state and generated-question mock view.
+- [x] Add Quiz navigation entry.
+- [x] Add Quiz page route/view.
+- [x] Add configuration panel.
+- [x] Add empty state and generated-question mock view.
 
 ### Phase 2: Persistence
 
-- [ ] Add quiz store JSON file.
-- [ ] Add quiz session CRUD APIs.
-- [ ] Add answer submission and score calculation.
-- [ ] Add tests for store and scoring.
+- [x] Add quiz store JSON file.
+- [x] Add quiz session CRUD APIs.
+- [x] Add answer submission and score calculation.
+- [x] Add tests for store and scoring.
 
 ### Phase 3: RAG-backed Generation
 
@@ -249,4 +263,3 @@ V1 is complete when:
 - see explanation and citations,
 - finish with a score summary,
 - reload the app and see the quiz session restored.
-

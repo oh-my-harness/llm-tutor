@@ -126,7 +126,7 @@ export function QuizPage({ knowledgeBases, onRefreshKnowledgeBases }: Props) {
       setQuizzes((prev) => [quiz, ...prev.filter((item) => item.id !== quiz.id)])
       setActiveQuizId(quiz.id)
       setCurrentIndex(0)
-      setStatus('Quiz ready')
+      setStatus('Quiz generated from knowledge chunks')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -317,7 +317,7 @@ export function QuizPage({ knowledgeBases, onRefreshKnowledgeBases }: Props) {
               </div>
               <h2 className="mt-5 text-2xl font-semibold text-gray-950">Create a quiz from your knowledge base</h2>
               <p className="mt-2 text-sm leading-6 text-gray-500">
-                V1 uses structured placeholder questions to prove the quiz workflow. RAG-backed question generation comes next.
+                Select a knowledge base and generate single-choice questions grounded in retrieved source chunks.
               </p>
             </div>
           </div>
