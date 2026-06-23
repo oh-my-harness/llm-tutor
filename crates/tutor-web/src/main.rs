@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use axum::extract::DefaultBodyLimit;
 use tower_http::cors::{Any, CorsLayer};
 
 mod knowledge_store;
@@ -21,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::knowledge::knowledge_router(knowledge.clone()))
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
         .merge(routes::ws::ws_router(pool.clone()))
+        .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .layer(cors);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));

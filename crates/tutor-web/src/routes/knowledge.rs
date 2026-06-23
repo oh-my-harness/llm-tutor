@@ -147,7 +147,14 @@ async fn ingest_document(
     let job_id = job.id.clone();
     let task_state = state.clone();
     tokio::spawn(async move {
-        update_job(&task_state.jobs, &job_id, "parse", "Preparing pasted text", 12, None);
+        update_job(
+            &task_state.jobs,
+            &job_id,
+            "parse",
+            "Preparing pasted text",
+            12,
+            None,
+        );
         let result =
             ingest_text_document(&task_state, &job_id, &kb, &source, &req.text, size_bytes).await;
         finish_job(&task_state.jobs, &job_id, result);
@@ -173,7 +180,13 @@ async fn upload_document(
             .into_response();
     }
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(err) => return error_response(err),
+        };
+
         if field.name() != Some("file") {
             continue;
         }
@@ -316,7 +329,14 @@ async fn ingest_upload_document(
     content_type: Option<String>,
     mime_type: Option<String>,
 ) -> anyhow::Result<(KnowledgeBaseView, usize)> {
-    update_job(state.jobs.as_ref(), job_id, "parse", "Parsing uploaded file", 18, None);
+    update_job(
+        state.jobs.as_ref(),
+        job_id,
+        "parse",
+        "Parsing uploaded file",
+        18,
+        None,
+    );
     let text = extract_upload_text(source, content_type.as_deref(), original_bytes.as_slice())?;
     if text.trim().is_empty() {
         anyhow::bail!("document text is empty");
@@ -329,12 +349,14 @@ async fn ingest_upload_document(
         .first()
         .map(|doc| doc.id.clone())
         .ok_or_else(|| anyhow::anyhow!("ingested document is missing"))?;
-    let file_path = state
-        .store
-        .store_document_file(kb, &document_id, source, original_bytes.as_slice())?;
-    let updated = state
-        .store
-        .update_document_file_metadata(kb, &document_id, file_path, mime_type)?;
+    let file_path =
+        state
+            .store
+            .store_document_file(kb, &document_id, source, original_bytes.as_slice())?;
+    let updated =
+        state
+            .store
+            .update_document_file_metadata(kb, &document_id, file_path, mime_type)?;
     Ok((updated, chunks))
 }
 
@@ -486,7 +508,12 @@ async fn delete_document(
         )
             .into_response();
     };
-    let Some(document) = item.documents.iter().find(|doc| doc.id == document_id).cloned() else {
+    let Some(document) = item
+        .documents
+        .iter()
+        .find(|doc| doc.id == document_id)
+        .cloned()
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "document not found" })),
@@ -525,7 +552,12 @@ async fn reindex_document(
         )
             .into_response();
     };
-    let Some(document) = item.documents.iter().find(|doc| doc.id == document_id).cloned() else {
+    let Some(document) = item
+        .documents
+        .iter()
+        .find(|doc| doc.id == document_id)
+        .cloned()
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "document not found" })),
@@ -549,10 +581,8 @@ async fn reindex_document(
     let task_state = state.clone();
     tokio::spawn(async move {
         let result = async {
-            let rag = tutor_rag::LanceDbRag::new(
-                tutor_rag::LanceDbRag::default_root(),
-                item.embedding,
-            );
+            let rag =
+                tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
             update_job(
                 &task_state.jobs,
                 &job_id,
@@ -585,7 +615,12 @@ async fn reindex_document(
                 96,
                 Some(chunks),
             );
-            Ok((task_state.store.update_document_chunks(&kb, &document_id, chunks)?, chunks))
+            Ok((
+                task_state
+                    .store
+                    .update_document_chunks(&kb, &document_id, chunks)?,
+                chunks,
+            ))
         }
         .await;
         finish_job(&task_state.jobs, &job_id, result);
@@ -618,7 +653,10 @@ async fn get_document_chunks(
     };
 
     let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
-    match rag.chunks_for_source(&kb, document.index_source(), 200).await {
+    match rag
+        .chunks_for_source(&kb, document.index_source(), 200)
+        .await
+    {
         Ok(chunks) => (
             StatusCode::OK,
             Json(serde_json::json!({ "kb": kb, "document_id": document_id, "chunks": chunks })),
@@ -640,7 +678,10 @@ impl IngestionJobs {
             knowledge_base: None,
             error: None,
         };
-        self.items.lock().unwrap().insert(job.id.clone(), job.clone());
+        self.items
+            .lock()
+            .unwrap()
+            .insert(job.id.clone(), job.clone());
         job
     }
 
@@ -666,11 +707,7 @@ fn update_job(
     }
 }
 
-fn finish_job(
-    jobs: &IngestionJobs,
-    id: &str,
-    result: anyhow::Result<(KnowledgeBaseView, usize)>,
-) {
+fn finish_job(jobs: &IngestionJobs, id: &str, result: anyhow::Result<(KnowledgeBaseView, usize)>) {
     if let Some(job) = jobs.items.lock().unwrap().get_mut(id) {
         match result {
             Ok((knowledge_base, chunks)) => {
@@ -770,7 +807,10 @@ mod tests {
     #[test]
     fn rejects_non_utf8_non_pdf_upload() {
         let err = extract_upload_text("lesson.bin", None, &[0xff, 0xfe]).unwrap_err();
-        assert!(err.to_string().contains("UTF-8 text attachments and PDF files"));
+        assert!(
+            err.to_string()
+                .contains("UTF-8 text attachments and PDF files")
+        );
     }
 
     #[tokio::test]
@@ -793,7 +833,11 @@ mod tests {
         });
         let response = app
             .clone()
-            .oneshot(json_request(Method::POST, "/api/knowledge-bases", create_body))
+            .oneshot(json_request(
+                Method::POST,
+                "/api/knowledge-bases",
+                create_body,
+            ))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
