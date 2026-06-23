@@ -157,6 +157,26 @@ async fn get_session(
         }
     };
     let history_len = messages.len();
+    let traces = match pool.traces(&id).await {
+        Ok(traces) => traces,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let compact_summary = match pool.compact_summary(&id).await {
+        Ok(summary) => summary,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
 
     (
         StatusCode::OK,
@@ -178,6 +198,22 @@ async fn get_session(
                     "text": message_text(&message),
                 }))
             }).collect::<Vec<_>>(),
+            "trace": traces.into_iter().map(|trace| {
+                let mut payload = trace.payload;
+                if let Some(map) = payload.as_object_mut() {
+                    map.insert("kind".into(), serde_json::Value::String(trace.kind.clone()));
+                }
+                serde_json::json!({
+                    "kind": trace.kind,
+                    "timestamp": trace.timestamp,
+                    "payload": payload,
+                })
+            }).collect::<Vec<_>>(),
+            "compact_summary": compact_summary.map(|summary| serde_json::json!({
+                "summary": summary.summary,
+                "timestamp": summary.timestamp,
+                "message_count": summary.message_count,
+            })),
             "llm": entry.llm.map(|config| serde_json::json!({
                 "provider": config.provider,
                 "model": config.model,

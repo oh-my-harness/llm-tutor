@@ -54,6 +54,16 @@ interface SessionDetailResponse {
     role: 'user' | 'assistant'
     text: string
   }>
+  trace?: Array<{
+    kind: string
+    timestamp?: string
+    payload?: Record<string, unknown>
+  }>
+  compact_summary?: {
+    summary: string
+    timestamp?: string
+    message_count?: number
+  } | null
   metadata?: {
     name?: string | null
   }
@@ -369,11 +379,16 @@ export default function App() {
           throw new Error(`failed to load session: HTTP ${res.status}`)
         }
         const data = await res.json() as SessionDetailResponse
-        const restored = (data.messages ?? []).map((message) => ({
+        const restoredTrace = restoreTraceEntries(data.trace ?? [], data.compact_summary ?? null)
+        const restored = attachRestoredCitations(
+          (data.messages ?? []).map((message) => ({
           role: message.role,
           text: message.text,
-        }))
+          })),
+          restoredTrace,
+        )
         setMessages(restored)
+        setTraceEntries(restoredTrace)
         if (data.capability && isCapability(data.capability)) {
           setCapability(data.capability)
         }
@@ -643,6 +658,55 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
       }
     })
     .filter((source): source is Citation => Boolean(source && source.text))
+}
+
+function restoreTraceEntries(
+  trace: NonNullable<SessionDetailResponse['trace']>,
+  compactSummary: NonNullable<SessionDetailResponse['compact_summary']> | null,
+): TraceEntry[] {
+  const entries: TraceEntry[] = trace.map((entry) => {
+    const payload = {
+      ...(entry.payload ?? {}),
+      kind: entry.kind,
+    }
+    return {
+      kind: entry.kind,
+      payload,
+      timestamp: entry.timestamp ? Date.parse(entry.timestamp) : Date.now(),
+    }
+  })
+
+  if (compactSummary?.summary) {
+    const payload: Record<string, unknown> = {
+      kind: 'compact_summary',
+      summary: compactSummary.summary,
+      message_count: compactSummary.message_count,
+    }
+    entries.unshift({
+      kind: 'compact_summary',
+      payload,
+      timestamp: compactSummary.timestamp ? Date.parse(compactSummary.timestamp) : Date.now(),
+    })
+  }
+
+  return entries
+}
+
+function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]): Message[] {
+  const citationGroups = traceEntries
+    .filter((entry) => entry.kind === 'rag_citations')
+    .map((entry) => citationsFromTrace(entry.payload))
+    .filter((citations) => citations.length > 0)
+
+  if (citationGroups.length === 0) return messages
+
+  let citationIndex = 0
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    const citations = citationGroups[citationIndex]
+    citationIndex += 1
+    return citations ? { ...message, citations } : message
+  })
 }
 
 function capabilityLabel(value: string): string {

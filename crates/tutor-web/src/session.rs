@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
-    session::{CreateSessionOptions, ListSessionOptions, SessionMetadata},
+    session::{CreateSessionOptions, ListSessionOptions, SessionEntryPayload, SessionMetadata},
 };
+use llm_harness_types::AgentMessage;
 use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
@@ -39,6 +40,20 @@ pub struct RuntimeSessionSummary {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub model: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedTraceEntry {
+    pub kind: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedCompactSummary {
+    pub summary: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub message_count: usize,
 }
 
 /// Thread-safe pool of active web session metadata plus runtime session repo.
@@ -187,6 +202,120 @@ impl SessionPool {
             .messages)
     }
 
+    pub async fn append_trace(
+        &self,
+        id: &str,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "trace_event".into(),
+                data: serde_json::json!({
+                    "kind": kind,
+                    "payload": payload,
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn traces(
+        &self,
+        id: &str,
+    ) -> Result<Vec<PersistedTraceEntry>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                    return None;
+                };
+                if custom_type != "trace_event" {
+                    return None;
+                }
+                let kind = data.get("kind")?.as_str()?.to_string();
+                let payload = data.get("payload").cloned().unwrap_or_default();
+                Some(PersistedTraceEntry {
+                    kind,
+                    timestamp: entry.timestamp,
+                    payload,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn refresh_compact_summary(
+        &self,
+        id: &str,
+    ) -> Result<Option<PersistedCompactSummary>, llm_harness_types::SessionError> {
+        let messages = self.messages(id).await?;
+        let message_count = messages
+            .iter()
+            .filter(|message| matches!(message, AgentMessage::User(_) | AgentMessage::Assistant(_)))
+            .count();
+        if message_count < 2 {
+            return Ok(None);
+        }
+
+        let summary = build_lightweight_summary(&messages);
+        let value = PersistedCompactSummary {
+            summary,
+            timestamp: chrono::Utc::now(),
+            message_count,
+        };
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "compact_summary".into(),
+                data: serde_json::to_value(&value).unwrap_or_default(),
+            })
+            .await?;
+        Ok(Some(value))
+    }
+
+    pub async fn compact_summary(
+        &self,
+        id: &str,
+    ) -> Result<Option<PersistedCompactSummary>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+
+        if let Some(summary) = entries.iter().rev().find_map(|entry| {
+            let SessionEntryPayload::Compaction(compaction) = &entry.payload else {
+                return None;
+            };
+            let AgentMessage::CompactionSummary(message) = &compaction.summary_message else {
+                return None;
+            };
+            Some(PersistedCompactSummary {
+                summary: message.summary.clone(),
+                timestamp: entry.timestamp,
+                message_count: 0,
+            })
+        }) {
+            return Ok(Some(summary));
+        }
+
+        Ok(entries.into_iter().rev().find_map(|entry| {
+            let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                return None;
+            };
+            if custom_type != "compact_summary" {
+                return None;
+            }
+            serde_json::from_value::<PersistedCompactSummary>(data).ok()
+        }))
+    }
+
     pub async fn list(
         &self,
         limit: Option<usize>,
@@ -303,6 +432,33 @@ impl SessionPool {
     }
 }
 
+fn build_lightweight_summary(messages: &[AgentMessage]) -> String {
+    let turns = messages
+        .iter()
+        .filter_map(|message| {
+            let role = message_role(message)?;
+            let text = message_text(message);
+            if text.trim().is_empty() {
+                return None;
+            }
+            Some(format!("{role}: {}", truncate_chars(text.trim(), 180)))
+        })
+        .collect::<Vec<_>>();
+
+    let start = turns.len().saturating_sub(8);
+    format!(
+        "Recent conversation summary:\n{}",
+        turns[start..].join("\n")
+    )
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    format!("{}...", text.chars().take(max_chars).collect::<String>())
+}
+
 pub fn message_text(message: &llm_harness_types::AgentMessage) -> String {
     let content = match message {
         llm_harness_types::AgentMessage::User(message) => &message.content,
@@ -398,6 +554,59 @@ mod tests {
         let reopened = pool.open_runtime_session(&id).await.unwrap();
         let ctx = reopened.build_context().await.unwrap();
         assert_eq!(ctx.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn runtime_session_persists_trace_entries() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool.create("chat", None, None, None).await.unwrap();
+
+        pool.append_trace(
+            &id,
+            "tool_call",
+            serde_json::json!({ "tool": "rag_search", "capability": "chat" }),
+        )
+        .await
+        .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let traces = reopened.traces(&id).await.unwrap();
+
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].kind, "tool_call");
+        assert_eq!(traces[0].payload["tool"], "rag_search");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn compact_summary_survives_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool.create("chat", None, None, None).await.unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("what is lithography?"))
+            .await
+            .unwrap();
+        session
+            .append_message(tutor_agent::chat::assistant_message(
+                "Lithography transfers patterns.",
+            ))
+            .await
+            .unwrap();
+
+        let summary = pool.refresh_compact_summary(&id).await.unwrap();
+        assert!(summary.is_some());
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let restored = reopened.compact_summary(&id).await.unwrap().unwrap();
+
+        assert!(restored.summary.contains("lithography"));
+        assert_eq!(restored.message_count, 2);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

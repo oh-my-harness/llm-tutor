@@ -7,18 +7,37 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, future::BoxFuture};
 use llm_harness_runtime::budget::BudgetControlAdapter;
 use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use serde::Deserialize;
-use tutor_rag::KnowledgeRetriever;
-use tutor_agent::event_sink::SharedEventSink;
+use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
+use tutor_rag::KnowledgeRetriever;
 
 use crate::session::{LlmSessionConfig, SessionEntry, SessionPool};
+
+#[derive(Clone)]
+struct PersistedEventSink {
+    pool: Arc<SessionPool>,
+    session_id: String,
+    stream: crate::stream::TutorStream,
+}
+
+impl EventSink for PersistedEventSink {
+    fn trace(&self, kind: String, data: serde_json::Value) -> BoxFuture<'static, ()> {
+        let pool = self.pool.clone();
+        let session_id = self.session_id.clone();
+        let stream = self.stream.clone();
+        Box::pin(async move {
+            let _ = pool.append_trace(&session_id, &kind, data.clone()).await;
+            stream.trace(&kind, data).await;
+        })
+    }
+}
 
 struct NoOpPricing;
 
@@ -167,7 +186,11 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             .map(|config| config.require_approval)
             .unwrap_or(false);
         let governance = GovernanceConfig::new(budget, Some(audit), require_approval);
-        let sink: SharedEventSink = Arc::new(entry.stream.clone());
+        let sink: SharedEventSink = Arc::new(PersistedEventSink {
+            pool: pool.clone(),
+            session_id: entry.id.clone(),
+            stream: entry.stream.clone(),
+        });
         let mut router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
         if let Some(embedding) = entry.embedding.clone() {
             let retriever =
@@ -185,8 +208,9 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
 
     match result {
         Ok(answer) => {
-            emit_rag_citations(&entry, &content).await;
+            emit_rag_citations(&pool, &entry, &content).await;
             let _ = entry.stream.content(&answer, false).await;
+            let _ = pool.refresh_compact_summary(&entry.id).await;
             let history_len = pool.history_len(&entry.id).await;
             let _ = entry
                 .stream
@@ -214,7 +238,7 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
     }
 }
 
-async fn emit_rag_citations(entry: &SessionEntry, query: &str) {
+async fn emit_rag_citations(pool: &SessionPool, entry: &SessionEntry, query: &str) {
     let (Some(kb), Some(embedding)) = (entry.kb.as_ref(), entry.embedding.clone()) else {
         return;
     };
@@ -239,23 +263,21 @@ async fn emit_rag_citations(entry: &SessionEntry, query: &str) {
             })
         })
         .collect::<Vec<_>>();
-    let _ = entry
-        .stream
-        .trace(
-            "rag_citations",
-            serde_json::json!({
-                "capability": entry.capability,
-                "tool": "rag_search",
-                "details": {
-                    "query": query,
-                    "kb": kb,
-                    "hits": sources.len(),
-                    "configured": true,
-                    "sources": sources,
-                }
-            }),
-        )
+    let payload = serde_json::json!({
+        "capability": entry.capability,
+        "tool": "rag_search",
+        "details": {
+            "query": query,
+            "kb": kb,
+            "hits": sources.len(),
+            "configured": true,
+            "sources": sources,
+        }
+    });
+    let _ = pool
+        .append_trace(&entry.id, "rag_citations", payload.clone())
         .await;
+    let _ = entry.stream.trace("rag_citations", payload).await;
 }
 
 fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Result<LlmConfig> {
