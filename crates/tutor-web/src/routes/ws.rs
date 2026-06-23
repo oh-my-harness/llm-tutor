@@ -16,7 +16,6 @@ use serde::Deserialize;
 use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
-use tutor_rag::KnowledgeRetriever;
 
 use crate::session::{LlmSessionConfig, SessionEntry, SessionPool};
 
@@ -208,7 +207,6 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
 
     match result {
         Ok(answer) => {
-            emit_rag_citations(&pool, &entry, &content).await;
             let _ = entry.stream.content(&answer, false).await;
             let _ = pool.refresh_compact_summary(&entry.id).await;
             let history_len = pool.history_len(&entry.id).await;
@@ -236,112 +234,6 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
-}
-
-async fn emit_rag_citations(pool: &SessionPool, entry: &SessionEntry, query: &str) {
-    if !should_auto_attach_rag_citations(query) {
-        return;
-    }
-
-    let (Some(kb), Some(embedding)) = (entry.kb.as_ref(), entry.embedding.clone()) else {
-        return;
-    };
-    let retriever = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), embedding);
-    let Ok(hits) = retriever.search(Some(kb), query, 5).await else {
-        return;
-    };
-    if hits.is_empty() {
-        return;
-    }
-    let sources = hits
-        .iter()
-        .enumerate()
-        .map(|(index, hit)| {
-            serde_json::json!({
-                "index": index + 1,
-                "id": hit.id,
-                "kb": hit.kb,
-                "source": hit.source,
-                "text": hit.text,
-                "score": hit.score,
-            })
-        })
-        .collect::<Vec<_>>();
-    let payload = serde_json::json!({
-        "capability": entry.capability,
-        "tool": "rag_search",
-        "details": {
-            "query": query,
-            "kb": kb,
-            "hits": sources.len(),
-            "configured": true,
-            "sources": sources,
-        }
-    });
-    let _ = pool
-        .append_trace(&entry.id, "rag_citations", payload.clone())
-        .await;
-    let _ = entry.stream.trace("rag_citations", payload).await;
-}
-
-fn should_auto_attach_rag_citations(query: &str) -> bool {
-    let normalized = query.trim().to_lowercase();
-    if normalized.is_empty() {
-        return false;
-    }
-
-    let compact = normalized
-        .chars()
-        .filter(|ch| {
-            !ch.is_whitespace() && !matches!(ch, '。' | '，' | ',' | '.' | '!' | '！' | '?' | '？')
-        })
-        .collect::<String>();
-
-    let casual_exact = [
-        "hi", "hello", "hey", "你好", "您好", "嗨", "哈喽", "谢谢", "感谢", "好的", "ok", "嗯",
-        "嗯嗯", "在吗",
-    ];
-    if casual_exact.contains(&compact.as_str()) {
-        return false;
-    }
-
-    let meaningful_markers = [
-        "什么",
-        "为什么",
-        "怎么",
-        "如何",
-        "解释",
-        "说明",
-        "分析",
-        "总结",
-        "对比",
-        "区别",
-        "定义",
-        "原理",
-        "公式",
-        "证明",
-        "计算",
-        "求",
-        "讲",
-        "介绍",
-        "what",
-        "why",
-        "how",
-        "explain",
-        "summarize",
-        "compare",
-        "define",
-        "calculate",
-        "solve",
-    ];
-    if meaningful_markers
-        .iter()
-        .any(|marker| normalized.contains(marker))
-    {
-        return true;
-    }
-
-    compact.chars().count() >= 8
 }
 
 fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Result<LlmConfig> {
@@ -378,34 +270,4 @@ fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Resu
         config.base_url,
         config.chat_path,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_auto_attach_rag_citations;
-
-    #[test]
-    fn auto_citations_skip_casual_greetings() {
-        for query in ["你好", "您好！", "hello", "谢谢", "ok", "在吗？"] {
-            assert!(
-                !should_auto_attach_rag_citations(query),
-                "casual query should not trigger RAG citations: {query}"
-            );
-        }
-    }
-
-    #[test]
-    fn auto_citations_allow_learning_questions() {
-        for query in [
-            "什么是光刻模型？",
-            "请解释一下 DiLA 的核心原理",
-            "how does lithography simulation work?",
-            "compare OPC and computational lithography",
-        ] {
-            assert!(
-                should_auto_attach_rag_citations(query),
-                "learning query should trigger RAG citations: {query}"
-            );
-        }
-    }
 }

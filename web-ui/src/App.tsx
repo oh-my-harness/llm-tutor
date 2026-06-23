@@ -724,7 +724,10 @@ function restoreTraceEntries(
 
 function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]): Message[] {
   const citationGroups = traceEntries
-    .filter((entry) => entry.kind === 'rag_citations')
+    .filter((entry) => {
+      const payload = entry.payload as Record<string, unknown>
+      return entry.kind === 'rag_citations' || (entry.kind === 'tool_result' && payload.tool === 'rag_search')
+    })
     .map((entry) => citationsFromTrace(entry.payload))
     .filter((citations) => citations.length > 0)
 
