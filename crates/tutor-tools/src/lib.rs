@@ -4,4 +4,4 @@ pub mod web_search;
 
 pub use code_exec::CodeExecTool;
 pub use rag_search::RagSearchTool;
-pub use web_search::WebSearchTool;
+pub use web_search::{WebSearchConfig, WebSearchTool};

@@ -20,7 +20,7 @@ use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
 
-use crate::session::{LlmSessionConfig, SessionEntry, SessionPool};
+use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
 
 #[derive(Clone)]
 struct PersistedEventSink {
@@ -208,6 +208,9 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             streamed_content: streamed_content.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
+        if let Some(search) = web_search_config_for_session(entry.search.clone()) {
+            router = router.with_web_search(search);
+        }
         if let Some(embedding) = entry.embedding.clone() {
             let retriever =
                 tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), embedding);
@@ -253,6 +256,18 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
+}
+
+fn web_search_config_for_session(
+    config: Option<SearchSessionConfig>,
+) -> Option<tutor_tools::WebSearchConfig> {
+    let config = config?;
+    Some(tutor_tools::WebSearchConfig {
+        provider: config.provider,
+        base_url: config.base_url,
+        api_key: config.api_key,
+        max_results: config.max_results.unwrap_or(5).clamp(1, 10),
+    })
 }
 
 fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Result<LlmConfig> {

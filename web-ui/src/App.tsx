@@ -12,7 +12,7 @@ import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
-import { loadLlmSettings, saveLlmSettings, settingsForSession } from './settings'
+import { loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec'
 
@@ -258,6 +258,7 @@ export default function App() {
             capability,
             kb,
             llm: settingsForSession(llmSettings),
+            search: searchForSession(llmSettings),
           }),
         })
         if (!res.ok) {

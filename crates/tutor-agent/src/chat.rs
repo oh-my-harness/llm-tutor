@@ -59,7 +59,10 @@ async fn run_chat_inner(
 
     let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
         Arc::new(rag_tool),
-        Arc::new(WebSearchTool::new()),
+        Arc::new(match router.web_search.clone() {
+            Some(config) => WebSearchTool::with_config(config),
+            None => WebSearchTool::new(),
+        }),
         Arc::new(CodeExecTool::new()),
     ];
 

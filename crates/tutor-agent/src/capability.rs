@@ -10,6 +10,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::SharedEventSink;
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
+use tutor_tools::WebSearchConfig;
 
 /// Supported teaching modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +44,7 @@ pub struct CapabilityRouter {
     pub event_sink: Option<SharedEventSink>,
     pub retriever: Option<Arc<dyn KnowledgeRetriever>>,
     pub associated_kb: Option<String>,
+    pub web_search: Option<WebSearchConfig>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -55,6 +57,7 @@ impl CapabilityRouter {
             event_sink: None,
             retriever: None,
             associated_kb: None,
+            web_search: None,
             client: None,
         }
     }
@@ -81,6 +84,11 @@ impl CapabilityRouter {
         if !kb.trim().is_empty() {
             self.associated_kb = Some(kb);
         }
+        self
+    }
+
+    pub fn with_web_search(mut self, config: WebSearchConfig) -> Self {
+        self.web_search = Some(config);
         self
     }
 
@@ -127,6 +135,7 @@ impl CapabilityRouter {
                     self.governance.clone(),
                 )
                 .with_event_sink(self.event_sink.clone())
+                .with_web_search(self.web_search.clone())
                 .with_client(client);
                 orchestrator.run(None).await
             }

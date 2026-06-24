@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 tutor-agent = { path = "../tutor-agent" }
 tutor-rag = { path = "../tutor-rag" }
+tutor-tools = { path = "../tutor-tools" }
 llm-harness-agent = { workspace = true }
 llm-harness-runtime = { workspace = true }
 llm-harness-types = { workspace = true }

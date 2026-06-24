@@ -1,5 +1,6 @@
 export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
+export type SearchProvider = 'duckduckgo'
 
 export interface LlmModelConfig {
   id: string
@@ -23,6 +24,15 @@ export interface EmbeddingModelConfig {
   sendDimensions: boolean
 }
 
+export interface SearchConfig {
+  id: string
+  name: string
+  provider: SearchProvider
+  baseUrl: string
+  apiKey: string
+  maxResults: number
+}
+
 export interface LlmSettings {
   provider: LlmProvider
   model: string
@@ -35,6 +45,8 @@ export interface LlmSettings {
   activeLlmConfigId: string | null
   embeddingConfigs: EmbeddingModelConfig[]
   activeEmbeddingConfigId: string | null
+  searchConfigs: SearchConfig[]
+  activeSearchConfigId: string | null
 }
 
 export const defaultLlmSettings: LlmSettings = {
@@ -49,6 +61,8 @@ export const defaultLlmSettings: LlmSettings = {
   activeLlmConfigId: null,
   embeddingConfigs: [],
   activeEmbeddingConfigId: null,
+  searchConfigs: [],
+  activeSearchConfigId: null,
 }
 
 export function loadLlmSettings(): LlmSettings {
@@ -61,6 +75,7 @@ export function loadLlmSettings(): LlmSettings {
     const activeLlmConfigId = normalizeActiveConfigId(parsed.activeLlmConfigId, llmConfigs)
     const activeLlmConfig = llmConfigs.find((config) => config.id === activeLlmConfigId) ?? null
     const embeddingConfigs = normalizeEmbeddingConfigs(parsed.embeddingConfigs)
+    const searchConfigs = normalizeSearchConfigs(parsed.searchConfigs)
 
     return {
       ...defaultLlmSettings,
@@ -75,6 +90,8 @@ export function loadLlmSettings(): LlmSettings {
       activeLlmConfigId,
       embeddingConfigs,
       activeEmbeddingConfigId: normalizeActiveConfigId(parsed.activeEmbeddingConfigId, embeddingConfigs),
+      searchConfigs,
+      activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
     }
   } catch {
     return defaultLlmSettings
@@ -95,6 +112,17 @@ export function settingsForSession(settings: LlmSettings) {
     chat_path: (config?.chatPath ?? settings.chatPath).trim() || null,
     budget_limit_usd: settings.budgetLimitUsd,
     require_approval: settings.requireApproval,
+  }
+}
+
+export function searchForSession(settings: LlmSettings) {
+  const config = activeSearchConfig(settings)
+  if (!config) return null
+  return {
+    provider: config.provider,
+    base_url: config.baseUrl.trim(),
+    api_key: config.apiKey.trim() || null,
+    max_results: Number(config.maxResults || 5),
   }
 }
 
@@ -130,6 +158,21 @@ export function createEmbeddingConfig(): EmbeddingModelConfig {
     model: 'text-embedding-3-small',
     dimensions: 1536,
     sendDimensions: false,
+  }
+}
+
+export function activeSearchConfig(settings: LlmSettings): SearchConfig | null {
+  return settings.searchConfigs.find((config) => config.id === settings.activeSearchConfigId) ?? null
+}
+
+export function createSearchConfig(): SearchConfig {
+  return {
+    id: crypto.randomUUID(),
+    name: 'DuckDuckGo',
+    provider: 'duckduckgo',
+    baseUrl: 'https://api.duckduckgo.com/',
+    apiKey: '',
+    maxResults: 5,
   }
 }
 
@@ -225,6 +268,22 @@ function normalizeEmbeddingConfigs(value: unknown): EmbeddingModelConfig[] {
       model: typeof config.model === 'string' ? config.model : 'text-embedding-3-small',
       dimensions: Number(config.dimensions || 1536),
       sendDimensions: Boolean(config.sendDimensions),
+    }
+  })
+}
+
+function normalizeSearchConfigs(value: unknown): SearchConfig[] {
+  if (!Array.isArray(value)) return []
+
+  return value.map((item) => {
+    const config = item as Partial<SearchConfig>
+    return {
+      id: typeof config.id === 'string' && config.id ? config.id : crypto.randomUUID(),
+      name: typeof config.name === 'string' && config.name ? config.name : 'DuckDuckGo',
+      provider: 'duckduckgo',
+      baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : 'https://api.duckduckgo.com/',
+      apiKey: typeof config.apiKey === 'string' ? config.apiKey : '',
+      maxResults: Number(config.maxResults || 5),
     }
   })
 }

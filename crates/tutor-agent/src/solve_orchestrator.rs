@@ -11,6 +11,7 @@ use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use crate::solve_context::{Plan, SolveContext, StepResult};
+use tutor_tools::WebSearchConfig;
 
 /// Drives the four-phase Deep Solve pipeline.
 pub struct SolveOrchestrator {
@@ -19,6 +20,7 @@ pub struct SolveOrchestrator {
     llm: LlmConfig,
     governance: GovernanceConfig,
     event_sink: Option<SharedEventSink>,
+    web_search: Option<WebSearchConfig>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -35,6 +37,7 @@ impl SolveOrchestrator {
             llm,
             governance,
             event_sink: None,
+            web_search: None,
             client: None,
         }
     }
@@ -47,6 +50,11 @@ impl SolveOrchestrator {
 
     pub fn with_event_sink(mut self, sink: Option<SharedEventSink>) -> Self {
         self.event_sink = sink;
+        self
+    }
+
+    pub fn with_web_search(mut self, config: Option<WebSearchConfig>) -> Self {
+        self.web_search = config;
         self
     }
 
@@ -358,7 +366,10 @@ impl SolveOrchestrator {
 
             let solve_tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
                 Arc::new(RagSearchTool::new()),
-                Arc::new(WebSearchTool::new()),
+                Arc::new(match self.web_search.clone() {
+                    Some(config) => WebSearchTool::with_config(config),
+                    None => WebSearchTool::new(),
+                }),
                 Arc::new(CodeExecTool::new()),
                 Arc::new(ReplanTool),
             ];

@@ -3,18 +3,20 @@ import {
   Activity,
   Brain,
   Database,
+  Globe2,
   Palette,
   Plus,
   SlidersHorizontal,
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
-import { createEmbeddingConfig, createLlmConfig, llmProviderPreset } from '../settings'
+import { createEmbeddingConfig, createLlmConfig, createSearchConfig, llmProviderPreset } from '../settings'
 import type {
   EmbeddingModelConfig,
   LlmModelConfig,
   LlmProvider,
   LlmSettings,
+  SearchConfig,
 } from '../settings'
 
 interface Props {
@@ -35,12 +37,13 @@ const providerOptions: { value: LlmProvider; label: string; description: string 
   },
 ]
 
-type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'governance'
+type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'governance'
 
 const settingsTabs: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
   { key: 'appearance', label: '外观', icon: Palette },
   { key: 'llm', label: 'LLM', icon: Brain },
   { key: 'embedding', label: '嵌入模型', icon: Database },
+  { key: 'search', label: 'Search', icon: Globe2 },
   { key: 'governance', label: '能力', icon: SlidersHorizontal },
 ]
 
@@ -55,6 +58,8 @@ export function SettingsPage({ settings, onChange }: Props) {
     settings.llmConfigs.find((config) => config.id === settings.activeLlmConfigId) ?? null
   const activeEmbeddingConfig =
     settings.embeddingConfigs.find((config) => config.id === settings.activeEmbeddingConfigId) ?? null
+  const activeSearchConfig =
+    settings.searchConfigs.find((config) => config.id === settings.activeSearchConfigId) ?? null
 
   const addLlmConfig = () => {
     const config = createLlmConfig()
@@ -146,6 +151,40 @@ export function SettingsPage({ settings, onChange }: Props) {
         settings.activeEmbeddingConfigId === id
           ? nextConfigs[0]?.id ?? null
           : settings.activeEmbeddingConfigId,
+    })
+  }
+
+  const addSearchConfig = () => {
+    const config = createSearchConfig()
+    onChange({
+      ...settings,
+      searchConfigs: [...settings.searchConfigs, config],
+      activeSearchConfigId: config.id,
+    })
+  }
+
+  const updateSearchConfig = <K extends keyof SearchConfig>(
+    id: string,
+    key: K,
+    value: SearchConfig[K],
+  ) => {
+    onChange({
+      ...settings,
+      searchConfigs: settings.searchConfigs.map((config) =>
+        config.id === id ? { ...config, [key]: value } : config,
+      ),
+    })
+  }
+
+  const deleteSearchConfig = (id: string) => {
+    const nextConfigs = settings.searchConfigs.filter((config) => config.id !== id)
+    onChange({
+      ...settings,
+      searchConfigs: nextConfigs,
+      activeSearchConfigId:
+        settings.activeSearchConfigId === id
+          ? nextConfigs[0]?.id ?? null
+          : settings.activeSearchConfigId,
     })
   }
 
@@ -438,6 +477,93 @@ export function SettingsPage({ settings, onChange }: Props) {
             </SettingsPanel>
           )}
 
+          {activeTab === 'search' && (
+            <SettingsPanel icon={Globe2} title="Search" description="Configure web search used by agent tools.">
+              {settings.searchConfigs.length === 0 ? (
+                <EmptyConfig onAdd={addSearchConfig} label="No search config" />
+              ) : (
+                <div className="grid gap-5 lg:grid-cols-[230px_1fr]">
+                  <ConfigList
+                    items={settings.searchConfigs.map((config) => ({
+                      id: config.id,
+                      title: config.name || 'DuckDuckGo',
+                      subtitle: `${config.provider} · ${config.maxResults} results`,
+                    }))}
+                    activeId={settings.activeSearchConfigId}
+                    addLabel="Add config"
+                    onAdd={addSearchConfig}
+                    onSelect={(id) => update('activeSearchConfigId', id)}
+                  />
+
+                  {activeSearchConfig && (
+                    <div className="space-y-5 rounded-lg border border-gray-200 p-4">
+                      <ConfigHeader
+                        title="Web search provider"
+                        description="DuckDuckGo works without an API key. Keep API Key empty unless you point this config at a compatible proxy."
+                        onDelete={() => deleteSearchConfig(activeSearchConfig.id)}
+                      />
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="Config name">
+                          <TextInput
+                            value={activeSearchConfig.name}
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'name', value)
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Provider">
+                          <select
+                            className={inputClassName}
+                            value={activeSearchConfig.provider}
+                            onChange={() =>
+                              updateSearchConfig(activeSearchConfig.id, 'provider', 'duckduckgo')
+                            }
+                          >
+                            <option value="duckduckgo">DuckDuckGo</option>
+                          </select>
+                        </Field>
+
+                        <Field label="Base URL">
+                          <TextInput
+                            value={activeSearchConfig.baseUrl}
+                            placeholder="https://api.duckduckgo.com/"
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'baseUrl', value)
+                            }
+                          />
+                        </Field>
+
+                        <Field label="API Key">
+                          <TextInput
+                            type="password"
+                            value={activeSearchConfig.apiKey}
+                            placeholder="optional"
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'apiKey', value)
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Max results">
+                          <TextInput
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={String(activeSearchConfig.maxResults)}
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'maxResults', Number(value))
+                            }
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </SettingsPanel>
+          )}
+
           {activeTab === 'governance' && (
             <SettingsPanel icon={Activity} title="能力" description="预算和工具执行审批会影响新建会话。">
               <Field label="Session budget">
@@ -475,6 +601,7 @@ function tabDescription(tab: SettingsTab) {
   if (tab === 'appearance') return '调整界面语言和视觉偏好。'
   if (tab === 'llm') return '配置对话模型服务，可新增多个服务配置。'
   if (tab === 'embedding') return '配置知识库检索使用的嵌入模型。'
+  if (tab === 'search') return '配置 agent web_search 工具使用的搜索服务。'
   return '配置预算和工具执行策略。'
 }
 

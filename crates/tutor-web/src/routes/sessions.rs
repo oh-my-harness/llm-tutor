@@ -10,7 +10,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::knowledge_store::KnowledgeStore;
-use crate::session::{LlmSessionConfig, SessionPool, message_role, message_text};
+use crate::session::{
+    LlmSessionConfig, SearchSessionConfig, SessionPool, message_role, message_text,
+};
 
 #[derive(Clone)]
 pub struct SessionsState {
@@ -23,6 +25,7 @@ struct CreateSessionRequest {
     capability: String,
     kb: Option<String>,
     llm: Option<CreateLlmConfig>,
+    search: Option<CreateSearchConfig>,
 }
 
 #[derive(Serialize)]
@@ -42,11 +45,20 @@ struct CreateLlmConfig {
 }
 
 #[derive(Deserialize)]
+struct CreateSearchConfig {
+    provider: String,
+    base_url: String,
+    api_key: Option<String>,
+    max_results: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct UpdateSessionRequest {
     capability: Option<String>,
     name: Option<String>,
     kb: Option<String>,
     llm: Option<CreateLlmConfig>,
+    search: Option<CreateSearchConfig>,
 }
 
 async fn create_session(
@@ -63,6 +75,7 @@ async fn create_session(
         budget_limit_usd: config.budget_limit_usd,
         require_approval: config.require_approval.unwrap_or(false),
     });
+    let search = req.search.and_then(search_config_from_request);
     let (kb, embedding) = match knowledge_binding(&state.knowledge, req.kb) {
         Ok(binding) => binding,
         Err(err) => {
@@ -73,7 +86,10 @@ async fn create_session(
                 .into_response();
         }
     };
-    match pool.create(&req.capability, kb, llm, embedding).await {
+    match pool
+        .create(&req.capability, kb, llm, search, embedding)
+        .await
+    {
         Ok(id) => (StatusCode::CREATED, Json(CreateSessionResponse { id })).into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -223,6 +239,12 @@ async fn get_session(
                 "budget_limit_usd": config.budget_limit_usd,
                 "require_approval": config.require_approval,
             })),
+            "search": entry.search.map(|config| serde_json::json!({
+                "provider": config.provider,
+                "base_url": config.base_url,
+                "api_key_configured": config.api_key.is_some(),
+                "max_results": config.max_results,
+            })),
             "embedding": entry.embedding.map(|config| serde_json::json!({
                 "provider": config.provider,
                 "model": config.model,
@@ -301,6 +323,18 @@ async fn update_session(
         }
     }
 
+    if let Some(search) = req.search {
+        let _ = pool.ensure_entry(&id).await;
+        let search = search_config_from_request(search);
+        if !pool.set_search(&id, search) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+    }
+
     if let Some(name) = req.name {
         let normalized = name.trim().to_string();
         let next_name = if normalized.is_empty() {
@@ -334,6 +368,20 @@ fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
         budget_limit_usd: config.budget_limit_usd,
         require_approval: config.require_approval.unwrap_or(false),
     }
+}
+
+fn search_config_from_request(config: CreateSearchConfig) -> Option<SearchSessionConfig> {
+    let provider = config.provider.trim().to_string();
+    let base_url = config.base_url.trim().to_string();
+    if provider.is_empty() || base_url.is_empty() {
+        return None;
+    }
+    Some(SearchSessionConfig {
+        provider,
+        base_url,
+        api_key: config.api_key.filter(|value| !value.trim().is_empty()),
+        max_results: config.max_results,
+    })
 }
 
 async fn delete_session(
