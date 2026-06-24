@@ -2,50 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BookOpenCheck, CheckCircle2, Circle, FileQuestion, Play, RefreshCw, Trash2 } from 'lucide-react'
 import type { LlmSettings } from '../settings'
 import { settingsForSession } from '../settings'
+import type { QuizSession } from '../quizTypes'
 
 interface KnowledgeBaseOption {
   id: string
   name: string
-}
-
-interface QuizSession {
-  id: string
-  title: string
-  kb_id: string
-  status: 'draft' | 'generating' | 'active' | 'finished' | 'error'
-  config: {
-    topic?: string | null
-    difficulty: 'easy' | 'medium' | 'hard'
-    question_count: number
-    question_type: 'single_choice'
-  }
-  questions: QuizQuestion[]
-  answers: QuizAnswer[]
-  score?: {
-    correct: number
-    total: number
-  } | null
-  created_at: string
-  updated_at: string
-}
-
-interface QuizQuestion {
-  id: string
-  question_type: 'single_choice'
-  stem: string
-  options: Array<{ id: string; text: string }>
-  correct_option_id: string
-  explanation: string
-  citations: Array<{ source: string; text: string; score?: number | null }>
-  tags: string[]
-  difficulty: 'easy' | 'medium' | 'hard'
-}
-
-interface QuizAnswer {
-  question_id: string
-  selected_option_id: string
-  correct: boolean
-  answered_at: string
 }
 
 interface Props {

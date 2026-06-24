@@ -21,6 +21,8 @@ pub enum Capability {
     DeepSolve,
     /// Execute user code with explanation.
     CodeExec,
+    /// Generate and answer knowledge-base quizzes in the product UI.
+    Quiz,
 }
 
 impl FromStr for Capability {
@@ -31,6 +33,7 @@ impl FromStr for Capability {
             "chat" => Ok(Self::Chat),
             "deep_solve" => Ok(Self::DeepSolve),
             "code_exec" => Ok(Self::CodeExec),
+            "quiz" => Ok(Self::Quiz),
             other => Err(TutorError::UnsupportedCapability(other.into())),
         }
     }
@@ -142,6 +145,9 @@ impl CapabilityRouter {
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_messages(self, messages).await
             }
+            Capability::Quiz => Err(TutorError::UnsupportedCapability(
+                "quiz is handled by tutor-web quiz APIs".into(),
+            )),
         }
     }
 
@@ -176,6 +182,9 @@ impl CapabilityRouter {
                     .map_err(|err| TutorError::Internal(err.to_string()))?;
                 Ok(answer)
             }
+            Capability::Quiz => Err(TutorError::UnsupportedCapability(
+                "quiz is handled by tutor-web quiz APIs".into(),
+            )),
         }
     }
 }
@@ -246,6 +255,10 @@ mod tests {
         assert!(matches!(
             Capability::from_str("deep_solve").unwrap(),
             Capability::DeepSolve
+        ));
+        assert!(matches!(
+            Capability::from_str("quiz").unwrap(),
+            Capability::Quiz
         ));
         assert!(Capability::from_str("unknown").is_err());
     }

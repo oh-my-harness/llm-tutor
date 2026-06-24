@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,13 @@ struct UpdateSessionRequest {
     kb: Option<String>,
     llm: Option<CreateLlmConfig>,
     search: Option<CreateSearchConfig>,
+}
+
+#[derive(Deserialize)]
+struct AppendMessageRequest {
+    user: Option<String>,
+    assistant: Option<String>,
+    quiz_id: Option<String>,
 }
 
 async fn create_session(
@@ -383,6 +390,84 @@ async fn update_session(
         .into_response()
 }
 
+async fn append_session_messages(
+    State(state): State<Arc<SessionsState>>,
+    Path(id): Path<String>,
+    Json(req): Json<AppendMessageRequest>,
+) -> impl IntoResponse {
+    if state.pool.ensure_entry(&id).await.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "session not found" })),
+        )
+            .into_response();
+    }
+
+    let session = match state.pool.open_runtime_session(&id).await {
+        Ok(session) => session,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    if let Some(user) = req.user.filter(|value| !value.trim().is_empty()) {
+        if let Err(err) = session
+            .append_message(tutor_agent::chat::user_message(&user))
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
+    if let Some(assistant) = req.assistant.filter(|value| !value.trim().is_empty()) {
+        if let Err(err) = session
+            .append_message(tutor_agent::chat::assistant_message(&assistant))
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
+    if let Some(quiz_id) = req.quiz_id.filter(|value| !value.trim().is_empty()) {
+        if let Err(err) = state
+            .pool
+            .append_trace(
+                &id,
+                "quiz_created",
+                serde_json::json!({
+                    "capability": "quiz",
+                    "quiz_id": quiz_id,
+                }),
+            )
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "id": id, "appended": true })),
+    )
+        .into_response()
+}
+
 fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
     LlmSessionConfig {
         provider: config.provider,
@@ -437,6 +522,7 @@ pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -
                 .patch(update_session)
                 .delete(delete_session),
         )
+        .route("/api/sessions/{id}/messages", post(append_session_messages))
         .with_state(state)
 }
 

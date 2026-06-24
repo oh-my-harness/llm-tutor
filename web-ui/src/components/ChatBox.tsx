@@ -4,19 +4,23 @@ import {
   ArrowUp,
   AtSign,
   Brain,
+  BookOpenCheck,
   CheckCircle2,
   ChevronDown,
   Code2,
   Database,
+  FileQuestion,
   MessageSquare,
   Paperclip,
   Sparkles,
+  Circle,
 } from 'lucide-react'
 import type { LlmModelConfig } from '../settings'
+import type { QuizSession } from '../quizTypes'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage } from './MarkdownMessage'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz'
 type OpenMenu = 'mode' | 'knowledge' | 'model' | null
 
 interface Message {
@@ -25,6 +29,7 @@ interface Message {
   kind?: 'idle' | 'thinking' | 'tool' | 'done' | 'error'
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
+  quiz?: QuizSession
 }
 
 interface Citation {
@@ -51,6 +56,8 @@ interface Props {
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
+  onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
+  onQuizFinish?: (quizId: string) => Promise<void>
   disabled: boolean
 }
 
@@ -79,6 +86,12 @@ const modeOptions: Array<{ value: Capability; label: string; description: string
     description: '运行代码并验证结果',
     icon: <Code2 size={21} />,
   },
+  {
+    value: 'quiz',
+    label: 'Quiz',
+    description: '基于对话或知识库生成测验',
+    icon: <FileQuestion size={21} />,
+  },
 ]
 
 export function ChatBox({
@@ -95,6 +108,8 @@ export function ChatBox({
   onCapabilityChange,
   onKnowledgeBaseChange,
   onLlmConfigChange,
+  onQuizAnswer,
+  onQuizFinish,
   disabled,
 }: Props) {
   const [input, setInput] = useState('')
@@ -163,7 +178,13 @@ export function ChatBox({
                     <span>{msg.text}</span>
                   </div>
                 ) : msg.role === 'assistant' ? (
-                  msg.deepSolve && msg.deepSolve.length > 0 ? (
+                  msg.quiz ? (
+                    <ChatQuizCard
+                      quiz={msg.quiz}
+                      onAnswer={onQuizAnswer}
+                      onFinish={onQuizFinish}
+                    />
+                  ) : msg.deepSolve && msg.deepSolve.length > 0 ? (
                     <DeepSolveMessage
                       text={msg.text}
                       events={msg.deepSolve}
@@ -272,6 +293,169 @@ function CitationList({ citations }: { citations: Citation[] }) {
             <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
           </details>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function ChatQuizCard({
+  quiz,
+  onAnswer,
+  onFinish,
+}: {
+  quiz: QuizSession
+  onAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
+  onFinish?: (quizId: string) => Promise<void>
+}) {
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [selectedOptionId, setSelectedOptionId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const question = quiz.questions[currentIndex] ?? null
+  const answer = question ? quiz.answers.find((item) => item.question_id === question.id) ?? null : null
+  const score = quiz.score ?? { correct: 0, total: quiz.questions.length }
+
+  useEffect(() => {
+    setSelectedOptionId(answer?.selected_option_id ?? '')
+  }, [answer?.selected_option_id, question?.id])
+
+  if (!question) {
+    return (
+      <div className="rounded-lg border border-blue-100 bg-white p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+          <BookOpenCheck size={18} />
+          Quiz
+        </div>
+        <p className="mt-3 text-sm text-gray-600">测验还没有生成题目。</p>
+      </div>
+    )
+  }
+
+  const submit = async () => {
+    if (!selectedOptionId || answer || !onAnswer || busy) return
+    setBusy(true)
+    try {
+      await onAnswer(quiz.id, question.id, selectedOptionId)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const finish = async () => {
+    if (!onFinish || busy || quiz.status === 'finished') return
+    setBusy(true)
+    try {
+      await onFinish(quiz.id)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4 rounded-lg border border-blue-100 bg-white p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <FileQuestion size={19} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-base font-semibold text-gray-950">{quiz.title || 'Quiz'}</h3>
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+              {quiz.status}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Question {currentIndex + 1} of {quiz.questions.length} · Score {score.correct}/{score.total}
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {question.tags.map((tag) => (
+            <span key={tag} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+              {tag}
+            </span>
+          ))}
+        </div>
+        <p className="text-base font-medium leading-7 text-gray-950">{question.stem}</p>
+      </div>
+
+      <div className="space-y-2">
+        {question.options.map((option) => {
+          const selected = selectedOptionId === option.id
+          const answered = Boolean(answer)
+          const isCorrect = question.correct_option_id === option.id
+          return (
+            <button
+              key={option.id}
+              type="button"
+              disabled={answered || busy}
+              onClick={() => setSelectedOptionId(option.id)}
+              className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left text-sm transition ${
+                selected ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/40'
+              } ${answered && isCorrect ? 'border-emerald-300 bg-emerald-50' : ''}`}
+            >
+              <span className="mt-0.5 text-blue-700">
+                {selected || (answered && isCorrect) ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+              </span>
+              <span className="leading-6 text-gray-700">
+                <span className="font-medium text-gray-950">{option.id}.</span> {option.text}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {answer && (
+        <div className={`rounded-lg p-3 text-sm ${answer.correct ? 'bg-emerald-50 text-emerald-900' : 'bg-red-50 text-red-900'}`}>
+          <div className="font-medium">{answer.correct ? '回答正确' : '回答错误'}</div>
+          <p className="mt-2 leading-6">{question.explanation}</p>
+          {question.citations.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {question.citations.map((citation, index) => (
+                <details key={`${citation.source}-${index}`} className="rounded-md bg-white/70 p-2">
+                  <summary className="cursor-pointer text-xs font-medium">{citation.source}</summary>
+                  <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
+                </details>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+        <button
+          className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-blue-50 disabled:opacity-50"
+          type="button"
+          disabled={currentIndex === 0}
+          onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
+        >
+          上一题
+        </button>
+        <button
+          className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-blue-50 disabled:opacity-50"
+          type="button"
+          disabled={currentIndex >= quiz.questions.length - 1}
+          onClick={() => setCurrentIndex((value) => Math.min(quiz.questions.length - 1, value + 1))}
+        >
+          下一题
+        </button>
+        <button
+          className="ml-auto inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
+          type="button"
+          disabled={!selectedOptionId || Boolean(answer) || busy}
+          onClick={submit}
+        >
+          提交答案
+        </button>
+        <button
+          className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-blue-50 disabled:opacity-50"
+          type="button"
+          disabled={busy || quiz.status === 'finished'}
+          onClick={finish}
+        >
+          结束测验
+        </button>
       </div>
     </div>
   )

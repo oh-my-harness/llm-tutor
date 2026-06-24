@@ -14,8 +14,9 @@ import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, activeLlmConfig, loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
+import type { QuizSession } from './quizTypes'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz'
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -24,6 +25,7 @@ interface Message {
   transient?: boolean
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
+  quiz?: QuizSession
 }
 
 interface Citation {
@@ -299,6 +301,49 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'user', text }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
+      if (capability === 'quiz') {
+        const conversationSource = quizSourceFromMessages(messages)
+        if (!selectedKnowledgeBaseId && !conversationSource.trim()) {
+          throw new Error('当前还没有可用于出题的对话内容。请先提供一段材料，或关联知识库。')
+        }
+        pushStatus({
+          kind: 'tool',
+          label: 'Generating quiz',
+          detail: selectedKnowledgeBaseId ? 'Knowledge base' : 'Conversation',
+        })
+        const res = await fetch('/api/quizzes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kb_id: selectedKnowledgeBaseId || null,
+            source_text: selectedKnowledgeBaseId ? null : conversationSource,
+            source_label: selectedKnowledgeBaseId ? null : '当前对话',
+            topic: text.trim() || null,
+            difficulty: 'medium',
+            question_count: 5,
+            llm: settingsForSession(llmSettings),
+          }),
+        })
+        const data = await safeJson(res)
+        if (!res.ok) {
+          throw new Error(errorMessage(data, res.status))
+        }
+        const quiz = data.quiz as QuizSession
+        const assistantText = `已根据“${text.trim()}”生成 Quiz。`
+        await persistQuizMessage(sid, text, assistantText, quiz.id)
+        setMessages((prev) => [
+          ...dropTrailingTransientStatus(prev),
+          {
+            role: 'assistant',
+            text: assistantText,
+            quiz,
+          },
+        ])
+        setRunning(false)
+        pushStatus({ kind: 'done', label: 'Done', detail: 'Quiz generated' })
+        void refreshSessions()
+        return
+      }
       send({ type: 'message', content: text })
       void refreshSessions()
     } catch (err) {
@@ -307,7 +352,41 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, send, pushStatus, refreshSessions])
+  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, send, pushStatus, refreshSessions, messages])
+
+  const updateQuizInMessages = useCallback((quiz: QuizSession) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.quiz?.id !== quiz.id) return message
+        return { ...message, quiz }
+      }),
+    )
+  }, [])
+
+  const handleQuizAnswer = useCallback(async (quizId: string, questionId: string, selectedOptionId: string) => {
+    const res = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}/answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question_id: questionId,
+        selected_option_id: selectedOptionId,
+      }),
+    })
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(errorMessage(data, res.status))
+    }
+    updateQuizInMessages(data.quiz as QuizSession)
+  }, [updateQuizInMessages])
+
+  const handleQuizFinish = useCallback(async (quizId: string) => {
+    const res = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}/finish`, { method: 'POST' })
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(errorMessage(data, res.status))
+    }
+    updateQuizInMessages(data.quiz as QuizSession)
+  }, [updateQuizInMessages])
 
   const handleAskDeepSolveStep = useCallback((step: { id: string; title: string; summary?: string }) => {
     const prompt = [
@@ -445,6 +524,7 @@ export default function App() {
         )
         const restored = attachRestoredDeepSolve(withCitations, restoredTrace)
         setMessages(restored)
+        void attachRestoredQuizzes(restored, restoredTrace).then(setMessages)
         setTraceEntries(restoredTrace)
         setLatestUsage(data.latest_usage ?? null)
         if (data.capability && isCapability(data.capability)) {
@@ -558,6 +638,8 @@ export default function App() {
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onLlmConfigChange={handleLlmConfigChange}
+                  onQuizAnswer={handleQuizAnswer}
+                  onQuizFinish={handleQuizFinish}
                   disabled={running}
                 />
               </main>
@@ -845,9 +927,42 @@ function attachRestoredDeepSolve(messages: Message[], traceEntries: TraceEntry[]
   })
 }
 
+async function attachRestoredQuizzes(messages: Message[], traceEntries: TraceEntry[]): Promise<Message[]> {
+  const quizIds = traceEntries
+    .filter((entry) => entry.kind === 'quiz_created')
+    .map((entry) => {
+      const payload = entry.payload as Record<string, unknown>
+      return typeof payload.quiz_id === 'string' ? payload.quiz_id : null
+    })
+    .filter((id): id is string => Boolean(id))
+
+  if (quizIds.length === 0) return messages
+
+  const quizzes = await Promise.all(
+    quizIds.map(async (id) => {
+      try {
+        const res = await fetch(`/api/quizzes/${encodeURIComponent(id)}`)
+        const data = await safeJson(res)
+        return res.ok ? data.quiz as QuizSession : null
+      } catch {
+        return null
+      }
+    }),
+  )
+
+  let quizIndex = 0
+  return messages.map((message) => {
+    if (message.role !== 'assistant' || !message.text.includes('生成 Quiz')) return message
+    const quiz = quizzes[quizIndex]
+    quizIndex += 1
+    return quiz ? { ...message, quiz } : message
+  })
+}
+
 function capabilityLabel(value: string): string {
   if (value === 'deep_solve') return 'Deep Solve'
   if (value === 'code_exec') return 'Code Exec'
+  if (value === 'quiz') return 'Quiz'
   return 'Chat'
 }
 
@@ -901,10 +1016,47 @@ function estimateContextTokens(messages: Message[], streamingText: string) {
   return Math.ceil(ascii / 4 + nonAscii * 1.2 + messageOverhead)
 }
 
+function quizSourceFromMessages(messages: Message[]) {
+  return messages
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .filter((message) => !message.quiz && message.text.trim())
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.text.trim()}`)
+    .join('\n\n')
+    .slice(-12000)
+}
+
 function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
   return Boolean(value && typeof value === 'object')
 }
 
 function isCapability(value: string): value is Capability {
-  return value === 'chat' || value === 'deep_solve' || value === 'code_exec'
+  return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz'
+}
+
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
+function errorMessage(data: Record<string, unknown>, status: number) {
+  return typeof data.error === 'string' ? data.error : `HTTP ${status}`
+}
+
+async function persistQuizMessage(sessionId: string, user: string, assistant: string, quizId: string) {
+  const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user,
+      assistant,
+      quiz_id: quizId,
+    }),
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(errorMessage(data, res.status))
+  }
 }

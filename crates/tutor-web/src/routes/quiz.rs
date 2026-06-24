@@ -27,7 +27,9 @@ struct QuizState {
 #[derive(Debug, Deserialize)]
 struct CreateQuizRequest {
     title: Option<String>,
-    kb_id: String,
+    kb_id: Option<String>,
+    source_text: Option<String>,
+    source_label: Option<String>,
     topic: Option<String>,
     difficulty: Option<QuizDifficulty>,
     question_count: Option<usize>,
@@ -60,22 +62,50 @@ async fn create_quiz(
     State(state): State<QuizState>,
     Json(req): Json<CreateQuizRequest>,
 ) -> impl IntoResponse {
+    let source_text = req
+        .source_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let source_label = req
+        .source_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("conversation")
+        .to_string();
+    let kb_id = req
+        .kb_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    if kb_id.is_none() && source_text.is_none() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "quiz requires either kb_id or source_text",
+        );
+    }
+
     let config = QuizConfig {
-        topic: req.topic,
+        topic: req.topic.clone(),
         difficulty: req.difficulty.unwrap_or(QuizDifficulty::Medium),
         question_count: req.question_count.unwrap_or(5).clamp(1, 10),
         question_type: QuizQuestionType::SingleChoice,
     };
 
-    let quiz = match state
-        .store
-        .create(req.title.unwrap_or_default(), req.kb_id, config)
-    {
+    let quiz = match state.store.create(
+        req.title.unwrap_or_default(),
+        kb_id.clone().unwrap_or_else(|| "__conversation__".into()),
+        config,
+    ) {
         Ok(quiz) => quiz,
         Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
     };
 
-    match generate_questions(&state, quiz, req.llm).await {
+    match generate_questions(&state, quiz, req.llm, source_text, source_label).await {
         Ok(quiz) => (
             StatusCode::CREATED,
             Json(serde_json::json!({ "quiz": quiz })),
@@ -147,7 +177,15 @@ async fn generate_questions(
     state: &QuizState,
     quiz: QuizSession,
     llm: Option<CreateLlmConfig>,
+    source_text: Option<String>,
+    source_label: String,
 ) -> anyhow::Result<QuizSession> {
+    if let Some(source_text) = source_text {
+        let hits = source_hits_from_text(&quiz, &source_label, &source_text);
+        let questions = questions_for_hits(&quiz, llm, &hits).await?;
+        return state.store.replace_questions(&quiz.id, questions);
+    }
+
     let Some(kb) = state.knowledge.get(&quiz.kb_id) else {
         anyhow::bail!("knowledge base not found");
     };
@@ -166,7 +204,16 @@ async fn generate_questions(
     if hits.is_empty() {
         anyhow::bail!("no source chunks found for quiz generation");
     }
-    let questions = if let Some(llm) = llm.and_then(llm_config_from_request) {
+    let questions = questions_for_hits(&quiz, llm, &hits).await?;
+    state.store.replace_questions(&quiz.id, questions)
+}
+
+async fn questions_for_hits(
+    quiz: &QuizSession,
+    llm: Option<CreateLlmConfig>,
+    hits: &[tutor_rag::SearchHit],
+) -> anyhow::Result<Vec<QuizQuestion>> {
+    if let Some(llm) = llm.and_then(llm_config_from_request) {
         let sources = hits
             .iter()
             .map(|hit| tutor_agent::quiz::QuizSourceChunk {
@@ -185,11 +232,42 @@ async fn generate_questions(
             &sources,
         )
         .await?;
-        questions_from_generated(&quiz.config, &hits, generated)
+        Ok(questions_from_generated(&quiz.config, hits, generated))
     } else {
-        questions_from_hits(&quiz.config, &hits)
-    };
-    state.store.replace_questions(&quiz.id, questions)
+        Ok(questions_from_hits(&quiz.config, hits))
+    }
+}
+
+fn source_hits_from_text(
+    quiz: &QuizSession,
+    source_label: &str,
+    source_text: &str,
+) -> Vec<tutor_rag::SearchHit> {
+    split_source_text(source_text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| tutor_rag::SearchHit {
+            id: format!("conversation-{index}"),
+            kb: quiz.kb_id.clone(),
+            source: source_label.to_string(),
+            text,
+            score: None,
+        })
+        .collect()
+}
+
+fn split_source_text(source_text: &str) -> Vec<String> {
+    let normalized = source_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= 1800 {
+        return vec![normalized];
+    }
+
+    let chars = normalized.chars().collect::<Vec<_>>();
+    chars
+        .chunks(1800)
+        .take(12)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect()
 }
 
 fn llm_config_from_request(config: CreateLlmConfig) -> Option<tutor_agent::LlmConfig> {
@@ -415,6 +493,34 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
         assert_eq!(body["quiz"]["score"]["correct"], 1);
+    }
+
+    #[tokio::test]
+    async fn creates_quiz_from_source_text_without_knowledge_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
+        let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
+        let app = quiz_router_with_rag_root(store, knowledge, dir.path().join("rag"));
+
+        let create = serde_json::json!({
+            "topic": "element reactions",
+            "source_text": "Element reactions are triggered by switching between one or two characters. Talents and weapons shape role builds.",
+            "source_label": "current conversation",
+            "question_count": 1
+        });
+        let response = app
+            .oneshot(json_request(Method::POST, "/api/quizzes", create))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response).await;
+        assert_eq!(body["quiz"]["kb_id"], "__conversation__");
+        assert_eq!(body["quiz"]["questions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["quiz"]["questions"][0]["citations"][0]["source"],
+            "current conversation"
+        );
     }
 
     fn json_request(method: Method, uri: &str, body: serde_json::Value) -> Request<Body> {

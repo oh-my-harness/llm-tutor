@@ -132,9 +132,6 @@ impl QuizStore {
     }
 
     pub fn create(&self, title: String, kb_id: String, config: QuizConfig) -> Result<QuizSession> {
-        if kb_id.trim().is_empty() {
-            return Err(anyhow!("knowledge base is required"));
-        }
         let now = Utc::now();
         let mut item = QuizSession {
             id: uuid::Uuid::new_v4().to_string(),
