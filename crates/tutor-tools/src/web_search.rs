@@ -12,15 +12,19 @@ pub struct WebSearchConfig {
     pub base_url: String,
     pub api_key: Option<String>,
     pub max_results: usize,
+    pub fetch_timeout_secs: u64,
+    pub max_fetch_chars: usize,
 }
 
 impl Default for WebSearchConfig {
     fn default() -> Self {
         Self {
             provider: "duckduckgo".into(),
-            base_url: "https://api.duckduckgo.com/".into(),
+            base_url: "https://duckduckgo.com/html/".into(),
             api_key: None,
             max_results: 5,
+            fetch_timeout_secs: 12,
+            max_fetch_chars: 12_000,
         }
     }
 }
@@ -95,7 +99,8 @@ impl Tool for WebSearchTool {
                     "query": query,
                     "provider": self.config.provider,
                     "results": results.len(),
-                    "items": results,
+                    "items": result_details(&results),
+                    "sources": source_details(&results),
                 }),
                 terminate: false,
             })
@@ -109,117 +114,43 @@ impl WebSearchTool {
             anyhow::bail!("unsupported web search provider `{}`", self.config.provider);
         }
 
-        let mut request = self.client.get(self.config.base_url.trim()).query(&[
-            ("q", query),
-            ("format", "json"),
-            ("no_html", "1"),
-            ("no_redirect", "1"),
-        ]);
-        if let Some(api_key) = self
-            .config
-            .api_key
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            request = request.header("x-api-key", api_key).bearer_auth(api_key);
-        }
-
-        let response = request.send().await?.error_for_status()?;
-        let value = response.json::<DuckDuckGoResponse>().await?;
-        Ok(parse_duckduckgo_response(
-            value,
-            self.config.max_results.clamp(1, 10),
-        ))
+        let limit = self.config.max_results.clamp(1, 10);
+        let response = self
+            .client
+            .get(self.config.base_url.trim())
+            .query(&[("q", query)])
+            .header(reqwest::header::USER_AGENT, "llm-tutor/0.1 web_search")
+            .send()
+            .await?
+            .error_for_status()?;
+        let html = response.text().await?;
+        Ok(parse_duckduckgo_html_results(&html, limit))
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct SearchResult {
     pub title: String,
     pub url: String,
     pub snippet: String,
+    pub score: Option<f32>,
+    pub source: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct DuckDuckGoResponse {
-    #[serde(default)]
-    abstract_text: String,
-    #[serde(default)]
-    abstract_url: String,
-    #[serde(default)]
-    heading: String,
-    #[serde(default)]
-    related_topics: Vec<DuckDuckGoTopic>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum DuckDuckGoTopic {
-    Topic {
-        #[serde(default, rename = "Text")]
-        text: String,
-        #[serde(default, rename = "FirstURL")]
-        first_url: String,
-    },
-    Group {
-        #[serde(default, rename = "Topics")]
-        topics: Vec<DuckDuckGoTopic>,
-    },
-    Other,
-}
-
-fn parse_duckduckgo_response(
-    response: DuckDuckGoResponse,
-    max_results: usize,
-) -> Vec<SearchResult> {
-    let mut results = Vec::new();
-    if !response.abstract_text.trim().is_empty() {
-        results.push(SearchResult {
-            title: if response.heading.trim().is_empty() {
-                "DuckDuckGo abstract".into()
-            } else {
-                response.heading
-            },
-            url: response.abstract_url,
-            snippet: response.abstract_text,
-        });
-    }
-
-    push_topics(&mut results, response.related_topics, max_results);
-    results.truncate(max_results);
-    results
-}
-
-fn push_topics(results: &mut Vec<SearchResult>, topics: Vec<DuckDuckGoTopic>, max_results: usize) {
-    for topic in topics {
-        if results.len() >= max_results {
-            return;
-        }
-        match topic {
-            DuckDuckGoTopic::Topic { text, first_url } => {
-                if !text.trim().is_empty() {
-                    results.push(SearchResult {
-                        title: title_from_text(&text),
-                        url: first_url,
-                        snippet: text,
-                    });
-                }
-            }
-            DuckDuckGoTopic::Group { topics } => push_topics(results, topics, max_results),
-            DuckDuckGoTopic::Other => {}
+impl SearchResult {
+    fn new(title: impl Into<String>, url: impl Into<String>, snippet: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            url: url.into(),
+            snippet: snippet.into(),
+            score: None,
+            source: Some("duckduckgo".into()),
         }
     }
 }
 
-fn title_from_text(text: &str) -> String {
-    text.split(" - ")
-        .next()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("DuckDuckGo result")
-        .chars()
-        .take(80)
-        .collect()
+fn normalize_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn format_results(query: &str, results: &[SearchResult]) -> String {
@@ -242,6 +173,155 @@ fn format_results(query: &str, results: &[SearchResult]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("[WEB] DuckDuckGo results for \"{query}\":\n{body}")
+}
+
+fn result_details(results: &[SearchResult]) -> serde_json::Value {
+    serde_json::Value::Array(
+        results
+            .iter()
+            .map(|result| {
+                json!({
+                    "title": result.title,
+                    "url": result.url,
+                    "snippet": result.snippet,
+                    "score": result.score,
+                    "source": result.source,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn source_details(results: &[SearchResult]) -> serde_json::Value {
+    serde_json::Value::Array(
+        results
+            .iter()
+            .enumerate()
+            .map(|(index, result)| {
+                json!({
+                    "index": index + 1,
+                    "kind": "web",
+                    "source": result.title,
+                    "title": result.title,
+                    "url": result.url,
+                    "text": result.snippet,
+                    "score": result.score,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn parse_duckduckgo_html_results(html: &str, limit: usize) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    let mut rest = html;
+
+    while results.len() < limit {
+        let Some(anchor_pos) = rest.find("result__a") else {
+            break;
+        };
+        rest = &rest[anchor_pos..];
+
+        let Some(href) = attr_value(rest, "href") else {
+            rest = &rest["result__a".len()..];
+            continue;
+        };
+        let Some(anchor_end) = rest.find("</a>") else {
+            break;
+        };
+        let title_start = rest.find('>').map(|index| index + 1).unwrap_or(0);
+        let title = normalize_text(&strip_html_fragment(&rest[title_start..anchor_end]));
+        let url = normalize_duckduckgo_url(&decode_entities(&href));
+
+        let next_anchor = rest[anchor_end..]
+            .find("result__a")
+            .map(|index| anchor_end + index)
+            .unwrap_or(rest.len());
+        let block = &rest[..next_anchor];
+        let snippet = extract_html_snippet(block).unwrap_or_default();
+
+        if !title.is_empty() && !url.is_empty() {
+            results.push(SearchResult::new(title, url, snippet));
+        }
+
+        rest = &rest[next_anchor..];
+    }
+
+    results
+}
+
+fn extract_html_snippet(block: &str) -> Option<String> {
+    let marker = "result__snippet";
+    let pos = block.find(marker)?;
+    let part = &block[pos..];
+    let start = part.find('>').map(|index| index + 1)?;
+    let end = part[start..].find("</").map(|index| start + index)?;
+    Some(normalize_text(&strip_html_fragment(&part[start..end])))
+}
+
+fn attr_value(input: &str, name: &str) -> Option<String> {
+    let marker = format!("{name}=");
+    let pos = input.find(&marker)?;
+    let value = &input[pos + marker.len()..];
+    let quote = value.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &value[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    Some(rest[..end].to_string())
+}
+
+fn normalize_duckduckgo_url(url: &str) -> String {
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        if let Some(uddg) = parsed
+            .query_pairs()
+            .find_map(|(key, value)| (key == "uddg").then_some(value.into_owned()))
+        {
+            return uddg;
+        }
+        return parsed.to_string();
+    }
+
+    if let Ok(parsed) = reqwest::Url::parse(&format!("https://duckduckgo.com{url}")) {
+        if let Some(uddg) = parsed
+            .query_pairs()
+            .find_map(|(key, value)| (key == "uddg").then_some(value.into_owned()))
+        {
+            return uddg;
+        }
+    }
+
+    url.trim().to_string()
+}
+
+fn strip_html_fragment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for ch in input.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                out.push(' ');
+            }
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    decode_entities(&out)
+}
+
+fn decode_entities(text: &str) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
 }
 
 #[cfg(test)]
@@ -275,22 +355,22 @@ mod tests {
     }
 
     #[test]
-    fn parses_duckduckgo_response() {
-        let response = DuckDuckGoResponse {
-            abstract_text: "Rust is a programming language.".into(),
-            abstract_url: "https://www.rust-lang.org/".into(),
-            heading: "Rust".into(),
-            related_topics: vec![DuckDuckGoTopic::Topic {
-                text: "Rust - A language empowering everyone.".into(),
-                first_url: "https://duckduckgo.com/Rust".into(),
-            }],
-        };
+    fn parses_duckduckgo_html_results() {
+        let html = r#"
+          <div class="result">
+            <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs&amp;rut=abc">
+              Example <b>Docs</b>
+            </a>
+            <a class="result__snippet">Official documentation &amp; examples.</a>
+          </div>
+        "#;
 
-        let results = parse_duckduckgo_response(response, 5);
+        let results = parse_duckduckgo_html_results(html, 5);
 
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].title, "Rust");
-        assert!(format_results("rust", &results).contains("DuckDuckGo results"));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Example Docs");
+        assert_eq!(results[0].url, "https://example.com/docs");
+        assert_eq!(results[0].snippet, "Official documentation & examples.");
     }
 
     #[tokio::test]

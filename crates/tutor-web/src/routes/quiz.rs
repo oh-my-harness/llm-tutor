@@ -209,6 +209,7 @@ fn llm_config_from_request(config: CreateLlmConfig) -> Option<tutor_agent::LlmCo
         api_key,
         config.base_url.filter(|value| !value.trim().is_empty()),
         config.chat_path.filter(|value| !value.trim().is_empty()),
+        None,
     ))
 }
 

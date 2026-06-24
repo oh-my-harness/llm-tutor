@@ -40,6 +40,7 @@ struct CreateLlmConfig {
     api_key: Option<String>,
     base_url: Option<String>,
     chat_path: Option<String>,
+    context_window_tokens: Option<u32>,
     budget_limit_usd: Option<f64>,
     require_approval: Option<bool>,
 }
@@ -50,6 +51,8 @@ struct CreateSearchConfig {
     base_url: String,
     api_key: Option<String>,
     max_results: Option<usize>,
+    fetch_timeout_secs: Option<u64>,
+    max_fetch_chars: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +75,7 @@ async fn create_session(
         api_key: config.api_key.filter(|value| !value.trim().is_empty()),
         base_url: config.base_url.filter(|value| !value.trim().is_empty()),
         chat_path: config.chat_path.filter(|value| !value.trim().is_empty()),
+        context_window_tokens: config.context_window_tokens,
         budget_limit_usd: config.budget_limit_usd,
         require_approval: config.require_approval.unwrap_or(false),
     });
@@ -193,6 +197,16 @@ async fn get_session(
                 .into_response();
         }
     };
+    let latest_usage = match pool.latest_usage(&id).await {
+        Ok(usage) => usage,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
 
     (
         StatusCode::OK,
@@ -230,12 +244,21 @@ async fn get_session(
                 "timestamp": summary.timestamp,
                 "message_count": summary.message_count,
             })),
+            "latest_usage": latest_usage.map(|usage| serde_json::json!({
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_creation_tokens": usage.cache_creation_tokens,
+                "total_tokens": usage.total_tokens(),
+                "source": "provider",
+            })),
             "llm": entry.llm.map(|config| serde_json::json!({
                 "provider": config.provider,
                 "model": config.model,
                 "api_key_configured": config.api_key.is_some(),
                 "base_url": config.base_url,
                 "chat_path": config.chat_path,
+                "context_window_tokens": config.context_window_tokens,
                 "budget_limit_usd": config.budget_limit_usd,
                 "require_approval": config.require_approval,
             })),
@@ -244,6 +267,8 @@ async fn get_session(
                 "base_url": config.base_url,
                 "api_key_configured": config.api_key.is_some(),
                 "max_results": config.max_results,
+                "fetch_timeout_secs": config.fetch_timeout_secs,
+                "max_fetch_chars": config.max_fetch_chars,
             })),
             "embedding": entry.embedding.map(|config| serde_json::json!({
                 "provider": config.provider,
@@ -365,6 +390,7 @@ fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
         api_key: config.api_key.filter(|value| !value.trim().is_empty()),
         base_url: config.base_url.filter(|value| !value.trim().is_empty()),
         chat_path: config.chat_path.filter(|value| !value.trim().is_empty()),
+        context_window_tokens: config.context_window_tokens,
         budget_limit_usd: config.budget_limit_usd,
         require_approval: config.require_approval.unwrap_or(false),
     }
@@ -381,6 +407,8 @@ fn search_config_from_request(config: CreateSearchConfig) -> Option<SearchSessio
         base_url,
         api_key: config.api_key.filter(|value| !value.trim().is_empty()),
         max_results: config.max_results,
+        fetch_timeout_secs: config.fetch_timeout_secs,
+        max_fetch_chars: config.max_fetch_chars,
     })
 }
 

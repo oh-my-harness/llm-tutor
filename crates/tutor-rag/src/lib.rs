@@ -91,7 +91,8 @@ impl LanceDbRag {
     }
 
     pub async fn ingest_text(&self, kb: &str, source: &str, text: &str) -> Result<usize> {
-        self.ingest_text_with_progress(kb, source, text, |_| {}).await
+        self.ingest_text_with_progress(kb, source, text, |_| {})
+            .await
     }
 
     pub async fn ingest_text_with_progress(

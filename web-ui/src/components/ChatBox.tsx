@@ -31,12 +31,16 @@ interface Citation {
   index: number
   source: string
   text: string
+  kind?: 'rag' | 'web'
+  title?: string
+  url?: string
   score?: number | null
 }
 
 interface Props {
   messages: Message[]
   streamingText: string
+  contextStats: ContextStats
   capability: Capability
   llmConfigs: LlmModelConfig[]
   activeLlmConfigId: string | null
@@ -48,6 +52,12 @@ interface Props {
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
   disabled: boolean
+}
+
+export interface ContextStats {
+  usedTokens: number
+  maxTokens: number
+  source: 'provider' | 'estimate'
 }
 
 const modeOptions: Array<{ value: Capability; label: string; description: string; icon: ReactNode }> = [
@@ -74,6 +84,7 @@ const modeOptions: Array<{ value: Capability; label: string; description: string
 export function ChatBox({
   messages,
   streamingText,
+  contextStats,
   capability,
   llmConfigs,
   activeLlmConfigId,
@@ -140,6 +151,7 @@ export function ChatBox({
         </div>
       ) : (
         <>
+          <ContextCapacity stats={contextStats} />
           <div ref={scrollRef} onScroll={handleScroll} className="flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((msg, i) => (
               <div key={i} className={messageClassName(msg)}>
@@ -202,17 +214,61 @@ export function ChatBox({
   )
 }
 
-function CitationList({ citations }: { citations: Citation[] }) {
+function ContextCapacity({ stats }: { stats: ContextStats }) {
+  const maxTokens = Math.max(1, stats.maxTokens)
+  const usedTokens = Math.max(0, stats.usedTokens)
+  const percent = Math.min(100, Math.round((usedTokens / maxTokens) * 100))
+  const tone =
+    percent >= 90
+      ? 'bg-red-500'
+      : percent >= 75
+        ? 'bg-amber-500'
+        : 'bg-blue-600'
+
   return (
-    <div className="mt-3 border-t border-gray-200 pt-3">
-      <div className="mb-2 text-xs font-medium text-gray-500">引用来源</div>
+    <div className="border-b border-blue-50 bg-white px-5 py-2">
+      <div className="flex items-center gap-3 text-xs text-gray-500">
+        <span className="font-medium text-gray-700">上下文容量</span>
+        <div className="h-1.5 w-36 overflow-hidden rounded-full bg-gray-100">
+          <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
+        </div>
+        <span>
+          {formatTokenCount(usedTokens)} / {formatTokenCount(maxTokens)}
+        </span>
+        <span className="text-gray-400">{percent}%</span>
+        <span className="text-gray-400">{stats.source === 'provider' ? '上次请求' : '估算'}</span>
+      </div>
+    </div>
+  )
+}
+
+function formatTokenCount(value: number) {
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`
+  return String(value)
+}
+
+function CitationList({ citations }: { citations: Citation[] }) {
+  const hasWeb = citations.some((citation) => citation.kind === 'web' || citation.url)
+  return (
+    <div className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
+      <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '网页来源' : '引用来源'}</div>
       <div className="space-y-2">
         {citations.map((citation, index) => (
           <details key={`${citation.source}-${index}`} className="rounded-md border border-blue-100 bg-white/70 p-2">
             <summary className="cursor-pointer text-xs font-medium text-blue-700">
-              [{citation.index || index + 1}] {citation.source}
+              [{citation.index || index + 1}] {citation.title || citation.source}
               {typeof citation.score === 'number' ? ` · ${citation.score.toFixed(4)}` : ''}
             </summary>
+            {citation.url && (
+              <a
+                className="mt-2 block truncate text-xs text-blue-600 hover:text-blue-700"
+                href={citation.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {citation.url}
+              </a>
+            )}
             <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
           </details>
         ))}

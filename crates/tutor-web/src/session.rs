@@ -6,7 +6,7 @@ use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
     session::{CreateSessionOptions, ListSessionOptions, SessionEntryPayload, SessionMetadata},
 };
-use llm_harness_types::AgentMessage;
+use llm_harness_types::{AgentMessage, TokenUsage};
 use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
@@ -18,6 +18,7 @@ pub struct LlmSessionConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub chat_path: Option<String>,
+    pub context_window_tokens: Option<u32>,
     pub budget_limit_usd: Option<f64>,
     pub require_approval: bool,
 }
@@ -28,6 +29,8 @@ pub struct SearchSessionConfig {
     pub base_url: String,
     pub api_key: Option<String>,
     pub max_results: Option<usize>,
+    pub fetch_timeout_secs: Option<u64>,
+    pub max_fetch_chars: Option<usize>,
 }
 
 /// Product metadata for an active tutor session.
@@ -218,6 +221,27 @@ impl SessionPool {
             .build_context()
             .await?
             .messages)
+    }
+
+    pub async fn latest_usage(
+        &self,
+        id: &str,
+    ) -> Result<Option<TokenUsage>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+
+        for entry in entries.into_iter().rev() {
+            let SessionEntryPayload::Message(AgentMessage::Assistant(message)) = entry.payload
+            else {
+                continue;
+            };
+            return Ok(message.usage);
+        }
+
+        Ok(None)
     }
 
     pub async fn append_trace(
@@ -770,6 +794,7 @@ mod tests {
                     api_key: Some("sk-test".into()),
                     base_url: Some("https://api.deepseek.com".into()),
                     chat_path: Some("/chat/completions".into()),
+                    context_window_tokens: Some(128_000),
                     budget_limit_usd: Some(2.0),
                     require_approval: false,
                 }),

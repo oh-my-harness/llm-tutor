@@ -8,7 +8,7 @@ use llm_harness_types::{
     AfterProviderResponseHook, AgentEvent, AgentMessage, AssistantMessage, ContentBlock,
     StopReason, UserMessage,
 };
-use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
+use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
@@ -63,6 +63,10 @@ async fn run_chat_inner(
             Some(config) => WebSearchTool::with_config(config),
             None => WebSearchTool::new(),
         }),
+        Arc::new(match router.web_search.clone() {
+            Some(config) => WebFetchTool::with_config(config),
+            None => WebFetchTool::new(),
+        }),
         Arc::new(CodeExecTool::new()),
     ];
 
@@ -70,10 +74,12 @@ async fn run_chat_inner(
 
     let opts = AgentHarnessOptions {
         model: router.llm.model.clone(),
+        model_info: Some(router.llm.model_info(8192)),
         tools,
         system_prompt: Some(
-            "You are a knowledgeable tutor. Use rag_search to find relevant course material, \
-             web_search for supplementary information, and code_exec when the user asks to run \
+            "You are a knowledgeable tutor. Use rag_search to find relevant course material. \
+             Use web_search for up-to-date or external information, then use web_fetch to read \
+             important source pages before making citation-backed claims. Use code_exec when the user asks to run \
              or verify code. For non-trivial numeric calculations, approximations, transcendental \
              functions, statistics, simulations, or any answer where exact arithmetic matters, call \
              code_exec with Python to compute or verify the result before answering. Answer clearly \
@@ -90,11 +96,15 @@ async fn run_chat_inner(
 
     let client = router.make_client();
 
+    let has_session = session.is_some();
     let harness = if let Some(session) = session {
         AgentHarness::with_session(client, router.env.clone(), session, opts)
     } else {
         AgentHarness::new_in_memory(client, router.env.clone(), opts).await
     };
+    if has_session {
+        try_auto_compact(&harness, router, "chat").await;
+    }
     let mut rx = harness.subscribe();
     let prompt_task = tokio::spawn(async move {
         harness
@@ -207,6 +217,40 @@ async fn run_chat_inner(
     }
 
     Ok(last_text)
+}
+
+pub(crate) async fn try_auto_compact(
+    harness: &AgentHarness,
+    router: &CapabilityRouter,
+    capability: &str,
+) {
+    match harness.compact().await {
+        Ok(stats) => {
+            emit_trace(
+                &router.event_sink,
+                "context_compacted",
+                serde_json::json!({
+                    "capability": capability,
+                    "tokens_before": stats.tokens_before,
+                    "tokens_after": stats.tokens_after,
+                    "compressed_entries": stats.compressed_entries,
+                }),
+            )
+            .await;
+        }
+        Err(err) if err.to_string().contains("not enough tokens to compact") => {}
+        Err(err) => {
+            emit_trace(
+                &router.event_sink,
+                "context_compaction_skipped",
+                serde_json::json!({
+                    "capability": capability,
+                    "reason": err.to_string(),
+                }),
+            )
+            .await;
+        }
+    }
 }
 
 pub fn user_message(text: &str) -> AgentMessage {

@@ -43,6 +43,11 @@
   - Actual: `llm-harness-runtime` still depends on the older adapter revision, so `llm-tutor` cannot independently bump `llm_adapter` without ending up with two incompatible `Provider` traits in the dependency graph.
   - Suggestion: update `llm-harness-runtime` to the adapter revision that includes embedding support, then optionally re-export embedding traits/types from the runtime facade.
 
+- **Latest runtime HEAD cannot be consumed by Cargo because of an invalid submodule URL**
+  - Expected: pinning `llm-harness-runtime` to the latest commit should fetch cleanly as a git dependency.
+  - Actual: commit `c6eba08` pulls submodule `examples/coding-agent` with URL `git@github.com:oh-my-harness/coding-agent.git`, which Cargo reports as an invalid relative URL.
+  - Suggestion: use a valid absolute SSH URL such as `ssh://git@github.com/oh-my-harness/coding-agent.git`, or avoid requiring example submodules for library consumption.
+
 - **Structured-output generation still needs app-level boilerplate**
   - Expected: product flows like quiz generation can ask the framework for typed JSON output with provider-aware schema support, retries, and validation error reporting.
   - Actual: `llm-tutor` has to call `llm_adapter::ResponseFormat` directly, extract JSON from text, deserialize it, and implement validation/retry policy in product code.
@@ -64,6 +69,7 @@
 | Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
 | SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
 | Runtime adapter pin lacks embedding support | Downstream RAG work cannot use new adapter embedding APIs while sharing harness provider traits | High |
+| Latest runtime HEAD has an invalid example submodule URL | Cargo cannot consume `c6eba08` as a git dependency | High |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
 | No shared harness builder in the public API | Every call site repeats `new_in_memory`, `subscribe`, event loop | Low |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
@@ -76,4 +82,5 @@
 4. Re-export common session repo option and metadata types from the facade/prelude
 5. Add `Session::set_name` or metadata updates for `SessionInfo`
 6. Align `llm-harness-runtime` with the adapter revision that includes `EmbeddingProvider`
-7. Add a typed structured-output helper for provider-aware JSON/schema generation
+7. Fix example submodule URLs so latest runtime commits can be consumed as git dependencies
+8. Add a typed structured-output helper for provider-aware JSON/schema generation

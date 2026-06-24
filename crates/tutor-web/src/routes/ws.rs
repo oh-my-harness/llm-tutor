@@ -232,6 +232,12 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             let _ = entry.stream.content(final_text, false).await;
             let _ = pool.refresh_compact_summary(&entry.id).await;
             let history_len = pool.history_len(&entry.id).await;
+            let latest_usage = pool.latest_usage(&entry.id).await.ok().flatten();
+            let context_window_tokens = entry
+                .llm
+                .as_ref()
+                .and_then(|config| config.context_window_tokens)
+                .unwrap_or(200_000);
             let _ = entry
                 .stream
                 .status(
@@ -239,6 +245,15 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
                     serde_json::json!({
                         "capability": entry.capability,
                         "history_len": history_len,
+                        "context_window_tokens": context_window_tokens,
+                        "usage": latest_usage.map(|usage| serde_json::json!({
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "cache_read_tokens": usage.cache_read_tokens,
+                            "cache_creation_tokens": usage.cache_creation_tokens,
+                            "total_tokens": usage.total_tokens(),
+                            "source": "provider",
+                        })),
                     }),
                 )
                 .await;
@@ -267,6 +282,11 @@ fn web_search_config_for_session(
         base_url: config.base_url,
         api_key: config.api_key,
         max_results: config.max_results.unwrap_or(5).clamp(1, 10),
+        fetch_timeout_secs: config.fetch_timeout_secs.unwrap_or(12).clamp(3, 60),
+        max_fetch_chars: config
+            .max_fetch_chars
+            .unwrap_or(12_000)
+            .clamp(1_000, 60_000),
     })
 }
 
@@ -303,5 +323,6 @@ fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Resu
         api_key,
         config.base_url,
         config.chat_path,
+        config.context_window_tokens,
     ))
 }

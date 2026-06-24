@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
+import type { ContextStats } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
@@ -12,7 +13,7 @@ import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
-import { loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, activeLlmConfig, loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec'
 
@@ -29,6 +30,9 @@ interface Citation {
   index: number
   source: string
   text: string
+  kind?: 'rag' | 'web'
+  title?: string
+  url?: string
   score?: number | null
 }
 
@@ -67,9 +71,19 @@ interface SessionDetailResponse {
     timestamp?: string
     message_count?: number
   } | null
+  latest_usage?: TokenUsagePayload | null
   metadata?: {
     name?: string | null
   }
+}
+
+interface TokenUsagePayload {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_tokens?: number
+  cache_creation_tokens?: number
+  total_tokens?: number
+  source?: string
 }
 
 export default function App() {
@@ -92,6 +106,16 @@ export default function App() {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(true)
+  const [latestUsage, setLatestUsage] = useState<TokenUsagePayload | null>(null)
+  const contextStats = useMemo<ContextStats>(() => {
+    const config = activeLlmConfig(llmSettings)
+    const providerInputTokens = typeof latestUsage?.input_tokens === 'number' ? latestUsage.input_tokens : null
+    return {
+      usedTokens: providerInputTokens ?? estimateContextTokens(messages, streamingText),
+      maxTokens: config?.contextWindowTokens || DEFAULT_CONTEXT_WINDOW_TOKENS,
+      source: providerInputTokens === null ? 'estimate' : 'provider',
+    }
+  }, [latestUsage, llmSettings, messages, streamingText])
 
   const pushStatus = useCallback((status: AgentStatus) => {
     if (status.kind === 'idle') return
@@ -146,7 +170,7 @@ export default function App() {
       } else if (event.type === 'trace') {
         const citations = citationsFromTrace(event.payload as Record<string, unknown>)
         if (citations.length > 0) {
-          pendingCitationsRef.current = citations
+          pendingCitationsRef.current = mergeCitations(pendingCitationsRef.current, citations)
         }
         const deepSolveEvent = deepSolveEventFromTrace(event.payload as Record<string, unknown>)
         if (deepSolveEvent) {
@@ -170,6 +194,7 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
         } else if (kind === 'done') {
+          setLatestUsage(isTokenUsagePayload(payload.usage) ? payload.usage : null)
           if (!streamingRef.current) {
             pushStatus({
               kind: 'done',
@@ -308,6 +333,7 @@ export default function App() {
     streamingRef.current = ''
     setTraceEntries([])
     pendingDeepSolveRef.current = []
+    setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
     setView('chat')
@@ -401,6 +427,7 @@ export default function App() {
       streamingRef.current = ''
       setTraceEntries([])
       pendingDeepSolveRef.current = []
+      setLatestUsage(null)
       setSessionId(id)
       try {
         const res = await fetch(`/api/sessions/${id}`)
@@ -419,6 +446,7 @@ export default function App() {
         const restored = attachRestoredDeepSolve(withCitations, restoredTrace)
         setMessages(restored)
         setTraceEntries(restoredTrace)
+        setLatestUsage(data.latest_usage ?? null)
         if (data.capability && isCapability(data.capability)) {
           setCapability(data.capability)
         }
@@ -471,6 +499,7 @@ export default function App() {
       streamingRef.current = ''
       setTraceEntries([])
       pendingDeepSolveRef.current = []
+      setLatestUsage(null)
     }
 
     try {
@@ -518,6 +547,7 @@ export default function App() {
                 <ChatBox
                   messages={messages}
                   streamingText={streamingText}
+                  contextStats={contextStats}
                   capability={capability}
                   llmConfigs={llmSettings.llmConfigs}
                   activeLlmConfigId={llmSettings.activeLlmConfigId}
@@ -680,8 +710,10 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
 
 function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
   const isRagToolResult = payload.kind === 'tool_result' && payload.tool === 'rag_search'
+  const isWebToolResult =
+    payload.kind === 'tool_result' && (payload.tool === 'web_search' || payload.tool === 'web_fetch')
   const isRagCitationEvent = payload.kind === 'rag_citations'
-  if (!isRagToolResult && !isRagCitationEvent) return []
+  if (!isRagToolResult && !isWebToolResult && !isRagCitationEvent) return []
   const details = payload.details
   if (!details || typeof details !== 'object') return []
   const sources = (details as { sources?: unknown }).sources
@@ -694,10 +726,25 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
         index: typeof item.index === 'number' ? item.index : 0,
         source: typeof item.source === 'string' ? item.source : 'source',
         text: typeof item.text === 'string' ? item.text : '',
+        kind: item.kind === 'web' ? 'web' : 'rag',
+        title: typeof item.title === 'string' ? item.title : undefined,
+        url: typeof item.url === 'string' ? item.url : undefined,
         score: typeof item.score === 'number' ? item.score : null,
       }
     })
     .filter((source): source is Citation => Boolean(source && source.text))
+}
+
+function mergeCitations(existing: Citation[], incoming: Citation[]): Citation[] {
+  const merged = [...existing]
+  for (const citation of incoming) {
+    const key = citation.url || `${citation.source}:${citation.text.slice(0, 80)}`
+    const seen = merged.some((item) => (item.url || `${item.source}:${item.text.slice(0, 80)}`) === key)
+    if (!seen) {
+      merged.push({ ...citation, index: merged.length + 1 })
+    }
+  }
+  return merged
 }
 
 function restoreTraceEntries(
@@ -736,7 +783,11 @@ function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]
   const citationGroups = traceEntries
     .filter((entry) => {
       const payload = entry.payload as Record<string, unknown>
-      return entry.kind === 'rag_citations' || (entry.kind === 'tool_result' && payload.tool === 'rag_search')
+      return (
+        entry.kind === 'rag_citations' ||
+        (entry.kind === 'tool_result' &&
+          (payload.tool === 'rag_search' || payload.tool === 'web_search' || payload.tool === 'web_fetch'))
+      )
     })
     .map((entry) => citationsFromTrace(entry.payload))
     .filter((citations) => citations.length > 0)
@@ -828,6 +879,30 @@ function upsertRecentSession(
     { id, title },
     ...prev.filter((session) => session.id !== id),
   ])
+}
+
+function estimateContextTokens(messages: Message[], streamingText: string) {
+  const text = [
+    ...messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map((message) => message.text),
+    streamingText,
+  ].join('\n')
+  if (!text.trim()) return 0
+
+  let ascii = 0
+  let nonAscii = 0
+  for (const char of text) {
+    if (char.charCodeAt(0) <= 0x7f) ascii += 1
+    else nonAscii += 1
+  }
+
+  const messageOverhead = messages.filter((message) => message.role === 'user' || message.role === 'assistant').length * 4
+  return Math.ceil(ascii / 4 + nonAscii * 1.2 + messageOverhead)
+}
+
+function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
+  return Boolean(value && typeof value === 'object')
 }
 
 function isCapability(value: string): value is Capability {

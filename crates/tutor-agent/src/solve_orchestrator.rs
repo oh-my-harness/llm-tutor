@@ -200,6 +200,7 @@ impl SolveOrchestrator {
 
         let opts = AgentHarnessOptions {
             model: self.llm.model.clone(),
+            model_info: Some(self.llm.model_info(8192)),
             tools: vec![],
             system_prompt: Some(
                 "You are a math tutor planning a structured solution. \
@@ -296,7 +297,7 @@ impl SolveOrchestrator {
             PrepareNextTurnHook,
         };
         use std::sync::Arc;
-        use tutor_tools::{CodeExecTool, RagSearchTool, WebSearchTool};
+        use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
 
         use crate::phase_manager::PhaseManager;
         use crate::replan_hook::ReplanHook;
@@ -370,6 +371,10 @@ impl SolveOrchestrator {
                     Some(config) => WebSearchTool::with_config(config),
                     None => WebSearchTool::new(),
                 }),
+                Arc::new(match self.web_search.clone() {
+                    Some(config) => WebFetchTool::with_config(config),
+                    None => WebFetchTool::new(),
+                }),
                 Arc::new(CodeExecTool::new()),
                 Arc::new(ReplanTool),
             ];
@@ -377,16 +382,19 @@ impl SolveOrchestrator {
             let phase_mgr = Arc::new(PhaseManager::new(vec![
                 "rag_search".into(),
                 "web_search".into(),
+                "web_fetch".into(),
                 "code_exec".into(),
                 "replan".into(),
             ]));
 
             let opts = AgentHarnessOptions {
                 model: self.llm.model.clone(),
+                model_info: Some(self.llm.model_info(8192)),
                 tools: solve_tools,
                 system_prompt: Some(format!(
                     "You are solving step {id}: {goal}\n\
-                     Use rag_search and web_search for information, code_exec to run code.\n\
+                     Use rag_search for course knowledge, web_search for external discovery, \
+                     web_fetch to read important source pages, and code_exec to run code.\n\
                      For non-trivial numeric calculations, approximations, transcendental functions, \
                      statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
                      If the current plan is fundamentally wrong, call replan(reason) — \
@@ -586,6 +594,7 @@ impl SolveOrchestrator {
 
         let opts = AgentHarnessOptions {
             model: self.llm.model.clone(),
+            model_info: Some(self.llm.model_info(8192)),
             tools: vec![],
             system_prompt: Some(
                 "You are a math tutor writing a final answer synthesis. \

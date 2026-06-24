@@ -166,7 +166,11 @@ impl KnowledgeStore {
         Ok(view)
     }
 
-    pub fn delete_document(&self, kb: &str, document_id: &str) -> Result<Option<KnowledgeDocument>> {
+    pub fn delete_document(
+        &self,
+        kb: &str,
+        document_id: &str,
+    ) -> Result<Option<KnowledgeDocument>> {
         let mut items = self.items.lock().unwrap();
         let Some(item) = items.iter_mut().find(|item| item.id == kb) else {
             return Err(anyhow!("knowledge base not found"));

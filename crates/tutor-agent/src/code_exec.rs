@@ -62,6 +62,7 @@ async fn run_code_exec_inner(
 
     let opts = AgentHarnessOptions {
         model: router.llm.model.clone(),
+        model_info: Some(router.llm.model_info(8192)),
         tools,
         system_prompt: Some(
             "You are a code execution tutor. When the user asks to run code, \
@@ -83,11 +84,15 @@ async fn run_code_exec_inner(
     };
 
     let client = router.make_client();
+    let has_session = session.is_some();
     let harness = if let Some(session) = session {
         AgentHarness::with_session(client, router.env.clone(), session, opts)
     } else {
         AgentHarness::new_in_memory(client, router.env.clone(), opts).await
     };
+    if has_session {
+        crate::chat::try_auto_compact(&harness, router, "code_exec").await;
+    }
     let mut rx = harness.subscribe();
     let prompt_task = tokio::spawn(async move {
         harness

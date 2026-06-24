@@ -10,6 +10,7 @@ export interface LlmModelConfig {
   apiKey: string
   baseUrl: string
   chatPath: string
+  contextWindowTokens: number
 }
 
 export interface EmbeddingModelConfig {
@@ -31,6 +32,8 @@ export interface SearchConfig {
   baseUrl: string
   apiKey: string
   maxResults: number
+  fetchTimeoutSecs: number
+  maxFetchChars: number
 }
 
 export interface LlmSettings {
@@ -48,6 +51,8 @@ export interface LlmSettings {
   searchConfigs: SearchConfig[]
   activeSearchConfigId: string | null
 }
+
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000
 
 export const defaultLlmSettings: LlmSettings = {
   provider: 'openai',
@@ -110,6 +115,7 @@ export function settingsForSession(settings: LlmSettings) {
     api_key: (config?.apiKey ?? settings.apiKey).trim(),
     base_url: (config?.baseUrl ?? settings.baseUrl).trim() || null,
     chat_path: (config?.chatPath ?? settings.chatPath).trim() || null,
+    context_window_tokens: Number(config?.contextWindowTokens || DEFAULT_CONTEXT_WINDOW_TOKENS),
     budget_limit_usd: settings.budgetLimitUsd,
     require_approval: settings.requireApproval,
   }
@@ -123,6 +129,8 @@ export function searchForSession(settings: LlmSettings) {
     base_url: config.baseUrl.trim(),
     api_key: config.apiKey.trim() || null,
     max_results: Number(config.maxResults || 5),
+    fetch_timeout_secs: Number(config.fetchTimeoutSecs || 12),
+    max_fetch_chars: Number(config.maxFetchChars || 12000),
   }
 }
 
@@ -140,6 +148,7 @@ export function createLlmConfig(provider: LlmProvider = 'openai'): LlmModelConfi
     apiKey: '',
     baseUrl: preset.baseUrl,
     chatPath: preset.chatPath,
+    contextWindowTokens: preset.contextWindowTokens,
   }
 }
 
@@ -170,9 +179,11 @@ export function createSearchConfig(): SearchConfig {
     id: crypto.randomUUID(),
     name: 'DuckDuckGo',
     provider: 'duckduckgo',
-    baseUrl: 'https://api.duckduckgo.com/',
+    baseUrl: 'https://duckduckgo.com/html/',
     apiKey: '',
     maxResults: 5,
+    fetchTimeoutSecs: 12,
+    maxFetchChars: 12000,
   }
 }
 
@@ -195,6 +206,7 @@ export function llmProviderPreset(provider: LlmProvider) {
       model: 'claude-haiku-4-5-20251001',
       baseUrl: 'https://api.anthropic.com',
       chatPath: '',
+      contextWindowTokens: 200000,
     }
   }
 
@@ -203,6 +215,7 @@ export function llmProviderPreset(provider: LlmProvider) {
     model: 'gpt-4o-mini',
     baseUrl: 'https://api.openai.com',
     chatPath: '/v1/chat/completions',
+    contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
   }
 }
 
@@ -226,6 +239,7 @@ function normalizeLlmConfigs(value: unknown, legacy: Partial<LlmSettings>): LlmM
         apiKey: typeof legacy.apiKey === 'string' ? legacy.apiKey : '',
         baseUrl: typeof legacy.baseUrl === 'string' ? legacy.baseUrl : defaultLlmSettings.baseUrl,
         chatPath: typeof legacy.chatPath === 'string' ? legacy.chatPath : defaultLlmSettings.chatPath,
+        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
       },
     ]
   }
@@ -245,7 +259,13 @@ function normalizeLlmConfig(value: unknown): LlmModelConfig {
     apiKey: typeof config.apiKey === 'string' ? config.apiKey : '',
     baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : preset.baseUrl,
     chatPath: typeof config.chatPath === 'string' ? config.chatPath : preset.chatPath,
+    contextWindowTokens: normalizePositiveNumber(config.contextWindowTokens, preset.contextWindowTokens),
   }
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue) : fallback
 }
 
 function normalizeLlmProvider(value: unknown): LlmProvider {
@@ -281,9 +301,11 @@ function normalizeSearchConfigs(value: unknown): SearchConfig[] {
       id: typeof config.id === 'string' && config.id ? config.id : crypto.randomUUID(),
       name: typeof config.name === 'string' && config.name ? config.name : 'DuckDuckGo',
       provider: 'duckduckgo',
-      baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : 'https://api.duckduckgo.com/',
+      baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : 'https://duckduckgo.com/html/',
       apiKey: typeof config.apiKey === 'string' ? config.apiKey : '',
       maxResults: Number(config.maxResults || 5),
+      fetchTimeoutSecs: normalizePositiveNumber(config.fetchTimeoutSecs, 12),
+      maxFetchChars: normalizePositiveNumber(config.maxFetchChars, 12000),
     }
   })
 }

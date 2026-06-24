@@ -88,6 +88,7 @@ export function SettingsPage({ settings, onChange }: Props) {
         model: preset.model,
         baseUrl: preset.baseUrl,
         chatPath: preset.chatPath,
+        contextWindowTokens: preset.contextWindowTokens,
       }
     })
     const active = nextConfigs.find((config) => config.id === settings.activeLlmConfigId)
@@ -349,6 +350,18 @@ export function SettingsPage({ settings, onChange }: Props) {
                             onChange={(value) => updateLlmConfig(activeLlmConfig.id, 'chatPath', value)}
                           />
                         </Field>
+
+                        <Field label="上下文窗口 tokens">
+                          <TextInput
+                            type="number"
+                            min="1024"
+                            step="1024"
+                            value={String(activeLlmConfig.contextWindowTokens)}
+                            onChange={(value) =>
+                              updateLlmConfig(activeLlmConfig.id, 'contextWindowTokens', Number(value))
+                            }
+                          />
+                        </Field>
                       </div>
                     </div>
                   )}
@@ -499,7 +512,7 @@ export function SettingsPage({ settings, onChange }: Props) {
                     <div className="space-y-5 rounded-lg border border-gray-200 p-4">
                       <ConfigHeader
                         title="Web search provider"
-                        description="DuckDuckGo works without an API key. Keep API Key empty unless you point this config at a compatible proxy."
+                        description="DuckDuckGo HTML search works without an API key. Use Base URL for a compatible HTML search endpoint or proxy."
                         onDelete={() => deleteSearchConfig(activeSearchConfig.id)}
                       />
                       <div className="grid gap-4 md:grid-cols-2">
@@ -527,7 +540,7 @@ export function SettingsPage({ settings, onChange }: Props) {
                         <Field label="Base URL">
                           <TextInput
                             value={activeSearchConfig.baseUrl}
-                            placeholder="https://api.duckduckgo.com/"
+                            placeholder="https://duckduckgo.com/html/"
                             onChange={(value) =>
                               updateSearchConfig(activeSearchConfig.id, 'baseUrl', value)
                             }
@@ -553,6 +566,31 @@ export function SettingsPage({ settings, onChange }: Props) {
                             value={String(activeSearchConfig.maxResults)}
                             onChange={(value) =>
                               updateSearchConfig(activeSearchConfig.id, 'maxResults', Number(value))
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Fetch timeout seconds">
+                          <TextInput
+                            type="number"
+                            min="3"
+                            max="60"
+                            value={String(activeSearchConfig.fetchTimeoutSecs)}
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'fetchTimeoutSecs', Number(value))
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Max fetched characters">
+                          <TextInput
+                            type="number"
+                            min="1000"
+                            max="60000"
+                            step="1000"
+                            value={String(activeSearchConfig.maxFetchChars)}
+                            onChange={(value) =>
+                              updateSearchConfig(activeSearchConfig.id, 'maxFetchChars', Number(value))
                             }
                           />
                         </Field>

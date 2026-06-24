@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use llm_adapter::{Provider, anthropic::AnthropicProvider, deepseek, openai::OpenAIProvider};
+use llm_harness_agent::ModelInfo;
 use llm_harness_runtime_auth::EnvAuthHook;
 
 use crate::error::{Result, TutorError};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmProviderKind {
     Anthropic,
     DeepSeek,
@@ -20,6 +21,7 @@ pub struct LlmConfig {
     pub api_key_env: Option<String>,
     pub base_url: Option<String>,
     pub chat_path: Option<String>,
+    pub context_window_tokens: Option<u32>,
 }
 
 impl LlmConfig {
@@ -64,6 +66,7 @@ impl LlmConfig {
             api_key_env: Some("ANTHROPIC_API_KEY".into()),
             base_url: None,
             chat_path: None,
+            context_window_tokens: Some(200_000),
         }
     }
 
@@ -73,6 +76,7 @@ impl LlmConfig {
         api_key: impl Into<String>,
         base_url: Option<String>,
         chat_path: Option<String>,
+        context_window_tokens: Option<u32>,
     ) -> Self {
         Self {
             provider,
@@ -81,6 +85,7 @@ impl LlmConfig {
             api_key_env: None,
             base_url,
             chat_path,
+            context_window_tokens,
         }
     }
 
@@ -108,6 +113,7 @@ impl LlmConfig {
             api_key_env: Some(api_key_env.into()),
             base_url,
             chat_path,
+            context_window_tokens: Some(default_context_window(provider)),
         })
     }
 
@@ -153,5 +159,19 @@ impl LlmConfig {
                 Arc::new(builder.build())
             }
         }
+    }
+
+    pub fn model_info(&self, max_tokens: u32) -> ModelInfo {
+        ModelInfo {
+            context_window: self.context_window_tokens.unwrap_or(200_000),
+            max_tokens,
+        }
+    }
+}
+
+fn default_context_window(provider: LlmProviderKind) -> u32 {
+    match provider {
+        LlmProviderKind::Anthropic => 200_000,
+        LlmProviderKind::DeepSeek | LlmProviderKind::OpenAI => 128_000,
     }
 }
