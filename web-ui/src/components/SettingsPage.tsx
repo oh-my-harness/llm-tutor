@@ -10,13 +10,20 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
-import { createEmbeddingConfig, createLlmConfig, createSearchConfig, llmProviderPreset } from '../settings'
+import {
+  createEmbeddingConfig,
+  createLlmConfig,
+  createSearchConfig,
+  llmProviderPreset,
+  searchProviderPreset,
+} from '../settings'
 import type {
   EmbeddingModelConfig,
   LlmModelConfig,
   LlmProvider,
   LlmSettings,
   SearchConfig,
+  SearchProvider,
 } from '../settings'
 
 interface Props {
@@ -173,6 +180,23 @@ export function SettingsPage({ settings, onChange }: Props) {
       ...settings,
       searchConfigs: settings.searchConfigs.map((config) =>
         config.id === id ? { ...config, [key]: value } : config,
+      ),
+    })
+  }
+
+  const updateSearchProvider = (id: string, provider: SearchProvider) => {
+    const preset = searchProviderPreset(provider)
+    onChange({
+      ...settings,
+      searchConfigs: settings.searchConfigs.map((config) =>
+        config.id === id
+          ? {
+              ...config,
+              provider,
+              name: config.name === 'DuckDuckGo' || config.name === 'Bing' ? preset.name : config.name,
+              baseUrl: preset.baseUrl,
+            }
+          : config,
       ),
     })
   }
@@ -512,7 +536,7 @@ export function SettingsPage({ settings, onChange }: Props) {
                     <div className="space-y-5 rounded-lg border border-gray-200 p-4">
                       <ConfigHeader
                         title="Web search provider"
-                        description="DuckDuckGo HTML search works without an API key. Use Base URL for a compatible HTML search endpoint or proxy."
+                        description="HTML search providers are best-effort. Bing usually works better for Chinese queries; a real Search API is still more reliable."
                         onDelete={() => deleteSearchConfig(activeSearchConfig.id)}
                       />
                       <div className="grid gap-4 md:grid-cols-2">
@@ -529,18 +553,22 @@ export function SettingsPage({ settings, onChange }: Props) {
                           <select
                             className={inputClassName}
                             value={activeSearchConfig.provider}
-                            onChange={() =>
-                              updateSearchConfig(activeSearchConfig.id, 'provider', 'duckduckgo')
+                            onChange={(event) =>
+                              updateSearchProvider(
+                                activeSearchConfig.id,
+                                event.target.value as SearchProvider,
+                              )
                             }
                           >
                             <option value="duckduckgo">DuckDuckGo</option>
+                            <option value="bing">Bing</option>
                           </select>
                         </Field>
 
                         <Field label="Base URL">
                           <TextInput
                             value={activeSearchConfig.baseUrl}
-                            placeholder="https://duckduckgo.com/html/"
+                            placeholder={searchProviderPreset(activeSearchConfig.provider).baseUrl}
                             onChange={(value) =>
                               updateSearchConfig(activeSearchConfig.id, 'baseUrl', value)
                             }

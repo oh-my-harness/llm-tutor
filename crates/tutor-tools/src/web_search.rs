@@ -89,10 +89,10 @@ impl Tool for WebSearchTool {
             }
 
             let results = self
-                .search_duckduckgo(&query)
+                .search(&query)
                 .await
                 .map_err(|err| ToolError::Execution(err.to_string()))?;
-            let text = format_results(&query, &results);
+            let text = format_results(&self.config.provider, &query, &results);
             Ok(ToolResult {
                 content: vec![ContentBlock::Text { text }],
                 details: json!({
@@ -109,22 +109,42 @@ impl Tool for WebSearchTool {
 }
 
 impl WebSearchTool {
-    async fn search_duckduckgo(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
-        if self.config.provider.trim().to_ascii_lowercase() != "duckduckgo" {
-            anyhow::bail!("unsupported web search provider `{}`", self.config.provider);
+    async fn search(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        match self.config.provider.trim().to_ascii_lowercase().as_str() {
+            "duckduckgo" => self.search_duckduckgo(query).await,
+            "bing" => self.search_bing(query).await,
+            other => anyhow::bail!("unsupported web search provider `{other}`"),
         }
+    }
 
+    async fn search_duckduckgo(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
         let limit = self.config.max_results.clamp(1, 10);
         let response = self
             .client
             .get(self.config.base_url.trim())
             .query(&[("q", query)])
-            .header(reqwest::header::USER_AGENT, "llm-tutor/0.1 web_search")
+            .header(reqwest::header::USER_AGENT, browser_user_agent())
+            .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
             .send()
             .await?
             .error_for_status()?;
         let html = response.text().await?;
         Ok(parse_duckduckgo_html_results(&html, limit))
+    }
+
+    async fn search_bing(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let response = self
+            .client
+            .get(self.config.base_url.trim())
+            .query(&[("q", query)])
+            .header(reqwest::header::USER_AGENT, browser_user_agent())
+            .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
+            .send()
+            .await?
+            .error_for_status()?;
+        let html = response.text().await?;
+        Ok(parse_bing_html_results(&html, limit))
     }
 }
 
@@ -153,9 +173,15 @@ fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn format_results(query: &str, results: &[SearchResult]) -> String {
+fn browser_user_agent() -> &'static str {
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}
+
+fn format_results(provider: &str, query: &str, results: &[SearchResult]) -> String {
     if results.is_empty() {
-        return format!("[WEB] No DuckDuckGo results found for \"{query}\".");
+        return format!(
+            "[WEB] No parseable {provider} results found for \"{query}\". The search provider may have returned no matches, blocked the request, or changed its HTML structure."
+        );
     }
 
     let body = results
@@ -172,7 +198,7 @@ fn format_results(query: &str, results: &[SearchResult]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("[WEB] DuckDuckGo results for \"{query}\":\n{body}")
+    format!("[WEB] {provider} results for \"{query}\":\n{body}")
 }
 
 fn result_details(results: &[SearchResult]) -> serde_json::Value {
@@ -248,6 +274,60 @@ fn parse_duckduckgo_html_results(html: &str, limit: usize) -> Vec<SearchResult> 
     }
 
     results
+}
+
+fn parse_bing_html_results(html: &str, limit: usize) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    let mut rest = html;
+
+    while results.len() < limit {
+        let Some(item_pos) = rest.find("b_algo") else {
+            break;
+        };
+        rest = &rest[item_pos..];
+        let next_item = rest["b_algo".len()..]
+            .find("b_algo")
+            .map(|index| "b_algo".len() + index)
+            .unwrap_or(rest.len());
+        let block = &rest[..next_item];
+
+        if let Some(result) = parse_bing_result_block(block) {
+            results.push(result);
+        }
+        rest = &rest[next_item..];
+    }
+
+    results
+}
+
+fn parse_bing_result_block(block: &str) -> Option<SearchResult> {
+    let h2_pos = block.find("<h2")?;
+    let h2_block = &block[h2_pos..];
+    let href = attr_value(h2_block, "href")?;
+    let anchor_end = h2_block.find("</a>")?;
+    let title_start = h2_block.find('>').map(|index| index + 1)?;
+    let title = normalize_text(&strip_html_fragment(&h2_block[title_start..anchor_end]));
+    let snippet = extract_bing_snippet(block).unwrap_or_default();
+
+    if title.is_empty() || href.trim().is_empty() {
+        return None;
+    }
+
+    Some(SearchResult {
+        title,
+        url: decode_entities(&href),
+        snippet,
+        score: None,
+        source: Some("bing".into()),
+    })
+}
+
+fn extract_bing_snippet(block: &str) -> Option<String> {
+    let p_pos = block.find("<p")?;
+    let part = &block[p_pos..];
+    let start = part.find('>').map(|index| index + 1)?;
+    let end = part[start..].find("</p>").map(|index| start + index)?;
+    Some(normalize_text(&strip_html_fragment(&part[start..end])))
 }
 
 fn extract_html_snippet(block: &str) -> Option<String> {
@@ -371,6 +451,24 @@ mod tests {
         assert_eq!(results[0].title, "Example Docs");
         assert_eq!(results[0].url, "https://example.com/docs");
         assert_eq!(results[0].snippet, "Official documentation & examples.");
+    }
+
+    #[test]
+    fn parses_bing_html_results() {
+        let html = r#"
+          <li class="b_algo">
+            <h2><a href="https://example.com/docs">Example <strong>Docs</strong></a></h2>
+            <div class="b_caption"><p>Official documentation &amp; examples.</p></div>
+          </li>
+        "#;
+
+        let results = parse_bing_html_results(html, 5);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Example Docs");
+        assert_eq!(results[0].url, "https://example.com/docs");
+        assert_eq!(results[0].snippet, "Official documentation & examples.");
+        assert_eq!(results[0].source.as_deref(), Some("bing"));
     }
 
     #[tokio::test]

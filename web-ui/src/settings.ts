@@ -1,6 +1,6 @@
 export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
-export type SearchProvider = 'duckduckgo'
+export type SearchProvider = 'duckduckgo' | 'bing'
 
 export interface LlmModelConfig {
   id: string
@@ -187,6 +187,19 @@ export function createSearchConfig(): SearchConfig {
   }
 }
 
+export function searchProviderPreset(provider: SearchProvider) {
+  if (provider === 'bing') {
+    return {
+      name: 'Bing',
+      baseUrl: 'https://www.bing.com/search',
+    }
+  }
+  return {
+    name: 'DuckDuckGo',
+    baseUrl: 'https://duckduckgo.com/html/',
+  }
+}
+
 export function embeddingForSession(config: EmbeddingModelConfig) {
   return {
     provider: config.provider,
@@ -297,17 +310,24 @@ function normalizeSearchConfigs(value: unknown): SearchConfig[] {
 
   return value.map((item) => {
     const config = item as Partial<SearchConfig>
+    const provider = normalizeSearchProvider(config.provider)
+    const preset = searchProviderPreset(provider)
     return {
       id: typeof config.id === 'string' && config.id ? config.id : crypto.randomUUID(),
-      name: typeof config.name === 'string' && config.name ? config.name : 'DuckDuckGo',
-      provider: 'duckduckgo',
-      baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : 'https://duckduckgo.com/html/',
+      name: typeof config.name === 'string' && config.name ? config.name : preset.name,
+      provider,
+      baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : preset.baseUrl,
       apiKey: typeof config.apiKey === 'string' ? config.apiKey : '',
       maxResults: Number(config.maxResults || 5),
       fetchTimeoutSecs: normalizePositiveNumber(config.fetchTimeoutSecs, 12),
       maxFetchChars: normalizePositiveNumber(config.maxFetchChars, 12000),
     }
   })
+}
+
+function normalizeSearchProvider(value: unknown): SearchProvider {
+  if (value === 'bing') return 'bing'
+  return 'duckduckgo'
 }
 
 function normalizeActiveConfigId<T extends { id: string }>(value: unknown, configs: T[]): string | null {
