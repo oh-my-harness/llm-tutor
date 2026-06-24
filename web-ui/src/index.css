@@ -13,6 +13,56 @@
   margin: 0;
 }
 
+.markdown-message h1,
+.markdown-message h2,
+.markdown-message h3,
+.markdown-message h4 {
+  margin: 0.85rem 0 0.35rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: rgb(17 24 39);
+}
+
+.markdown-message h1 {
+  font-size: 1.35em;
+}
+
+.markdown-message h2 {
+  font-size: 1.18em;
+}
+
+.markdown-message h3,
+.markdown-message h4 {
+  font-size: 1.05em;
+}
+
+.markdown-message h1 a,
+.markdown-message h2 a,
+.markdown-message h3 a,
+.markdown-message h4 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.markdown-message a {
+  color: rgb(37 99 235);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-message blockquote {
+  margin: 0.65rem 0 0;
+  border-left: 3px solid rgb(147 197 253);
+  padding-left: 0.85rem;
+  color: rgb(75 85 99);
+}
+
+.markdown-message hr {
+  margin: 0.85rem 0;
+  border: 0;
+  border-top: 1px solid rgb(209 213 219);
+}
+
 .markdown-message ul,
 .markdown-message ol {
   margin: 0.5rem 0 0;
@@ -25,6 +75,15 @@
 
 .markdown-message ol {
   list-style: decimal;
+}
+
+.markdown-message li + li {
+  margin-top: 0.15rem;
+}
+
+.markdown-message input[type="checkbox"] {
+  margin-right: 0.4rem;
+  vertical-align: -0.1em;
 }
 
 .markdown-message strong {
