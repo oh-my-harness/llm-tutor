@@ -306,7 +306,7 @@ fn questions_from_generated(
                 .filter_map(|source_index| hits.get(*source_index))
                 .map(|hit| QuizCitation {
                     source: hit.source.clone(),
-                    text: hit.text.clone(),
+                    text: citation_excerpt(&hit.text, &question.supporting_quote),
                     score: hit.score,
                 })
                 .collect::<Vec<_>>();
@@ -340,6 +340,35 @@ fn questions_from_generated(
             }
         })
         .collect()
+}
+
+fn citation_excerpt(source_text: &str, quote: &str) -> String {
+    let normalized_quote = quote.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized_quote.is_empty() {
+        return compact_text(source_text, 360);
+    }
+
+    let normalized_source = source_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(byte_pos) = normalized_source.find(&normalized_quote) else {
+        return compact_text(source_text, 360);
+    };
+
+    let char_pos = normalized_source[..byte_pos].chars().count();
+    let quote_chars = normalized_quote.chars().count();
+    let start = char_pos.saturating_sub(100);
+    let end = (char_pos + quote_chars + 160).min(normalized_source.chars().count());
+    let mut excerpt = normalized_source
+        .chars()
+        .skip(start)
+        .take(end - start)
+        .collect::<String>();
+    if start > 0 {
+        excerpt.insert_str(0, "...");
+    }
+    if end < normalized_source.chars().count() {
+        excerpt.push_str("...");
+    }
+    excerpt
 }
 
 fn questions_from_hits(config: &QuizConfig, hits: &[tutor_rag::SearchHit]) -> Vec<QuizQuestion> {

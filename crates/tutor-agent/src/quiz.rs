@@ -27,6 +27,7 @@ pub struct GeneratedQuizQuestion {
     pub options: Vec<String>,
     pub correct_option_index: usize,
     pub explanation: String,
+    pub supporting_quote: String,
     #[serde(default)]
     pub citation_indices: Vec<usize>,
     #[serde(default)]
@@ -79,7 +80,9 @@ pub async fn generate_quiz_questions_with_client(
         .await
         .map_err(|err| TutorError::Internal(format!("quiz LLM generation failed: {err}")))?;
     let text = response_text(&response.content);
-    parse_generated_quiz(&text, config.question_count, chunks.len())
+    let questions = parse_generated_quiz(&text, config.question_count, chunks.len())?;
+    validate_supporting_quotes_against_chunks(&questions, chunks)?;
+    Ok(questions)
 }
 
 pub fn parse_generated_quiz(
@@ -128,6 +131,28 @@ fn validate_questions(
                 "quiz question explanation is empty".into(),
             ));
         }
+        if question.supporting_quote.trim().is_empty() {
+            return Err(TutorError::Internal(
+                "quiz question supporting quote is empty".into(),
+            ));
+        }
+        let mut normalized_options = std::collections::HashSet::new();
+        for option in &question.options {
+            let normalized = normalize_text(option);
+            if normalized.is_empty() {
+                return Err(TutorError::Internal("quiz option is empty".into()));
+            }
+            if !normalized_options.insert(normalized) {
+                return Err(TutorError::Internal(
+                    "quiz question has duplicate options".into(),
+                ));
+            }
+        }
+        if question.citation_indices.is_empty() {
+            return Err(TutorError::Internal(
+                "quiz question has no citations".into(),
+            ));
+        }
         for index in &question.citation_indices {
             if *index >= source_count {
                 return Err(TutorError::Internal(
@@ -140,7 +165,7 @@ fn validate_questions(
 }
 
 fn system_prompt() -> String {
-    "You generate grounded tutor quiz questions. Return only valid JSON. Every question must be answerable from the supplied source chunks.".into()
+    "You generate grounded tutor quiz questions. Return only valid JSON. Every question must be answerable from the supplied source chunks. The correct answer, explanation, citation_indices, and supporting_quote must all agree with each other.".into()
 }
 
 fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) -> String {
@@ -162,10 +187,35 @@ fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) 
         .join("\n\n");
 
     format!(
-        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
+        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n\nRules:\n- Use only facts that are directly supported by the supplied sources.\n- The option at correct_option_index must be the only best answer.\n- The explanation must explicitly explain why the correct option is correct and why the key distractor is not supported.\n- citation_indices must point only to source chunks that support the correct answer.\n- supporting_quote must be an exact short quote copied from one cited source chunk and must support the correct answer.\n- Do not cite a source chunk merely because it is topically related.\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"supporting_quote\":\"exact quote from cited source\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
         count = config.question_count.clamp(1, 10),
         difficulty = config.difficulty,
     )
+}
+
+fn normalize_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn validate_supporting_quotes_against_chunks(
+    questions: &[GeneratedQuizQuestion],
+    chunks: &[QuizSourceChunk],
+) -> Result<()> {
+    for question in questions {
+        let quote = normalize_text(&question.supporting_quote);
+        let supported = question.citation_indices.iter().any(|index| {
+            chunks
+                .get(*index)
+                .map(|chunk| normalize_text(&chunk.text).contains(&quote))
+                .unwrap_or(false)
+        });
+        if !supported {
+            return Err(TutorError::Internal(
+                "quiz supporting quote was not found in cited source chunks".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn response_text(content: &[ResponseContent]) -> String {
@@ -203,8 +253,10 @@ fn quiz_schema() -> serde_json::Value {
                         },
                         "correct_option_index": { "type": "integer", "minimum": 0 },
                         "explanation": { "type": "string" },
+                        "supporting_quote": { "type": "string" },
                         "citation_indices": {
                             "type": "array",
+                            "minItems": 1,
                             "items": { "type": "integer", "minimum": 0 }
                         },
                         "tags": {
@@ -212,7 +264,7 @@ fn quiz_schema() -> serde_json::Value {
                             "items": { "type": "string" }
                         }
                     },
-                    "required": ["stem", "options", "correct_option_index", "explanation", "citation_indices", "tags"]
+                    "required": ["stem", "options", "correct_option_index", "explanation", "supporting_quote", "citation_indices", "tags"]
                 }
             }
         },
@@ -240,7 +292,7 @@ mod tests {
             Ok(ChatResponse {
                 id: "fake".into(),
                 model: "fake-model".into(),
-                content: vec![ResponseContent::Text(r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns.","citation_indices":[0],"tags":["OPC"]}]}"#.into())],
+                content: vec![ResponseContent::Text(r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#.into())],
                 stop_reason: StopReason::EndTurn,
                 usage: Usage::default(),
             })
@@ -279,7 +331,7 @@ mod tests {
 
     #[test]
     fn parses_and_validates_generated_quiz_json() {
-        let text = r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns.","citation_indices":[0],"tags":["OPC"]}]}"#;
+        let text = r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#;
 
         let questions = parse_generated_quiz(text, 2, 1).unwrap();
 
@@ -290,10 +342,52 @@ mod tests {
 
     #[test]
     fn rejects_out_of_range_citations() {
-        let text = r#"{"questions":[{"stem":"Q?","options":["A","B"],"correct_option_index":0,"explanation":"Because.","citation_indices":[2],"tags":[]}]}"#;
+        let text = r#"{"questions":[{"stem":"Q?","options":["A","B"],"correct_option_index":0,"explanation":"Because.","supporting_quote":"Because","citation_indices":[2],"tags":[]}]}"#;
 
         let err = parse_generated_quiz(text, 1, 1).unwrap_err().to_string();
 
         assert!(err.contains("citation index"));
+    }
+
+    #[test]
+    fn rejects_questions_without_citations() {
+        let text = r#"{"questions":[{"stem":"Q?","options":["A","B"],"correct_option_index":0,"explanation":"Because.","supporting_quote":"Because","citation_indices":[],"tags":[]}]}"#;
+
+        let err = parse_generated_quiz(text, 1, 1).unwrap_err().to_string();
+
+        assert!(err.contains("no citations"));
+    }
+
+    #[test]
+    fn rejects_duplicate_options() {
+        let text = r#"{"questions":[{"stem":"Q?","options":["Same"," Same "],"correct_option_index":0,"explanation":"Because.","supporting_quote":"Because","citation_indices":[0],"tags":[]}]}"#;
+
+        let err = parse_generated_quiz(text, 1, 1).unwrap_err().to_string();
+
+        assert!(err.contains("duplicate options"));
+    }
+
+    #[test]
+    fn rejects_supporting_quote_not_found_in_cited_chunks() {
+        let questions = vec![GeneratedQuizQuestion {
+            stem: "Q?".into(),
+            options: vec!["A".into(), "B".into()],
+            correct_option_index: 0,
+            explanation: "Because.".into(),
+            supporting_quote: "not present".into(),
+            citation_indices: vec![0],
+            tags: vec![],
+        }];
+        let chunks = vec![QuizSourceChunk {
+            source: "source.md".into(),
+            text: "This chunk supports another fact.".into(),
+            score: None,
+        }];
+
+        let err = validate_supporting_quotes_against_chunks(&questions, &chunks)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("supporting quote"));
     }
 }
