@@ -62,7 +62,7 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web for up-to-date information about a topic."
+        "Search the web for current or externally verifiable information. Use this before answering requests to collect facts, trivia, latest/current information, sources, or details about real-world/public entities, products, games, papers, libraries, events, and online content."
     }
 
     fn parameters_schema(&self) -> &serde_json::Value {

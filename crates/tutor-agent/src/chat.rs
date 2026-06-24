@@ -76,16 +76,7 @@ async fn run_chat_inner(
         model: router.llm.model.clone(),
         model_info: Some(router.llm.model_info(8192)),
         tools,
-        system_prompt: Some(
-            "You are a knowledgeable tutor. Use rag_search to find relevant course material. \
-             Use web_search for up-to-date or external information, then use web_fetch to read \
-             important source pages before making citation-backed claims. Use code_exec when the user asks to run \
-             or verify code. For non-trivial numeric calculations, approximations, transcendental \
-             functions, statistics, simulations, or any answer where exact arithmetic matters, call \
-             code_exec with Python to compute or verify the result before answering. Answer clearly \
-             and concisely."
-                .into(),
-        ),
+        system_prompt: Some(chat_system_prompt()),
         auth: router.auth_hook(),
         hooks: HarnessHooks {
             after_provider_response: vec![gov.budget.clone() as Arc<dyn AfterProviderResponseHook>],
@@ -291,4 +282,34 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
             }
         })
     })
+}
+
+fn chat_system_prompt() -> String {
+    "You are a knowledgeable tutor. Use rag_search to find relevant course material. \
+     Web verification rules are strict: when the user asks you to collect facts, trivia, \
+     current information, latest information, sources, external references, or information \
+     about real-world/public entities, products, games, communities, papers, libraries, \
+     events, or online content, you must call web_search before answering. After web_search, \
+     use web_fetch to read important source pages before making citation-backed or factual \
+     claims. If web_search or web_fetch fails, say what could not be verified instead of \
+     inventing facts from memory. Use code_exec when the user asks to run or verify code. \
+     For non-trivial numeric calculations, approximations, transcendental functions, \
+     statistics, simulations, or any answer where exact arithmetic matters, call code_exec \
+     with Python to compute or verify the result before answering. Answer clearly and \
+     concisely."
+        .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chat_system_prompt;
+
+    #[test]
+    fn chat_prompt_requires_web_search_for_fact_collection() {
+        let prompt = chat_system_prompt();
+        assert!(prompt.contains("collect facts"));
+        assert!(prompt.contains("trivia"));
+        assert!(prompt.contains("must call web_search before answering"));
+        assert!(prompt.contains("If web_search or web_fetch fails"));
+    }
 }
