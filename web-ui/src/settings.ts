@@ -1,6 +1,13 @@
 export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
-export type SearchProvider = 'duckduckgo' | 'bing'
+export type SearchProvider =
+  | 'duckduckgo'
+  | 'bing'
+  | 'brave'
+  | 'tavily'
+  | 'serper'
+  | 'serpapi'
+  | 'exa'
 
 export interface LlmModelConfig {
   id: string
@@ -194,6 +201,36 @@ export function searchProviderPreset(provider: SearchProvider) {
       baseUrl: 'https://www.bing.com/search',
     }
   }
+  if (provider === 'brave') {
+    return {
+      name: 'Brave',
+      baseUrl: 'https://api.search.brave.com/res/v1/web/search',
+    }
+  }
+  if (provider === 'tavily') {
+    return {
+      name: 'Tavily',
+      baseUrl: 'https://api.tavily.com/search',
+    }
+  }
+  if (provider === 'serper') {
+    return {
+      name: 'Serper',
+      baseUrl: 'https://google.serper.dev/search',
+    }
+  }
+  if (provider === 'serpapi') {
+    return {
+      name: 'SerpAPI',
+      baseUrl: 'https://serpapi.com/search.json',
+    }
+  }
+  if (provider === 'exa') {
+    return {
+      name: 'Exa',
+      baseUrl: 'https://api.exa.ai/search',
+    }
+  }
   return {
     name: 'DuckDuckGo',
     baseUrl: 'https://duckduckgo.com/html/',
@@ -327,6 +364,11 @@ function normalizeSearchConfigs(value: unknown): SearchConfig[] {
 
 function normalizeSearchProvider(value: unknown): SearchProvider {
   if (value === 'bing') return 'bing'
+  if (value === 'brave') return 'brave'
+  if (value === 'tavily') return 'tavily'
+  if (value === 'serper') return 'serper'
+  if (value === 'serpapi') return 'serpapi'
+  if (value === 'exa') return 'exa'
   return 'duckduckgo'
 }
 

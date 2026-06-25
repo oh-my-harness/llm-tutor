@@ -23,6 +23,8 @@ pub enum Capability {
     CodeExec,
     /// Generate and answer knowledge-base quizzes in the product UI.
     Quiz,
+    /// Research external/internal sources and synthesize a cited report.
+    Research,
 }
 
 impl FromStr for Capability {
@@ -34,6 +36,7 @@ impl FromStr for Capability {
             "deep_solve" => Ok(Self::DeepSolve),
             "code_exec" => Ok(Self::CodeExec),
             "quiz" => Ok(Self::Quiz),
+            "research" => Ok(Self::Research),
             other => Err(TutorError::UnsupportedCapability(other.into())),
         }
     }
@@ -128,6 +131,7 @@ impl CapabilityRouter {
     ) -> Result<String> {
         match capability {
             Capability::Chat => crate::chat::run_chat_with_messages(self, messages).await,
+            Capability::Research => crate::chat::run_research_with_messages(self, messages).await,
             Capability::DeepSolve => {
                 let question = question_from_messages(&messages);
                 let client = self.make_client();
@@ -160,6 +164,9 @@ impl CapabilityRouter {
     ) -> Result<String> {
         match capability {
             Capability::Chat => crate::chat::run_chat_with_session(self, session, question).await,
+            Capability::Research => {
+                crate::chat::run_research_with_session(self, session, question).await
+            }
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_session(self, session, question).await
             }
@@ -259,6 +266,10 @@ mod tests {
         assert!(matches!(
             Capability::from_str("quiz").unwrap(),
             Capability::Quiz
+        ));
+        assert!(matches!(
+            Capability::from_str("research").unwrap(),
+            Capability::Research
         ));
         assert!(Capability::from_str("unknown").is_err());
     }

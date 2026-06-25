@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
-import type { ContextStats } from './components/ChatBox'
+import type { ChatAttachment, ContextStats } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
+import { BooksPage } from './components/BooksPage'
 import { QuizPage } from './components/QuizPage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
@@ -16,7 +17,7 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, activeLlmConfig, loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
 import type { QuizSession } from './quizTypes'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -26,6 +27,7 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  attachments?: ChatAttachment[]
 }
 
 interface Citation {
@@ -46,6 +48,12 @@ interface RecentSession {
 interface KnowledgeBaseOption {
   id: string
   name: string
+}
+
+interface Book {
+  id: string
+  title: string
+  chapters?: Array<{ id: string; title: string; markdown: string }>
 }
 
 interface SessionListResponse {
@@ -273,8 +281,10 @@ export default function App() {
     })
   }, [refreshSessions, refreshKnowledgeBases, pushStatus])
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = []) => {
     try {
+      const content = buildMessageContentWithAttachments(text, attachments)
+      const displayText = text.trim() || `发送了 ${attachments.length} 个附件`
       let sid = sessionId
       if (!sid) {
         const kb = selectedKnowledgeBaseId || null
@@ -295,14 +305,15 @@ export default function App() {
         const createdSessionId = data.id as string
         sid = createdSessionId
         setSessionId(createdSessionId)
-        upsertRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(text))
+        upsertRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
       }
 
-      setMessages((prev) => [...prev, { role: 'user', text }])
+      setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       if (capability === 'quiz') {
-        const conversationSource = quizSourceFromMessages(messages)
+        const attachmentSource = attachmentSourceText(attachments)
+        const conversationSource = [quizSourceFromMessages(messages), attachmentSource].filter(Boolean).join('\n\n')
         if (!selectedKnowledgeBaseId && !conversationSource.trim()) {
           throw new Error('当前还没有可用于出题的对话内容。请先提供一段材料，或关联知识库。')
         }
@@ -318,7 +329,7 @@ export default function App() {
             kb_id: selectedKnowledgeBaseId || null,
             source_text: selectedKnowledgeBaseId ? null : conversationSource,
             source_label: selectedKnowledgeBaseId ? null : '当前对话',
-            topic: text.trim() || null,
+            topic: text.trim() || (attachments.length > 0 ? '附件内容' : null),
             difficulty: 'medium',
             question_count: 5,
             llm: settingsForSession(llmSettings),
@@ -329,8 +340,8 @@ export default function App() {
           throw new Error(errorMessage(data, res.status))
         }
         const quiz = data.quiz as QuizSession
-        const assistantText = `已根据“${text.trim()}”生成 Quiz。`
-        await persistQuizMessage(sid, text, assistantText, quiz.id)
+        const assistantText = `已根据“${displayText}”生成 Quiz。`
+        await persistQuizMessage(sid, content, assistantText, quiz.id)
         setMessages((prev) => [
           ...dropTrailingTransientStatus(prev),
           {
@@ -344,7 +355,7 @@ export default function App() {
         void refreshSessions()
         return
       }
-      send({ type: 'message', content: text })
+      send({ type: 'message', content })
       void refreshSessions()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -387,6 +398,53 @@ export default function App() {
     }
     updateQuizInMessages(data.quiz as QuizSession)
   }, [updateQuizInMessages])
+
+  const handleSaveToBook = useCallback(async (markdown: string) => {
+    try {
+      const fallbackTitle = titleFromMarkdown(markdown)
+      const bookTitle = window.prompt('保存到哪本书？如果不存在会自动创建。', fallbackTitle)
+      if (!bookTitle?.trim()) return
+      const chapterTitle = window.prompt('章节标题', fallbackTitle) || fallbackTitle
+
+      const booksRes = await fetch('/api/books')
+      const booksData = await safeJson(booksRes)
+      if (!booksRes.ok) {
+        throw new Error(errorMessage(booksData, booksRes.status))
+      }
+      const books = (booksData.books ?? []) as Book[]
+      let book = books.find((item) => item.title.trim() === bookTitle.trim())
+      if (!book) {
+        const createRes = await fetch('/api/books', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: bookTitle.trim() }),
+        })
+        const createData = await safeJson(createRes)
+        if (!createRes.ok) {
+          throw new Error(errorMessage(createData, createRes.status))
+        }
+        book = createData.book as Book
+      }
+
+      const chapterRes = await fetch(`/api/books/${encodeURIComponent(book.id)}/chapters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: chapterTitle.trim() || fallbackTitle,
+          markdown,
+          source_session_id: sessionId,
+        }),
+      })
+      const chapterData = await safeJson(chapterRes)
+      if (!chapterRes.ok) {
+        throw new Error(errorMessage(chapterData, chapterRes.status))
+      }
+      pushStatus({ kind: 'done', label: 'Saved', detail: `Book: ${book.title}` })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Save failed', detail: message })
+    }
+  }, [pushStatus, sessionId])
 
   const handleAskDeepSolveStep = useCallback((step: { id: string; title: string; summary?: string }) => {
     const prompt = [
@@ -638,6 +696,7 @@ export default function App() {
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onLlmConfigChange={handleLlmConfigChange}
+                  onSaveToBook={handleSaveToBook}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   disabled={running}
@@ -675,10 +734,7 @@ export default function App() {
         )}
 
         {view === 'books' && (
-          <PlaceholderPage
-            title="书籍"
-            description="书籍与教材阅读空间，后续可以展示章节、阅读进度、摘要和与当前书籍相关的问答。"
-          />
+          <BooksPage />
         )}
 
         {view === 'knowledge' && (
@@ -768,6 +824,38 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
       kind: 'tool',
       label: 'Sources attached',
       detail: typeof details?.hits === 'number' ? `${details.hits} citations` : capability,
+    }
+  }
+
+  if (kind === 'research_stage_start') {
+    return {
+      kind: 'thinking',
+      label: typeof payload.title === 'string' ? payload.title : 'Planning research',
+      detail: capability,
+    }
+  }
+
+  if (kind === 'research_search') {
+    return {
+      kind: 'tool',
+      label: 'Searching web',
+      detail: capability,
+    }
+  }
+
+  if (kind === 'research_read') {
+    return {
+      kind: 'tool',
+      label: 'Reading source',
+      detail: capability,
+    }
+  }
+
+  if (kind === 'research_report_done') {
+    return {
+      kind: 'done',
+      label: 'Research report ready',
+      detail: capability,
     }
   }
 
@@ -963,6 +1051,7 @@ function capabilityLabel(value: string): string {
   if (value === 'deep_solve') return 'Deep Solve'
   if (value === 'code_exec') return 'Code Exec'
   if (value === 'quiz') return 'Quiz'
+  if (value === 'research') return 'Research'
   return 'Chat'
 }
 
@@ -1025,12 +1114,51 @@ function quizSourceFromMessages(messages: Message[]) {
     .slice(-12000)
 }
 
+function buildMessageContentWithAttachments(text: string, attachments: ChatAttachment[]) {
+  const baseText = text.trim()
+  const source = attachmentSourceText(attachments)
+  if (!source) return baseText
+  return `${baseText || '请根据附件内容继续。'}\n\n${source}`
+}
+
+function attachmentSourceText(attachments: ChatAttachment[]) {
+  const readable = attachments.filter((attachment) => attachment.text?.trim())
+  if (readable.length === 0) return ''
+  return [
+    '[附件上下文]',
+    ...readable.map((attachment, index) => [
+      `### ${index + 1}. ${attachment.name}`,
+      `Type: ${attachment.type || 'unknown'}`,
+      `Size: ${formatBytes(attachment.size)}`,
+      attachment.truncated ? 'Note: content was truncated.' : null,
+      '',
+      attachment.text?.trim() ?? '',
+    ].filter(Boolean).join('\n')),
+  ].join('\n\n')
+}
+
+function titleFromMarkdown(markdown: string) {
+  const heading = markdown
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('# '))
+  if (heading) return heading.replace(/^#\s+/, '').trim().slice(0, 80) || 'Research Report'
+  const first = markdown.trim().split('\n').find((line) => line.trim())
+  return first?.trim().slice(0, 80) || 'Research Report'
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
   return Boolean(value && typeof value === 'object')
 }
 
 function isCapability(value: string): value is Capability {
-  return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz'
+  return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz' || value === 'research'
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {

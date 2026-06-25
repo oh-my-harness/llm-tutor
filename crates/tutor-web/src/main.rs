@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use axum::extract::DefaultBodyLimit;
 use tower_http::cors::{Any, CorsLayer};
 
+mod book_store;
 mod knowledge_store;
 mod quiz_store;
 mod routes;
@@ -14,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let pool = session::SessionPool::new();
     let knowledge = knowledge_store::KnowledgeStore::new();
     let quizzes = std::sync::Arc::new(quiz_store::QuizStore::new());
+    let books = std::sync::Arc::new(book_store::BookStore::new());
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -23,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let app = axum::Router::new()
         .merge(routes::knowledge::knowledge_router(knowledge.clone()))
         .merge(routes::quiz::quiz_router(quizzes, knowledge.clone()))
+        .merge(routes::books::books_router(books))
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
         .merge(routes::ws::ws_router(pool.clone()))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

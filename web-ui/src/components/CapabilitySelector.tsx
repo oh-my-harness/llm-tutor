@@ -1,4 +1,4 @@
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
 
 interface Props {
   value: Capability
@@ -11,6 +11,7 @@ export function CapabilitySelector({ value, onChange }: Props) {
     { key: 'deep_solve', label: 'Deep Solve' },
     { key: 'code_exec', label: 'Code Exec' },
     { key: 'quiz', label: 'Quiz' },
+    { key: 'research', label: 'Research' },
   ]
   return (
     <div className="flex border rounded overflow-hidden text-sm">

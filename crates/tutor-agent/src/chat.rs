@@ -24,7 +24,7 @@ pub async fn run_chat_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(router, Some(messages), None).await
+    run_chat_inner(router, "chat", chat_system_prompt(), Some(messages), None).await
 }
 
 pub async fn run_chat_with_session(
@@ -32,20 +32,70 @@ pub async fn run_chat_with_session(
     session: Session,
     question: &str,
 ) -> Result<String> {
-    run_chat_inner(router, Some(vec![user_message(question)]), Some(session)).await
+    run_chat_inner(
+        router,
+        "chat",
+        chat_system_prompt(),
+        Some(vec![user_message(question)]),
+        Some(session),
+    )
+    .await
+}
+
+pub async fn run_research_with_messages(
+    router: &CapabilityRouter,
+    messages: Vec<AgentMessage>,
+) -> Result<String> {
+    run_chat_inner(
+        router,
+        "research",
+        research_system_prompt(),
+        Some(messages),
+        None,
+    )
+    .await
+}
+
+pub async fn run_research_with_session(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+) -> Result<String> {
+    run_chat_inner(
+        router,
+        "research",
+        research_system_prompt(),
+        Some(vec![user_message(question)]),
+        Some(session),
+    )
+    .await
 }
 
 async fn run_chat_inner(
     router: &CapabilityRouter,
+    capability: &'static str,
+    system_prompt: String,
     messages: Option<Vec<AgentMessage>>,
     session: Option<Session>,
 ) -> Result<String> {
     emit_trace(
         &router.event_sink,
         "phase_start",
-        serde_json::json!({ "capability": "chat", "phase": "respond" }),
+        serde_json::json!({ "capability": capability, "phase": "respond" }),
     )
     .await;
+    if capability == "research" {
+        emit_trace(
+            &router.event_sink,
+            "research_stage_start",
+            serde_json::json!({
+                "capability": "research",
+                "stage": "plan",
+                "title": "Plan research"
+            }),
+        )
+        .await;
+    }
 
     let rag_tool = router
         .retriever
@@ -76,7 +126,7 @@ async fn run_chat_inner(
         model: router.llm.model.clone(),
         model_info: Some(router.llm.model_info(8192)),
         tools,
-        system_prompt: Some(chat_system_prompt()),
+        system_prompt: Some(system_prompt),
         auth: router.auth_hook(),
         hooks: HarnessHooks {
             after_provider_response: vec![gov.budget.clone() as Arc<dyn AfterProviderResponseHook>],
@@ -94,7 +144,7 @@ async fn run_chat_inner(
         AgentHarness::new_in_memory(client, router.env.clone(), opts).await
     };
     if has_session {
-        try_auto_compact(&harness, router, "chat").await;
+        try_auto_compact(&harness, router, capability).await;
     }
     let mut rx = harness.subscribe();
     let prompt_task = tokio::spawn(async move {
@@ -114,7 +164,7 @@ async fn run_chat_inner(
                 emit_trace(
                     &router.event_sink,
                     "event_lagged",
-                    serde_json::json!({ "capability": "chat", "skipped": skipped }),
+                    serde_json::json!({ "capability": capability, "skipped": skipped }),
                 )
                 .await;
                 continue;
@@ -144,13 +194,38 @@ async fn run_chat_inner(
                     &router.event_sink,
                     "tool_call",
                     serde_json::json!({
-                        "capability": "chat",
+                        "capability": capability,
                         "tool_use_id": tool_use_id,
                         "tool": tool_name,
                         "args": args,
                     }),
                 )
                 .await;
+                if capability == "research" && tool_name == "web_search" {
+                    emit_trace(
+                        &router.event_sink,
+                        "research_search",
+                        serde_json::json!({
+                            "capability": "research",
+                            "stage": "search",
+                            "title": "Search web",
+                            "payload": { "args": args },
+                        }),
+                    )
+                    .await;
+                } else if capability == "research" && tool_name == "web_fetch" {
+                    emit_trace(
+                        &router.event_sink,
+                        "research_read",
+                        serde_json::json!({
+                            "capability": "research",
+                            "stage": "read",
+                            "title": "Read source",
+                            "payload": { "args": args },
+                        }),
+                    )
+                    .await;
+                }
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionEnd {
                 tool_use_id,
@@ -165,7 +240,7 @@ async fn run_chat_inner(
                     &router.event_sink,
                     "tool_result",
                     serde_json::json!({
-                        "capability": "chat",
+                        "capability": capability,
                         "tool_use_id": tool_use_id,
                         "tool": tool_name,
                         "ok": result.is_ok(),
@@ -193,9 +268,22 @@ async fn run_chat_inner(
     emit_trace(
         &router.event_sink,
         "phase_end",
-        serde_json::json!({ "capability": "chat", "phase": "respond" }),
+        serde_json::json!({ "capability": capability, "phase": "respond" }),
     )
     .await;
+    if capability == "research" {
+        emit_trace(
+            &router.event_sink,
+            "research_report_done",
+            serde_json::json!({
+                "capability": "research",
+                "stage": "synthesize",
+                "title": "Research report ready",
+                "summary": last_text.chars().take(240).collect::<String>(),
+            }),
+        )
+        .await;
+    }
 
     if let Some(error) = last_error {
         return Err(TutorError::Internal(error));
@@ -300,9 +388,21 @@ fn chat_system_prompt() -> String {
         .into()
 }
 
+fn research_system_prompt() -> String {
+    "You are a research tutor. Your job is to turn the user's topic into a sourced, reusable research report. \
+     Follow this workflow: (1) briefly identify the research question and scope, (2) call web_search for external facts, \
+     (3) call web_fetch on the most relevant sources before relying on them, (4) optionally call rag_search when a knowledge base is associated, \
+     (5) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
+     If search or fetch fails, clearly state what failed and what remains unverified. \
+     The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
+     Cite factual claims using numbered source references that match the Sources section. \
+     Keep intermediate planning brief; the final report is the main deliverable."
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::chat_system_prompt;
+    use super::{chat_system_prompt, research_system_prompt};
 
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
@@ -311,5 +411,14 @@ mod tests {
         assert!(prompt.contains("trivia"));
         assert!(prompt.contains("must call web_search before answering"));
         assert!(prompt.contains("If web_search or web_fetch fails"));
+    }
+
+    #[test]
+    fn research_prompt_requires_search_fetch_and_report() {
+        let prompt = research_system_prompt();
+        assert!(prompt.contains("call web_search"));
+        assert!(prompt.contains("call web_fetch"));
+        assert!(prompt.contains("Markdown report"));
+        assert!(prompt.contains("Sources"));
     }
 }

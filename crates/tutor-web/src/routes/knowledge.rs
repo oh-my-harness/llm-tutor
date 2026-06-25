@@ -66,6 +66,17 @@ struct SearchRequest {
     top_k: Option<usize>,
 }
 
+const CHAT_ATTACHMENT_MAX_CHARS: usize = 20_000;
+
+#[derive(Serialize)]
+struct ParsedAttachment {
+    name: String,
+    size: usize,
+    mime_type: Option<String>,
+    text: String,
+    truncated: bool,
+}
+
 async fn list_knowledge_bases(State(state): State<KnowledgeState>) -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -219,6 +230,63 @@ async fn upload_document(
         return (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({ "job": job })),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": "missing file field" })),
+    )
+        .into_response()
+}
+
+async fn parse_chat_attachment(mut multipart: Multipart) -> impl IntoResponse {
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(err) => return error_response(err),
+        };
+
+        if field.name() != Some("file") {
+            continue;
+        }
+
+        let file_name = field.file_name().unwrap_or("attachment.txt").to_string();
+        let content_type = field.content_type().map(str::to_string);
+        let bytes = match field.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => return error_response(err),
+        };
+        let size = bytes.len();
+        let text = match extract_upload_text(&file_name, content_type.as_deref(), bytes.as_ref()) {
+            Ok(text) => text,
+            Err(err) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": err.to_string() })),
+                )
+                    .into_response();
+            }
+        };
+        let truncated = text.chars().count() > CHAT_ATTACHMENT_MAX_CHARS;
+        let text = if truncated {
+            text.chars().take(CHAT_ATTACHMENT_MAX_CHARS).collect()
+        } else {
+            text
+        };
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "attachment": ParsedAttachment {
+                    name: file_name.clone(),
+                    size,
+                    mime_type: upload_mime_type(&file_name, content_type.as_deref()),
+                    text,
+                    truncated,
+                }
+            })),
         )
             .into_response();
     }
@@ -749,6 +817,7 @@ pub fn knowledge_router(store: Arc<KnowledgeStore>) -> Router {
         jobs: Arc::new(IngestionJobs::default()),
     };
     Router::new()
+        .route("/api/attachments/parse", post(parse_chat_attachment))
         .route(
             "/api/knowledge-bases",
             get(list_knowledge_bases).post(create_knowledge_base),
@@ -811,6 +880,40 @@ mod tests {
             err.to_string()
                 .contains("UTF-8 text attachments and PDF files")
         );
+    }
+
+    #[tokio::test]
+    async fn parses_chat_attachment_upload() {
+        let root = tempfile::tempdir().unwrap();
+        let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
+        let app = knowledge_router(store);
+
+        let boundary = "X-LLM-TUTOR-ATTACHMENT";
+        let upload_body = format!(
+            "--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"\r\n\
+             Content-Type: text/plain\r\n\r\n\
+             alpha beta gamma\r\n\
+             --{boundary}--\r\n"
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/attachments/parse")
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(upload_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["attachment"]["name"], "notes.txt");
+        assert_eq!(body["attachment"]["text"], "alpha beta gamma");
     }
 
     #[tokio::test]

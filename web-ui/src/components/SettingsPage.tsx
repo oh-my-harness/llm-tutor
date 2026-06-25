@@ -536,7 +536,7 @@ export function SettingsPage({ settings, onChange }: Props) {
                     <div className="space-y-5 rounded-lg border border-gray-200 p-4">
                       <ConfigHeader
                         title="Web search provider"
-                        description="HTML search providers are best-effort. Bing usually works better for Chinese queries; a real Search API is still more reliable."
+                        description="Use free HTML providers for fallback, or configure paid search APIs for more reliable agent research."
                         onDelete={() => deleteSearchConfig(activeSearchConfig.id)}
                       />
                       <div className="grid gap-4 md:grid-cols-2">
@@ -562,6 +562,11 @@ export function SettingsPage({ settings, onChange }: Props) {
                           >
                             <option value="duckduckgo">DuckDuckGo</option>
                             <option value="bing">Bing</option>
+                            <option value="brave">Brave Search API</option>
+                            <option value="tavily">Tavily</option>
+                            <option value="serper">Serper</option>
+                            <option value="serpapi">SerpAPI</option>
+                            <option value="exa">Exa</option>
                           </select>
                         </Field>
 
@@ -579,7 +584,12 @@ export function SettingsPage({ settings, onChange }: Props) {
                           <TextInput
                             type="password"
                             value={activeSearchConfig.apiKey}
-                            placeholder="optional"
+                            placeholder={
+                              activeSearchConfig.provider === 'duckduckgo' ||
+                              activeSearchConfig.provider === 'bing'
+                                ? 'optional'
+                                : 'required'
+                            }
                             onChange={(value) =>
                               updateSearchConfig(activeSearchConfig.id, 'apiKey', value)
                             }

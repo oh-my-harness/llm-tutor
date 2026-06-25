@@ -40,10 +40,11 @@ impl WebSearchTool {
     }
 
     pub fn with_config(config: WebSearchConfig) -> Self {
+        let timeout_secs = config.fetch_timeout_secs.clamp(3, 60);
         Self {
             config,
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(timeout_secs))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
         }
@@ -113,11 +114,42 @@ impl WebSearchTool {
         match self.config.provider.trim().to_ascii_lowercase().as_str() {
             "duckduckgo" => self.search_duckduckgo(query).await,
             "bing" => self.search_bing(query).await,
+            "brave" => self.search_brave(query).await,
+            "tavily" => self.search_tavily(query).await,
+            "serper" => self.search_serper(query).await,
+            "serpapi" => self.search_serpapi(query).await,
+            "exa" => self.search_exa(query).await,
             other => anyhow::bail!("unsupported web search provider `{other}`"),
         }
     }
 
     async fn search_duckduckgo(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        match self.search_duckduckgo_lite(query).await {
+            Ok(results) if !results.is_empty() => return Ok(results),
+            Ok(_) | Err(_) => {}
+        }
+
+        self.search_duckduckgo_html(query).await
+    }
+
+    async fn search_duckduckgo_lite(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let region = duckduckgo_region(query);
+        let response = self
+            .client
+            .post("https://lite.duckduckgo.com/lite/")
+            .form(&[("q", query), ("kl", region)])
+            .header(reqwest::header::USER_AGENT, browser_user_agent())
+            .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
+            .send()
+            .await?
+            .error_for_status()?;
+        let html = response.text().await?;
+
+        Ok(parse_duckduckgo_lite_results(&html, limit))
+    }
+
+    async fn search_duckduckgo_html(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
         let limit = self.config.max_results.clamp(1, 10);
         let response = self
             .client
@@ -146,6 +178,111 @@ impl WebSearchTool {
         let html = response.text().await?;
         Ok(parse_bing_html_results(&html, limit))
     }
+
+    async fn search_brave(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let api_key = self.require_api_key("Brave")?;
+        let response = self
+            .client
+            .get(self.config.base_url.trim())
+            .query(&[("q", query.to_string()), ("count", limit.to_string())])
+            .header("X-Subscription-Token", api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await?
+            .error_for_status()?;
+        let value = response.json::<serde_json::Value>().await?;
+        Ok(parse_brave_results(&value, limit))
+    }
+
+    async fn search_tavily(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let api_key = self.require_api_key("Tavily")?;
+        let response = self
+            .client
+            .post(self.config.base_url.trim())
+            .bearer_auth(api_key)
+            .json(&json!({
+                "query": query,
+                "max_results": limit,
+                "search_depth": "basic",
+                "include_answer": false,
+                "include_raw_content": false,
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        let value = response.json::<serde_json::Value>().await?;
+        Ok(parse_tavily_results(&value, limit))
+    }
+
+    async fn search_serper(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let api_key = self.require_api_key("Serper")?;
+        let response = self
+            .client
+            .post(self.config.base_url.trim())
+            .header("X-API-KEY", api_key)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&json!({
+                "q": query,
+                "num": limit,
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        let value = response.json::<serde_json::Value>().await?;
+        Ok(parse_serper_results(&value, limit))
+    }
+
+    async fn search_serpapi(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let api_key = self.require_api_key("SerpAPI")?;
+        let response = self
+            .client
+            .get(self.config.base_url.trim())
+            .query(&[
+                ("engine", "google".to_string()),
+                ("q", query.to_string()),
+                ("api_key", api_key.to_string()),
+                ("num", limit.to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?;
+        let value = response.json::<serde_json::Value>().await?;
+        Ok(parse_serpapi_results(&value, limit))
+    }
+
+    async fn search_exa(&self, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let limit = self.config.max_results.clamp(1, 10);
+        let api_key = self.require_api_key("Exa")?;
+        let response = self
+            .client
+            .post(self.config.base_url.trim())
+            .header("x-api-key", api_key)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&json!({
+                "query": query,
+                "num_results": limit,
+                "type": "auto",
+                "contents": { "text": true },
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        let value = response.json::<serde_json::Value>().await?;
+        Ok(parse_exa_results(&value, limit))
+    }
+
+    fn require_api_key(&self, provider: &str) -> anyhow::Result<&str> {
+        self.config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("{provider} API key is not configured"))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -158,14 +295,43 @@ pub struct SearchResult {
 }
 
 impl SearchResult {
-    fn new(title: impl Into<String>, url: impl Into<String>, snippet: impl Into<String>) -> Self {
+    fn new(
+        title: impl Into<String>,
+        url: impl Into<String>,
+        snippet: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Self {
             title: title.into(),
             url: url.into(),
             snippet: snippet.into(),
             score: None,
-            source: Some("duckduckgo".into()),
+            source: Some(source.into()),
         }
+    }
+}
+
+fn result_with_score(
+    title: impl Into<String>,
+    url: impl Into<String>,
+    snippet: impl Into<String>,
+    source: impl Into<String>,
+    score: Option<f32>,
+) -> SearchResult {
+    SearchResult {
+        title: title.into(),
+        url: url.into(),
+        snippet: snippet.into(),
+        score,
+        source: Some(source.into()),
+    }
+}
+
+fn duckduckgo_region(query: &str) -> &'static str {
+    if query.chars().any(|ch| !ch.is_ascii()) {
+        "cn-zh"
+    } else {
+        "wt-wt"
     }
 }
 
@@ -238,6 +404,150 @@ fn source_details(results: &[SearchResult]) -> serde_json::Value {
     )
 }
 
+fn parse_brave_results(value: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    value
+        .pointer("/web/results")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .filter_map(|item| {
+            let title = json_text(item, "title");
+            let url = json_text(item, "url");
+            let snippet = json_text(item, "description");
+            (!title.is_empty() && !url.is_empty())
+                .then(|| SearchResult::new(title, url, snippet, "brave"))
+        })
+        .collect()
+}
+
+fn parse_tavily_results(value: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    value
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .filter_map(|item| {
+            let title = json_text(item, "title");
+            let url = json_text(item, "url");
+            let snippet = json_text(item, "content");
+            let score = json_score(item, "score");
+            (!title.is_empty() && !url.is_empty())
+                .then(|| result_with_score(title, url, snippet, "tavily", score))
+        })
+        .collect()
+}
+
+fn parse_serper_results(value: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    value
+        .get("organic")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .filter_map(|item| {
+            let title = json_text(item, "title");
+            let url = json_text(item, "link");
+            let snippet = json_text(item, "snippet");
+            (!title.is_empty() && !url.is_empty())
+                .then(|| SearchResult::new(title, url, snippet, "serper"))
+        })
+        .collect()
+}
+
+fn parse_serpapi_results(value: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    value
+        .get("organic_results")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .filter_map(|item| {
+            let title = json_text(item, "title");
+            let url = json_text(item, "link");
+            let snippet = json_text(item, "snippet");
+            (!title.is_empty() && !url.is_empty())
+                .then(|| SearchResult::new(title, url, snippet, "serpapi"))
+        })
+        .collect()
+}
+
+fn parse_exa_results(value: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    value
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(limit)
+        .filter_map(|item| {
+            let title = json_text(item, "title");
+            let url = json_text(item, "url");
+            let snippet = json_text(item, "text");
+            let score = json_score(item, "score");
+            (!title.is_empty() && !url.is_empty())
+                .then(|| result_with_score(title, url, snippet, "exa", score))
+        })
+        .collect()
+}
+
+fn json_text(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(normalize_text)
+        .unwrap_or_default()
+}
+
+fn json_score(value: &serde_json::Value, key: &str) -> Option<f32> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .filter(|score| score.is_finite())
+        .map(|score| score as f32)
+}
+
+fn parse_duckduckgo_lite_results(html: &str, limit: usize) -> Vec<SearchResult> {
+    let mut results = Vec::new();
+    let mut rest = html;
+
+    while results.len() < limit {
+        let Some(link_marker_pos) = rest.find("result-link") else {
+            break;
+        };
+        let anchor_pos = rest[..link_marker_pos]
+            .rfind("<a")
+            .unwrap_or(link_marker_pos);
+        rest = &rest[anchor_pos..];
+
+        let Some(href) = attr_value(rest, "href") else {
+            rest = &rest["result-link".len()..];
+            continue;
+        };
+        let Some(anchor_end) = rest.find("</a>") else {
+            break;
+        };
+        let title_start = rest.find('>').map(|index| index + 1).unwrap_or(0);
+        let title = normalize_text(&strip_html_fragment(&rest[title_start..anchor_end]));
+        let url = normalize_duckduckgo_url(&decode_entities(&href));
+
+        let next_anchor = rest[anchor_end..]
+            .find("result-link")
+            .map(|index| anchor_end + index)
+            .unwrap_or(rest.len());
+        let block = &rest[..next_anchor];
+        let snippet = extract_lite_snippet(block).unwrap_or_default();
+
+        if !title.is_empty() && !url.is_empty() {
+            results.push(SearchResult::new(title, url, snippet, "duckduckgo-lite"));
+        }
+
+        rest = &rest[next_anchor..];
+    }
+
+    results
+}
+
 fn parse_duckduckgo_html_results(html: &str, limit: usize) -> Vec<SearchResult> {
     let mut results = Vec::new();
     let mut rest = html;
@@ -267,7 +577,7 @@ fn parse_duckduckgo_html_results(html: &str, limit: usize) -> Vec<SearchResult> 
         let snippet = extract_html_snippet(block).unwrap_or_default();
 
         if !title.is_empty() && !url.is_empty() {
-            results.push(SearchResult::new(title, url, snippet));
+            results.push(SearchResult::new(title, url, snippet, "duckduckgo"));
         }
 
         rest = &rest[next_anchor..];
@@ -327,6 +637,15 @@ fn extract_bing_snippet(block: &str) -> Option<String> {
     let part = &block[p_pos..];
     let start = part.find('>').map(|index| index + 1)?;
     let end = part[start..].find("</p>").map(|index| start + index)?;
+    Some(normalize_text(&strip_html_fragment(&part[start..end])))
+}
+
+fn extract_lite_snippet(block: &str) -> Option<String> {
+    let marker = "result-snippet";
+    let pos = block.find(marker)?;
+    let part = &block[pos..];
+    let start = part.find('>').map(|index| index + 1)?;
+    let end = part[start..].find("</td>").map(|index| start + index)?;
     Some(normalize_text(&strip_html_fragment(&part[start..end])))
 }
 
@@ -454,6 +773,26 @@ mod tests {
     }
 
     #[test]
+    fn parses_duckduckgo_lite_results() {
+        let html = r#"
+          <tr>
+            <td><a rel="nofollow" href="https://example.com/docs" class='result-link'>Example <b>Docs</b></a></td>
+          </tr>
+          <tr>
+            <td class='result-snippet'>Official documentation &amp; examples.</td>
+          </tr>
+        "#;
+
+        let results = parse_duckduckgo_lite_results(html, 5);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Example Docs");
+        assert_eq!(results[0].url, "https://example.com/docs");
+        assert_eq!(results[0].snippet, "Official documentation & examples.");
+        assert_eq!(results[0].source.as_deref(), Some("duckduckgo-lite"));
+    }
+
+    #[test]
     fn parses_bing_html_results() {
         let html = r#"
           <li class="b_algo">
@@ -471,11 +810,78 @@ mod tests {
         assert_eq!(results[0].source.as_deref(), Some("bing"));
     }
 
+    #[test]
+    fn parses_paid_provider_json_results() {
+        let brave = json!({
+            "web": {
+                "results": [
+                    { "title": "Brave Result", "url": "https://example.com/brave", "description": "Brave snippet" }
+                ]
+            }
+        });
+        assert_eq!(
+            parse_brave_results(&brave, 5)[0],
+            SearchResult::new(
+                "Brave Result",
+                "https://example.com/brave",
+                "Brave snippet",
+                "brave"
+            )
+        );
+
+        let tavily = json!({
+            "results": [
+                { "title": "Tavily Result", "url": "https://example.com/tavily", "content": "Tavily snippet", "score": 0.82 }
+            ]
+        });
+        let tavily_result = &parse_tavily_results(&tavily, 5)[0];
+        assert_eq!(tavily_result.source.as_deref(), Some("tavily"));
+        assert_eq!(tavily_result.score, Some(0.82));
+
+        let serper = json!({
+            "organic": [
+                { "title": "Serper Result", "link": "https://example.com/serper", "snippet": "Serper snippet" }
+            ]
+        });
+        assert_eq!(
+            parse_serper_results(&serper, 5)[0].source.as_deref(),
+            Some("serper")
+        );
+
+        let serpapi = json!({
+            "organic_results": [
+                { "title": "SerpAPI Result", "link": "https://example.com/serpapi", "snippet": "SerpAPI snippet" }
+            ]
+        });
+        assert_eq!(
+            parse_serpapi_results(&serpapi, 5)[0].source.as_deref(),
+            Some("serpapi")
+        );
+
+        let exa = json!({
+            "results": [
+                { "title": "Exa Result", "url": "https://example.com/exa", "text": "Exa snippet", "score": 0.91 }
+            ]
+        });
+        let exa_result = &parse_exa_results(&exa, 5)[0];
+        assert_eq!(exa_result.source.as_deref(), Some("exa"));
+        assert_eq!(exa_result.score, Some(0.91));
+    }
+
     #[tokio::test]
     async fn web_search_rejects_empty_query() {
         let tool = WebSearchTool::new();
         let args = serde_json::json!({ "query": "" });
         let err = tool.execute(args, &make_ctx()).await.unwrap_err();
         assert!(err.to_string().contains("query is empty"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn duckduckgo_live_smoke() {
+        let tool = WebSearchTool::new();
+        let results = tool.search_duckduckgo("51cgw").await.unwrap();
+        eprintln!("{results:#?}");
+        assert!(!results.is_empty());
     }
 }

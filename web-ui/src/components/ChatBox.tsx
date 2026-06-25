@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import {
+  AlertCircle,
   ArrowUp,
   AtSign,
   Brain,
@@ -9,18 +10,21 @@ import {
   ChevronDown,
   Code2,
   Database,
+  FileText,
   FileQuestion,
+  SearchCheck,
   MessageSquare,
   Paperclip,
   Sparkles,
   Circle,
+  X,
 } from 'lucide-react'
 import type { LlmModelConfig } from '../settings'
 import type { QuizSession } from '../quizTypes'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage } from './MarkdownMessage'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
 type OpenMenu = 'mode' | 'knowledge' | 'model' | null
 
 interface Message {
@@ -30,6 +34,17 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  attachments?: ChatAttachment[]
+}
+
+export interface ChatAttachment {
+  id: string
+  name: string
+  size: number
+  type: string
+  text?: string
+  error?: string
+  truncated?: boolean
 }
 
 interface Citation {
@@ -51,11 +66,12 @@ interface Props {
   activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
-  onSend: (text: string) => void
+  onSend: (text: string, attachments?: ChatAttachment[]) => void
   onAskDeepSolveStep?: (step: { id: string; title: string; summary?: string }) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
+  onSaveToBook?: (markdown: string) => Promise<void>
   onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onQuizFinish?: (quizId: string) => Promise<void>
   disabled: boolean
@@ -92,6 +108,12 @@ const modeOptions: Array<{ value: Capability; label: string; description: string
     description: '基于对话或知识库生成测验',
     icon: <FileQuestion size={21} />,
   },
+  {
+    value: 'research',
+    label: '研究',
+    description: '搜索、阅读并生成带引用的研究报告',
+    icon: <SearchCheck size={21} />,
+  },
 ]
 
 export function ChatBox({
@@ -108,19 +130,31 @@ export function ChatBox({
   onCapabilityChange,
   onKnowledgeBaseChange,
   onLlmConfigChange,
+  onSaveToBook,
   onQuizAnswer,
   onQuizFinish,
   disabled,
 }: Props) {
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
 
   const handleSend = () => {
-    if (!input.trim() || disabled) return
-    onSend(input.trim())
+    const readyAttachments = attachments.filter((attachment) => !attachment.error)
+    if ((!input.trim() && readyAttachments.length === 0) || disabled) return
+    onSend(input.trim(), readyAttachments)
     setInput('')
+    setAttachments([])
+  }
+
+  const handleAddAttachments = (items: ChatAttachment[]) => {
+    setAttachments((current) => [...current, ...items])
+  }
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id))
   }
 
   const handleScroll = () => {
@@ -159,6 +193,9 @@ export function ChatBox({
               onKnowledgeBaseChange={onKnowledgeBaseChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
+              attachments={attachments}
+              onAddAttachments={handleAddAttachments}
+              onRemoveAttachment={handleRemoveAttachment}
               disabled={disabled}
               variant="center"
             />
@@ -195,13 +232,32 @@ export function ChatBox({
                   ) : (
                     <>
                       <MarkdownMessage text={msg.text} />
+                      {capability === 'research' && msg.text.trim() && onSaveToBook && (
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                            type="button"
+                            onClick={() => {
+                              void onSaveToBook(msg.text)
+                            }}
+                          >
+                            <BookOpenCheck size={16} />
+                            保存到书籍
+                          </button>
+                        </div>
+                      )}
                       {msg.citations && msg.citations.length > 0 && (
                         <CitationList citations={msg.citations} />
                       )}
                     </>
                   )
                 ) : (
-                  <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
+                  <>
+                    <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <AttachmentSummary attachments={msg.attachments} />
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -225,6 +281,9 @@ export function ChatBox({
               onKnowledgeBaseChange={onKnowledgeBaseChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
+              attachments={attachments}
+              onAddAttachments={handleAddAttachments}
+              onRemoveAttachment={handleRemoveAttachment}
               disabled={disabled}
               variant="bottom"
             />
@@ -473,6 +532,9 @@ function Composer({
   onKnowledgeBaseChange,
   onLlmConfigChange,
   onSend,
+  attachments,
+  onAddAttachments,
+  onRemoveAttachment,
   disabled,
   variant,
 }: {
@@ -487,10 +549,15 @@ function Composer({
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
   onSend: () => void
+  attachments: ChatAttachment[]
+  onAddAttachments: (attachments: ChatAttachment[]) => void
+  onRemoveAttachment: (id: string) => void
   disabled: boolean
   variant: 'center' | 'bottom'
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [readingAttachments, setReadingAttachments] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
   const activeKnowledge = knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
   const activeModel = llmConfigs.find((item) => item.id === activeLlmConfigId) ?? llmConfigs[0] ?? null
@@ -514,6 +581,20 @@ function Composer({
     setOpenMenu((current) => (current === menu ? null : menu))
   }
 
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    setReadingAttachments(true)
+    try {
+      const parsed = await Promise.all(files.map(readChatAttachment))
+      onAddAttachments(parsed)
+    } finally {
+      setReadingAttachments(false)
+    }
+  }
+
   return (
     <div
       className={`relative rounded-3xl border border-blue-100 bg-white shadow-sm ${
@@ -534,6 +615,15 @@ function Composer({
         }}
         placeholder="今天我能帮您什么？"
       />
+      {attachments.length > 0 && (
+        <div className="border-t border-blue-50 px-4 py-2">
+          <AttachmentSummary
+            attachments={attachments}
+            removable
+            onRemove={onRemoveAttachment}
+          />
+        </div>
+      )}
       <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
         <div className="relative">
           <ToolbarButton
@@ -562,12 +652,21 @@ function Composer({
         </div>
 
         <button
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50"
+          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
           type="button"
+          disabled={disabled || readingAttachments}
+          onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip size={18} />
           附件
         </button>
+        <input
+          ref={fileInputRef}
+          className="hidden"
+          type="file"
+          multiple
+          onChange={handleFileChange}
+        />
 
         <div className="relative">
           <ToolbarButton
@@ -643,7 +742,7 @@ function Composer({
         <button
           className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
           onClick={onSend}
-          disabled={disabled || !input.trim()}
+          disabled={disabled || (!input.trim() && attachments.filter((attachment) => !attachment.error).length === 0)}
           type="button"
           title="发送"
         >
@@ -652,6 +751,165 @@ function Composer({
       </div>
     </div>
   )
+}
+
+const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+const MAX_ATTACHMENT_CHARS = 20000
+const TEXT_EXTENSIONS = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'csv',
+  'tsv',
+  'json',
+  'jsonl',
+  'log',
+  'rs',
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'py',
+  'toml',
+  'yaml',
+  'yml',
+  'xml',
+  'html',
+  'css',
+  'sql',
+])
+
+async function readChatAttachment(file: File): Promise<ChatAttachment> {
+  const base = {
+    id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+    name: file.name,
+    size: file.size,
+    type: file.type || 'application/octet-stream',
+  }
+
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    return {
+      ...base,
+      error: `附件超过 ${formatBytes(MAX_ATTACHMENT_BYTES)}，请拆分后再发送。`,
+    }
+  }
+
+  if (!isTextFile(file) || isPdfFile(file)) {
+    return parseAttachmentOnServer(file, base)
+  }
+
+  try {
+    const raw = await file.text()
+    const truncated = raw.length > MAX_ATTACHMENT_CHARS
+    return {
+      ...base,
+      text: truncated ? raw.slice(0, MAX_ATTACHMENT_CHARS) : raw,
+      truncated,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ...base, error: `读取失败：${message}` }
+  }
+}
+
+async function parseAttachmentOnServer(
+  file: File,
+  base: Pick<ChatAttachment, 'id' | 'name' | 'size' | 'type'>,
+): Promise<ChatAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    const res = await fetch('/api/attachments/parse', {
+      method: 'POST',
+      body: form,
+    })
+    const data = await res.json().catch(() => ({})) as {
+      attachment?: {
+        name?: string
+        size?: number
+        mime_type?: string | null
+        text?: string
+        truncated?: boolean
+      }
+      error?: string
+    }
+    if (!res.ok || !data.attachment?.text) {
+      return { ...base, error: data.error || `附件解析失败：HTTP ${res.status}` }
+    }
+    return {
+      ...base,
+      name: data.attachment.name || base.name,
+      size: data.attachment.size ?? base.size,
+      type: data.attachment.mime_type || base.type,
+      text: data.attachment.text,
+      truncated: Boolean(data.attachment.truncated),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ...base, error: `附件解析请求失败：${message}` }
+  }
+}
+
+function isPdfFile(file: File) {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
+function isTextFile(file: File) {
+  if (file.type.startsWith('text/')) return true
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  return Boolean(ext && TEXT_EXTENSIONS.has(ext))
+}
+
+function AttachmentSummary({
+  attachments,
+  removable = false,
+  onRemove,
+}: {
+  attachments: ChatAttachment[]
+  removable?: boolean
+  onRemove?: (id: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className={`flex max-w-full items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+            attachment.error
+              ? 'border-red-100 bg-red-50 text-red-700'
+              : 'border-blue-100 bg-blue-50 text-gray-700'
+          }`}
+          title={attachment.error || attachment.name}
+        >
+          {attachment.error ? (
+            <AlertCircle size={16} className="shrink-0" />
+          ) : (
+            <FileText size={16} className="shrink-0 text-blue-600" />
+          )}
+          <span className="min-w-0 truncate font-medium">{attachment.name}</span>
+          <span className="shrink-0 text-gray-500">{formatBytes(attachment.size)}</span>
+          {attachment.truncated && <span className="shrink-0 text-amber-600">truncated</span>}
+          {attachment.error && <span className="min-w-0 truncate">{attachment.error}</span>}
+          {removable && (
+            <button
+              className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-white hover:text-gray-900"
+              type="button"
+              onClick={() => onRemove?.(attachment.id)}
+              title="移除附件"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function llmApiModeLabel(provider: LlmModelConfig['provider']) {

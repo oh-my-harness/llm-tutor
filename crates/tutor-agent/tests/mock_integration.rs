@@ -271,3 +271,35 @@ async fn chat_emits_trace_events() {
         "missing chat phase_end trace: {events:?}"
     );
 }
+
+#[tokio::test]
+async fn research_emits_research_trace_events() {
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![MockResponse::text(
+            "# Report\n\n## Sources\n\n[1] Mock source",
+        )],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone());
+
+    let answer = router
+        .run(Capability::Research, "research a topic")
+        .await
+        .unwrap();
+    assert!(answer.contains("Report"));
+
+    let events = sink.events();
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "research_stage_start" && data["capability"] == "research"
+        }),
+        "missing research stage event: {events:?}"
+    );
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "research_report_done" && data["capability"] == "research"
+        }),
+        "missing research report event: {events:?}"
+    );
+}
