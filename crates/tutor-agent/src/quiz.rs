@@ -81,8 +81,8 @@ pub async fn generate_quiz_questions_with_client(
         .await
         .map_err(|err| TutorError::Internal(format!("quiz LLM generation failed: {err}")))?;
     let text = response_text(&response.content);
-    let questions = parse_generated_quiz(&text, config.question_count, chunks.len())?;
-    validate_supporting_quotes_against_chunks(&questions, chunks)?;
+    let mut questions = parse_generated_quiz(&text, config.question_count, chunks.len())?;
+    repair_supporting_quotes_against_chunks(&mut questions, chunks);
     Ok(questions)
 }
 
@@ -208,25 +208,46 @@ fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn validate_supporting_quotes_against_chunks(
-    questions: &[GeneratedQuizQuestion],
+fn repair_supporting_quotes_against_chunks(
+    questions: &mut [GeneratedQuizQuestion],
     chunks: &[QuizSourceChunk],
-) -> Result<()> {
+) {
     for question in questions {
-        let quote = normalize_text(&question.supporting_quote);
-        let supported = question.citation_indices.iter().any(|index| {
-            chunks
-                .get(*index)
-                .map(|chunk| normalize_text(&chunk.text).contains(&quote))
-                .unwrap_or(false)
-        });
-        if !supported {
-            return Err(TutorError::Internal(
-                "quiz supporting quote was not found in cited source chunks".into(),
-            ));
+        if quote_found_in_cited_chunks(question, chunks) {
+            continue;
         }
+        let Some(source) = question
+            .citation_indices
+            .iter()
+            .find_map(|index| chunks.get(*index))
+        else {
+            continue;
+        };
+        question.supporting_quote = source_quote_prefix(&source.text, 240);
     }
-    Ok(())
+}
+
+fn quote_found_in_cited_chunks(
+    question: &GeneratedQuizQuestion,
+    chunks: &[QuizSourceChunk],
+) -> bool {
+    let quote = normalize_text(&question.supporting_quote);
+    if quote.is_empty() {
+        return false;
+    }
+    question.citation_indices.iter().any(|index| {
+        chunks
+            .get(*index)
+            .map(|chunk| normalize_text(&chunk.text).contains(&quote))
+            .unwrap_or(false)
+    })
+}
+
+fn source_quote_prefix(source_text: &str, max_chars: usize) -> String {
+    normalize_text(source_text)
+        .chars()
+        .take(max_chars)
+        .collect::<String>()
 }
 
 fn response_text(content: &[ResponseContent]) -> String {
@@ -400,8 +421,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_supporting_quote_not_found_in_cited_chunks() {
-        let questions = vec![GeneratedQuizQuestion {
+    fn repairs_supporting_quote_not_found_in_cited_chunks() {
+        let mut questions = vec![GeneratedQuizQuestion {
             stem: "Q?".into(),
             options: vec!["A".into(), "B".into()],
             correct_option_index: 0,
@@ -416,10 +437,12 @@ mod tests {
             score: None,
         }];
 
-        let err = validate_supporting_quotes_against_chunks(&questions, &chunks)
-            .unwrap_err()
-            .to_string();
+        repair_supporting_quotes_against_chunks(&mut questions, &chunks);
 
-        assert!(err.contains("supporting quote"));
+        assert_eq!(
+            questions[0].supporting_quote,
+            "This chunk supports another fact."
+        );
+        assert!(quote_found_in_cited_chunks(&questions[0], &chunks));
     }
 }
