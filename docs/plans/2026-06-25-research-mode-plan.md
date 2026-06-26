@@ -1,6 +1,6 @@
 # Research Mode Plan
 
-> Status: proposed | Date: 2026-06-25 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
+> Status: in progress | Date: 2026-06-25 | Last updated: 2026-06-26 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
 
 ## 1. Goal
 
@@ -36,7 +36,7 @@ Included:
 - report synthesis with citations,
 - source list rendering under the report,
 - save report to book as a Markdown chapter,
-- local durable report and book metadata.
+- local durable Notebook entry and optional Book chapter metadata.
 
 Out of scope for V1:
 
@@ -53,7 +53,7 @@ Out of scope for V1:
 The user chooses `Research` in the composer and sends a topic:
 
 ```text
-调研一下 Rust 生态中适合做 Web 搜索的库
+Research Rust crates and services that are suitable for web search in an agent product.
 ```
 
 The UI renders one structured assistant result:
@@ -135,7 +135,7 @@ Search provider configuration stays in product settings. Tool implementations sh
 
 Owns product APIs and persistence:
 
-- research report store,
+- notebook entry store for research reports,
 - book store,
 - save report endpoint,
 - save report to book endpoint,
@@ -158,8 +158,10 @@ Owns product experience:
 Start with JSON-backed local stores. Move to SQLite only when schema evolution becomes painful.
 
 ```ts
-ResearchReport {
+NotebookEntry {
   id: string
+  spaceId: string
+  type: 'research_report'
   sessionId: string
   title: string
   query: string
@@ -199,6 +201,7 @@ BookChapter {
   title: string
   markdown: string
   sourceReportId?: string
+  sourceSessionId?: string
   createdAt: string
   updatedAt: string
 }
@@ -293,7 +296,7 @@ V1 action:
 Save to book -> choose existing book or create book -> create chapter from report Markdown
 ```
 
-The report remains a report even after saving. The book chapter stores `sourceReportId` so the user can trace it back.
+The report remains a Notebook research entry even after saving. A future book chapter should store `sourceNotebookEntryId` so the user can trace it back.
 
 ## 10. Implementation Plan
 
@@ -316,15 +319,16 @@ The report remains a report even after saving. The book chapter stores `sourceRe
 
 - [ ] Add `ResearchReport` UI message component.
 - [ ] Parse/attach report sources from trace or structured metadata.
-- [ ] Render final report Markdown and source list.
-- [ ] Add source citation display.
+- [x] Render final report Markdown.
+- [ ] Add a dedicated source list attached to the report metadata.
+- [ ] Add source citation display beyond generic message citations.
 
 ### Phase 4: Persistence
 
-- [ ] Add research report store.
-- [ ] Add create/read report APIs.
-- [ ] Persist report metadata with session ID.
-- [ ] Restore research reports when loading old sessions.
+- [ ] Add Notebook entry store.
+- [ ] Add create/read Notebook entry APIs.
+- [ ] Persist research report metadata in `NotebookEntry(type = research_report)`.
+- [ ] Restore research reports from Notebook entries and session links.
 
 ### Phase 5: Book Save
 

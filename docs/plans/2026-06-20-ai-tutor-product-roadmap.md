@@ -1,6 +1,6 @@
 # AI Tutor Product Roadmap
 
-> Status: planning | Date: 2026-06-20 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
+> Status: in progress | Date: 2026-06-20 | Last updated: 2026-06-26 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
 
 ## 1. Product Direction
 
@@ -45,7 +45,8 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 | Knowledge Base | User-owned document library | Upload, parse, index, retrieve, show sources |
 | Deep Solve | Guided problem solving | Plan -> solve steps -> synthesize final answer |
 | Quiz | Practice and assessment | Generate questions, collect answer, judge response |
-| Notebook | Persistent review | Save answers, notes, quiz results, source links |
+| Space | Learning workspace | Notebook, quiz bank, and student profile |
+| Books | Polished output | Turn curated notes/reports into chapters |
 | Settings | Runtime control | LLM provider, model, API key, budget limit |
 
 ### Explicitly Out of MVP
@@ -53,7 +54,7 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 - TutorBot channel integrations.
 - Multi-user auth and admin dashboard.
 - Three-layer memory.
-- Book Engine / living books.
+- Rich Book Engine / living books.
 - Math Animator.
 - Deep Research with parallel sub-agents.
 - Full plugin marketplace.
@@ -66,9 +67,9 @@ The current `llm-tutor` Rust workspace should remain the starting point.
 
 - Keep Rust as the orchestration backend.
 - Keep `llm-harness-runtime` as the runtime foundation.
-- Add persistent storage with SQLite first.
+- Keep local JSON stores for MVP product data; consider SQLite when schema churn grows.
 - Use WebSocket for streaming content, trace events, and tool status.
-- Keep capabilities behind a clear router: `chat`, `deep_solve`, `quiz`, later `research` and `visualize`.
+- Keep capabilities behind a clear router: `chat`, `deep_solve`, `code_exec`, `quiz`, `research`, later `visualize`.
 
 ### Frontend
 
@@ -78,15 +79,15 @@ The current `llm-tutor` Rust workspace should remain the starting point.
 
 ### RAG
 
-Start simple and local:
+Current implementation is simple and local:
 
 - Document formats: Markdown, TXT, PDF first.
-- Chunking: token or paragraph-based chunks.
+- Chunking: basic text chunks now; later token or paragraph-based chunks.
 - Embeddings: configurable provider.
-- Store: SQLite + vector extension, LanceDB, or Qdrant.
+- Store: LanceDB.
 - Retrieval: top-k semantic search with source metadata.
 
-Recommended first implementation: SQLite for metadata plus a small local vector store abstraction, so the app can swap storage later.
+Current implementation uses JSON metadata plus LanceDB vectors. SQLite is still a reasonable next storage step when product data becomes more relational.
 
 ### Storage Model
 
@@ -98,7 +99,9 @@ Minimum entities:
 - `documents`
 - `chunks`
 - `retrieval_hits`
-- `notebooks`
+- `books`
+- `book_chapters`
+- `spaces`
 - `notebook_entries`
 - `quiz_questions`
 - `quiz_attempts`
@@ -109,22 +112,22 @@ Minimum entities:
 
 Goal: make the current app reproducible and easy to run.
 
-- [ ] Finalize dependency strategy: git dependencies or local path dependencies, but not a mix that causes version drift.
-- [ ] Update README with the correct backend port and current launch steps.
+- [x] Finalize dependency strategy: git dependencies or local path dependencies, but not a mix that causes version drift.
+- [x] Update README with the correct backend port and current launch steps.
 - [ ] Add a smoke test for `tutor-web` startup.
-- [ ] Keep `cargo check --workspace`, `cargo test --workspace`, and `npm run build` green.
+- [x] Keep `cargo check --workspace`, `cargo test --workspace`, and `npm run build` green.
 
 #### v0.1 Carryover Checklist
 
 These items come from the earlier Phase 1-5 plans. They should be closed before starting larger product work, otherwise later phases will build on an uneven foundation.
 
-- [ ] Wire top-level `Capability::CodeExec` instead of returning `UnsupportedCapability`.
-- [ ] Decide whether `code_exec` requires approval in CLI, Web, both, or only when configured.
-- [ ] Wire `BudgetControlAdapter` into both cost accumulation and stop/limit behavior for every harness.
-- [ ] Emit real `TutorStream::trace` events from Chat and Deep Solve, especially phase transitions, tool calls, and replan events.
-- [ ] Confirm WebSocket output semantics: final-only response, chunked text stream, or mixed content/trace/status stream.
-- [ ] Replace Deep Solve `run_pre_retrieve` stub with either real RAG retrieval or an explicit no-KB branch.
-- [ ] Update README with accurate backend port, provider setup, dependency strategy, and known v0.1 limitations.
+- [x] Wire top-level `Capability::CodeExec` instead of returning `UnsupportedCapability`.
+- [x] Decide whether `code_exec` requires approval in CLI, Web, both, or only when configured.
+- [x] Wire `BudgetControlAdapter` into both cost accumulation and stop/limit behavior for every harness.
+- [x] Emit real `TutorStream::trace` events from Chat and Deep Solve, especially phase transitions, tool calls, and replan events.
+- [x] Confirm WebSocket output semantics: final-only response, chunked text stream, or mixed content/trace/status stream.
+- [x] Replace Deep Solve `run_pre_retrieve` stub with either real RAG retrieval or an explicit no-KB branch.
+- [x] Update README with accurate backend port, provider setup, dependency strategy, and known v0.1 limitations.
 - [ ] Add or remove the planned `docs/quickstart-deep-solve.md`; avoid stale file references in plans.
 - [ ] Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and either fix warnings or document accepted warnings.
 - [ ] Document how to run ignored real-provider tests and what API keys are required.
@@ -139,15 +142,15 @@ Acceptance:
 
 Goal: replace RAG stubs with real document ingestion and retrieval.
 
-- [ ] Add `knowledge_bases` and `documents` storage.
-- [ ] Add document upload endpoint.
-- [ ] Parse TXT and Markdown.
-- [ ] Parse PDF text.
-- [ ] Chunk documents with stable chunk IDs.
-- [ ] Add embedding provider configuration.
-- [ ] Store chunk vectors and metadata.
-- [ ] Replace `RagSearchTool` placeholder with real retrieval.
-- [ ] Return citations to the UI.
+- [x] Add `knowledge_bases` and `documents` storage.
+- [x] Add document upload endpoint.
+- [x] Parse TXT and Markdown.
+- [x] Parse PDF text.
+- [x] Chunk documents with stable chunk IDs.
+- [x] Add embedding provider configuration.
+- [x] Store chunk vectors and metadata.
+- [x] Replace `RagSearchTool` placeholder with real retrieval.
+- [x] Return citations to the UI.
 
 Acceptance:
 
@@ -159,12 +162,12 @@ Acceptance:
 
 Goal: turn chat from ephemeral messages into a resumable learning history.
 
-- [ ] Persist sessions and messages.
-- [ ] Add session list API.
-- [ ] Add session detail API.
-- [ ] Add resume session support in Web UI.
-- [ ] Store selected capability and knowledge base per session.
-- [ ] Persist trace events or compact task summaries.
+- [x] Persist sessions and messages.
+- [x] Add session list API.
+- [x] Add session detail API.
+- [x] Add resume session support in Web UI.
+- [x] Store selected capability and knowledge base per session.
+- [x] Persist trace events or compact task summaries.
 
 Acceptance:
 
@@ -175,11 +178,11 @@ Acceptance:
 
 Goal: make long reasoning inspectable and useful.
 
-- [ ] Stream phase events: plan, solve step, replan, synthesize.
-- [ ] Show a structured Trace Panel with phase status.
-- [ ] Show intermediate step results separately from the final answer.
+- [x] Stream phase events: plan, solve step, replan, synthesize.
+- [x] Show a structured Trace Panel with phase status.
+- [x] Show intermediate step results separately from the final answer.
 - [ ] Allow user to stop a running solve.
-- [ ] Add mock tests for replan and phase event emission.
+- [x] Add mock tests for replan and phase event emission.
 
 Acceptance:
 
@@ -190,12 +193,12 @@ Acceptance:
 
 Goal: add the first active learning workflow.
 
-- [ ] Add `quiz` capability.
-- [ ] Generate questions from selected knowledge base chunks.
-- [ ] Support short answer and multiple choice first.
-- [ ] Add answer judging prompt.
-- [ ] Save quiz questions and attempts.
-- [ ] Show explanations and source references.
+- [x] Add `quiz` capability.
+- [x] Generate questions from selected knowledge base chunks.
+- [x] Support single-choice questions first.
+- [x] Add answer judging/scoring flow.
+- [x] Save quiz questions and attempts.
+- [x] Show explanations and source references.
 
 Acceptance:
 
@@ -203,32 +206,42 @@ Acceptance:
 - User can answer and receive feedback.
 - Wrong answers can be saved for later review.
 
-### Phase 5: Notebook
+### Phase 5: Space, Notebook, and Learning Records
 
 Goal: make learning outputs reusable.
 
-- [ ] Add notebooks and notebook entries.
-- [ ] Save chat answers to notebook.
-- [ ] Save quiz results to notebook.
+- [ ] Add default Space.
+- [ ] Add Notebook entries.
+- [ ] Save research reports to Notebook as `type = research_report`.
+- [ ] Move Quiz history/review into Space / Quiz Bank.
+- [ ] Add Student Profile module.
+- [ ] Add Markdown-based Memory module with L1 events, L2 summaries, and L3 learner memory.
+- [ ] Add manual memory consolidation from the Memory module.
+- [ ] Add `read_memory` tool so Quiz, Research, Chat, and Deep Solve can actively inspect learner memory.
+- [x] Add books and book chapters.
+- [ ] Send curated Notebook entries to Books.
+- [ ] Save chat answers to Notebook.
+- [ ] Save quiz summaries to Notebook.
 - [ ] Save source snippets.
-- [ ] Add notebook browser UI.
-- [ ] Add `write_note` and `list_notebook` tools.
+- [x] Add basic book browser UI.
+- [ ] Add `write_note` / `save_to_book` style tools when runtime/tool policy is ready.
 
 Acceptance:
 
 - User can keep important learning records without leaving the chat.
-- Future turns can reference saved notes.
+- Future turns can reference saved records.
 
 ### Phase 6: Product Polish
 
 Goal: make the app feel like a learning product, not only a developer demo.
 
-- [ ] Redesign the UI around three areas: Chat, Knowledge, Notebook.
-- [ ] Add clear empty states.
-- [ ] Add upload progress and indexing status.
+- [x] Redesign the UI around chat, knowledge, quiz, books, settings, and trace.
+- [ ] Redesign Space around Notebook, Quiz Bank, and Student Profile.
+- [x] Add clear empty states for major views.
+- [x] Add upload progress and indexing status.
 - [ ] Add model/provider health checks.
-- [ ] Add error recovery for missing API keys and failed embeddings.
-- [ ] Add export for chat and notebook entries.
+- [x] Add error recovery for missing API keys and failed embeddings.
+- [ ] Add export for chat and book entries.
 
 Acceptance:
 
@@ -241,9 +254,9 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 | Feature | Why Later |
 |---|---|
-| Deep Research | Needs robust citations, parallel task orchestration, and report editing |
-| Book Engine | Requires stable document model and many UI block types |
-| Three-layer Memory | Needs enough real usage data to justify memory consolidation |
+| Deeper Research | Current Research MVP exists; needs robust citations, report store, regeneration, and parallel task orchestration |
+| Rich Book Engine | Current Books MVP exists; rich editing requires stable document model and many UI block types |
+| Automatic Memory Consolidation | Start with manual Markdown consolidation first; automatic triggers need trust and good review UX |
 | TutorBot | Needs auth, workspace isolation, and channel security |
 | Multi-user | Changes storage, permissions, and deployment model |
 | Math Animator | Requires media rendering pipeline and visual QA |
@@ -252,13 +265,17 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 Recommended next implementation order:
 
-1. Decide dependency strategy and commit the current runtime alignment.
-2. Update README launch instructions.
-3. Implement SQLite persistence scaffolding.
-4. Implement real RAG ingestion for TXT/Markdown.
-5. Extend to PDF parsing.
-6. Wire `RagSearchTool` to the real retriever.
-7. Add citations in Web UI.
+1. Add Space shell with Notebook, Quiz Bank, and Student Profile tabs.
+2. Add `NotebookEntry` store and save Research reports as `type = research_report`.
+3. Move historical Quiz review into Space / Quiz Bank and remove standalone Quiz navigation.
+4. Add Markdown Memory module and manual consolidation.
+5. Add `read_memory` tool and mount it for personalized Quiz, Research, Chat, and Deep Solve planning.
+6. Improve source/citation quality for Research and Quiz.
+7. Upgrade RAG chunking from basic character chunks to paragraph/token-aware chunks.
+8. Add model/provider health checks in Settings.
+9. Add export for chat, notebook entries, reports, and book chapters.
+10. Add a smoke test for `tutor-web` startup.
+11. Decide whether local JSON stores should move to SQLite.
 
 ## 7. Risks
 
@@ -268,7 +285,7 @@ Recommended next implementation order:
 | RAG quality is poor | Start with source-visible retrieval debugging and chunk previews |
 | Provider differences break tool calls | Keep mock provider tests and provider-specific integration tests |
 | Long tasks feel opaque | Stream trace/status events early |
-| Storage model churn | Use simple SQLite migrations and avoid premature multi-user design |
+| Storage model churn | Keep JSON while local MVP is simple; move to SQLite when reports/books/sessions need relational queries |
 | UI becomes a debug console | Design around learner workflows, not internal events |
 
 ## 8. Success Metrics
@@ -278,7 +295,7 @@ Early qualitative metrics:
 - User can upload a course note and get a grounded answer in under 2 minutes.
 - User can solve a difficult question with visible intermediate steps.
 - User can generate useful quiz questions from their own material.
-- User can save and later find an important answer or mistake.
+- User can save and later find an important answer, report, or mistake.
 
 Engineering metrics:
 
