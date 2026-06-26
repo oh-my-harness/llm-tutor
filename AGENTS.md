@@ -11,3 +11,4 @@
   `docs/framework-feedback.md` instead of silently building a parallel system.
 - Keep adapters between product code and runtime code thin, explicit, and
   covered by boundary tests.
+- After completing a meaningful task, commit the changes promptly.
