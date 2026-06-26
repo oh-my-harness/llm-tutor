@@ -12,6 +12,7 @@ pub struct QuizGenerationConfig {
     pub topic: Option<String>,
     pub difficulty: String,
     pub question_count: usize,
+    pub memory_markdown: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -186,8 +187,18 @@ fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) 
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let memory = config
+        .memory_markdown
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            format!("\nLearner memory for personalization only, not factual support:\n{value}\n")
+        })
+        .unwrap_or_default();
+
     format!(
-        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n\nRules:\n- Use only facts that are directly supported by the supplied sources.\n- The option at correct_option_index must be the only best answer.\n- The explanation must explicitly explain why the correct option is correct and why the key distractor is not supported.\n- citation_indices must point only to source chunks that support the correct answer.\n- supporting_quote must be an exact short quote copied from one cited source chunk and must support the correct answer.\n- Do not cite a source chunk merely because it is topically related.\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"supporting_quote\":\"exact quote from cited source\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
+        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n{memory}\nRules:\n- Use learner memory only to choose focus, difficulty, tags, and explanation style.\n- Use only facts that are directly supported by the supplied sources.\n- The option at correct_option_index must be the only best answer.\n- The explanation must explicitly explain why the correct option is correct and why the key distractor is not supported.\n- citation_indices must point only to source chunks that support the correct answer.\n- supporting_quote must be an exact short quote copied from one cited source chunk and must support the correct answer.\n- Do not cite learner memory.\n- Do not cite a source chunk merely because it is topically related.\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"supporting_quote\":\"exact quote from cited source\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
         count = config.question_count.clamp(1, 10),
         difficulty = config.difficulty,
     )
@@ -315,6 +326,7 @@ mod tests {
                 topic: Some("OPC".into()),
                 difficulty: "medium".into(),
                 question_count: 1,
+                memory_markdown: None,
             },
             &[QuizSourceChunk {
                 source: "source.md".into(),
@@ -338,6 +350,26 @@ mod tests {
         assert_eq!(questions.len(), 1);
         assert_eq!(questions[0].correct_option_index, 0);
         assert_eq!(questions[0].citation_indices, vec![0]);
+    }
+
+    #[test]
+    fn generation_prompt_uses_memory_only_for_personalization() {
+        let prompt = generation_prompt(
+            &QuizGenerationConfig {
+                topic: Some("OPC".into()),
+                difficulty: "medium".into(),
+                question_count: 1,
+                memory_markdown: Some("- Learner confuses OPC and photoresist.".into()),
+            },
+            &[QuizSourceChunk {
+                source: "source.md".into(),
+                text: "OPC corrects lithography mask patterns.".into(),
+                score: None,
+            }],
+        );
+
+        assert!(prompt.contains("Learner memory for personalization only"));
+        assert!(prompt.contains("Do not cite learner memory"));
     }
 
     #[test]

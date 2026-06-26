@@ -112,6 +112,20 @@ async fn chat_tool_call_then_text() {
 }
 
 #[tokio::test]
+async fn chat_can_call_read_memory_then_text() {
+    let responses = vec![
+        MockResponse::tool_use("use-memory", "read_memory", r#"{"scope":"profile"}"#),
+        MockResponse::text("I will adapt the next explanation to your profile."),
+    ];
+    let router = make_router(responses, make_governance(None));
+    let answer = router
+        .run(Capability::Chat, "review this based on my profile")
+        .await
+        .unwrap();
+    assert!(answer.contains("profile"));
+}
+
+#[tokio::test]
 async fn smoke_deep_solve_one_step() {
     let plan_json =
         r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;

@@ -8,7 +8,8 @@ import { ApprovalDialog } from './components/ApprovalDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
 import { BooksPage } from './components/BooksPage'
-import { QuizPage } from './components/QuizPage'
+import { SpacePage } from './components/SpacePage'
+import { MemoryPage } from './components/MemoryPage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
@@ -48,12 +49,6 @@ interface RecentSession {
 interface KnowledgeBaseOption {
   id: string
   name: string
-}
-
-interface Book {
-  id: string
-  title: string
-  chapters?: Array<{ id: string; title: string; markdown: string }>
 }
 
 interface SessionListResponse {
@@ -399,47 +394,28 @@ export default function App() {
     updateQuizInMessages(data.quiz as QuizSession)
   }, [updateQuizInMessages])
 
-  const handleSaveToBook = useCallback(async (markdown: string) => {
+  const handleSaveToNotebook = useCallback(async (markdown: string) => {
     try {
-      const fallbackTitle = titleFromMarkdown(markdown)
-      const bookTitle = window.prompt('保存到哪本书？如果不存在会自动创建。', fallbackTitle)
-      if (!bookTitle?.trim()) return
-      const chapterTitle = window.prompt('章节标题', fallbackTitle) || fallbackTitle
-
-      const booksRes = await fetch('/api/books')
-      const booksData = await safeJson(booksRes)
-      if (!booksRes.ok) {
-        throw new Error(errorMessage(booksData, booksRes.status))
-      }
-      const books = (booksData.books ?? []) as Book[]
-      let book = books.find((item) => item.title.trim() === bookTitle.trim())
-      if (!book) {
-        const createRes = await fetch('/api/books', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: bookTitle.trim() }),
-        })
-        const createData = await safeJson(createRes)
-        if (!createRes.ok) {
-          throw new Error(errorMessage(createData, createRes.status))
-        }
-        book = createData.book as Book
-      }
-
-      const chapterRes = await fetch(`/api/books/${encodeURIComponent(book.id)}/chapters`, {
+      const title = titleFromMarkdown(markdown)
+      const res = await fetch('/api/notebook/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: chapterTitle.trim() || fallbackTitle,
+          space_id: 'default',
+          entry_type: 'research_report',
+          title,
           markdown,
+          metadata: {
+            generatedBy: 'research',
+          },
           source_session_id: sessionId,
         }),
       })
-      const chapterData = await safeJson(chapterRes)
-      if (!chapterRes.ok) {
-        throw new Error(errorMessage(chapterData, chapterRes.status))
+      const data = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(errorMessage(data, res.status))
       }
-      pushStatus({ kind: 'done', label: 'Saved', detail: `Book: ${book.title}` })
+      pushStatus({ kind: 'done', label: 'Saved', detail: `Notebook: ${title}` })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Save failed', detail: message })
@@ -696,7 +672,7 @@ export default function App() {
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onLlmConfigChange={handleLlmConfigChange}
-                  onSaveToBook={handleSaveToBook}
+                  onSaveToNotebook={handleSaveToNotebook}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   disabled={running}
@@ -741,26 +717,12 @@ export default function App() {
           <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} />
         )}
 
-        {view === 'quiz' && (
-          <QuizPage
-            knowledgeBases={knowledgeBases}
-            settings={llmSettings}
-            onRefreshKnowledgeBases={refreshKnowledgeBases}
-          />
-        )}
-
         {view === 'space' && (
-          <PlaceholderPage
-            title="空间"
-            description="用于组织项目、课程、班级或个人学习空间，后续可以承载权限、资料集合和任务面板。"
-          />
+          <SpacePage />
         )}
 
         {view === 'memory' && (
-          <PlaceholderPage
-            title="记忆"
-            description="展示 agent 对用户偏好、学习进度和长期上下文的记忆。当前会话历史仍是后端内存态。"
-          />
+          <MemoryPage settings={llmSettings} />
         )}
 
         {view === 'settings' && (

@@ -45,6 +45,10 @@ const providerOptions: { value: LlmProvider; label: string; description: string 
 ]
 
 type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'governance'
+type ConfigTestState = {
+  status: 'running' | 'ok' | 'error'
+  message: string
+}
 
 const settingsTabs: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
   { key: 'appearance', label: '外观', icon: Palette },
@@ -56,6 +60,7 @@ const settingsTabs: Array<{ key: SettingsTab; label: string; icon: LucideIcon }>
 
 export function SettingsPage({ settings, onChange }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
+  const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
 
   const update = <K extends keyof LlmSettings>(key: K, value: LlmSettings[K]) => {
     onChange({ ...settings, [key]: value })
@@ -213,6 +218,86 @@ export function SettingsPage({ settings, onChange }: Props) {
     })
   }
 
+  const setConfigTestState = (id: string, state: ConfigTestState) => {
+    setTestState((current) => ({ ...current, [id]: state }))
+  }
+
+  const testLlmConfig = async (config: LlmModelConfig) => {
+    setConfigTestState(config.id, { status: 'running', message: 'Testing model connection...' })
+    try {
+      const response = await fetch('/api/settings/test/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: config.provider,
+          model: config.model,
+          api_key: config.apiKey,
+          base_url: config.baseUrl,
+          chat_path: config.chatPath,
+          context_window_tokens: config.contextWindowTokens,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload.error || 'Model test failed')
+      }
+      const confirmedWindow = Number(payload.confirmed_context_window_tokens || 0)
+      if (confirmedWindow > 0 && confirmedWindow !== config.contextWindowTokens) {
+        updateLlmConfig(config.id, 'contextWindowTokens', confirmedWindow)
+      }
+      const usage =
+        payload.input_tokens || payload.output_tokens
+          ? ` Input ${payload.input_tokens ?? 0}, output ${payload.output_tokens ?? 0} tokens.`
+          : ''
+      setConfigTestState(config.id, {
+        status: 'ok',
+        message: `${payload.message || 'Model connection works.'}${usage}`,
+      })
+    } catch (error) {
+      setConfigTestState(config.id, {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Model test failed',
+      })
+    }
+  }
+
+  const testEmbeddingConfig = async (config: EmbeddingModelConfig) => {
+    setConfigTestState(config.id, { status: 'running', message: 'Testing embedding connection...' })
+    try {
+      const response = await fetch('/api/settings/test/embedding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: config.provider,
+          model: config.model,
+          api_key: config.apiKey,
+          base_url: config.baseUrl,
+          embeddings_path: config.embeddingsPath,
+          dimensions: config.dimensions,
+          send_dimensions: config.sendDimensions,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload.error || 'Embedding test failed')
+      }
+      const dimensions = Number(payload.dimensions || 0)
+      if (dimensions > 0 && dimensions !== config.dimensions) {
+        updateEmbeddingConfig(config.id, 'dimensions', dimensions)
+      }
+      const usage = payload.total_tokens ? ` Total ${payload.total_tokens} tokens.` : ''
+      setConfigTestState(config.id, {
+        status: 'ok',
+        message: `${payload.message || 'Embedding connection works.'}${usage}`,
+      })
+    } catch (error) {
+      setConfigTestState(config.id, {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Embedding test failed',
+      })
+    }
+  }
+
   return (
     <main className="flex min-h-0 flex-1 bg-gray-50">
       <aside className="hidden w-64 shrink-0 border-r border-gray-200 bg-white px-4 py-6 md:block">
@@ -317,6 +402,11 @@ export function SettingsPage({ settings, onChange }: Props) {
                         description="选择接口模式，并填写端点、Key 和模型 ID。"
                         onDelete={() => deleteLlmConfig(activeLlmConfig.id)}
                       />
+                      <ConfigTestBar
+                        state={testState[activeLlmConfig.id]}
+                        label="测试配置"
+                        onTest={() => testLlmConfig(activeLlmConfig)}
+                      />
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label="配置名称">
                           <TextInput
@@ -418,6 +508,11 @@ export function SettingsPage({ settings, onChange }: Props) {
                         title="嵌入接口"
                         description="配置 OpenAI-compatible embeddings 接口。"
                         onDelete={() => deleteEmbeddingConfig(activeEmbeddingConfig.id)}
+                      />
+                      <ConfigTestBar
+                        state={testState[activeEmbeddingConfig.id]}
+                        label="测试配置"
+                        onTest={() => testEmbeddingConfig(activeEmbeddingConfig)}
                       />
                       <div className="grid gap-4 md:grid-cols-2">
                         <Field label="配置名称">
@@ -762,6 +857,41 @@ function ConfigHeader({
         <Trash2 size={15} />
         删除
       </button>
+    </div>
+  )
+}
+
+function ConfigTestBar({
+  state,
+  label,
+  onTest,
+}: {
+  state?: ConfigTestState
+  label: string
+  onTest: () => void
+}) {
+  const running = state?.status === 'running'
+  const tone =
+    state?.status === 'ok'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : state?.status === 'error'
+        ? 'border-red-200 bg-red-50 text-red-700'
+        : 'border-gray-200 bg-gray-50 text-gray-600'
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <button
+        type="button"
+        className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={running}
+        onClick={onTest}
+      >
+        {running ? '测试中...' : label}
+      </button>
+      {state && (
+        <div className={`min-w-0 flex-1 rounded-md border px-3 py-2 text-sm ${tone}`}>
+          {state.message}
+        </div>
+      )}
     </div>
   )
 }

@@ -12,6 +12,8 @@ use serde::Deserialize;
 use tutor_rag::KnowledgeRetriever;
 
 use crate::knowledge_store::KnowledgeStore;
+use crate::memory_store::{MemoryEventCategory, MemoryStore};
+use crate::notebook_store::NotebookStore;
 use crate::quiz_store::{
     QuizCitation, QuizConfig, QuizDifficulty, QuizOption, QuizQuestion, QuizQuestionType,
     QuizSession, QuizStore,
@@ -21,6 +23,8 @@ use crate::quiz_store::{
 struct QuizState {
     store: Arc<QuizStore>,
     knowledge: Arc<KnowledgeStore>,
+    notebook: Arc<NotebookStore>,
+    memory: Arc<MemoryStore>,
     rag_root: PathBuf,
 }
 
@@ -28,6 +32,7 @@ struct QuizState {
 struct CreateQuizRequest {
     title: Option<String>,
     kb_id: Option<String>,
+    notebook_entry_id: Option<String>,
     source_text: Option<String>,
     source_label: Option<String>,
     topic: Option<String>,
@@ -62,19 +67,33 @@ async fn create_quiz(
     State(state): State<QuizState>,
     Json(req): Json<CreateQuizRequest>,
 ) -> impl IntoResponse {
-    let source_text = req
+    let use_memory = should_use_memory_for_quiz(&req);
+    let mut source_text = req
         .source_text
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let source_label = req
+    let mut source_label = req
         .source_label
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("conversation")
         .to_string();
+    let notebook_entry_id = req
+        .notebook_entry_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(entry_id) = &notebook_entry_id {
+        let Some(entry) = state.notebook.get(entry_id) else {
+            return error_response(StatusCode::NOT_FOUND, "notebook entry not found");
+        };
+        source_text = Some(entry.markdown);
+        source_label = format!("notebook: {}", entry.title);
+    }
     let kb_id = req
         .kb_id
         .as_deref()
@@ -98,19 +117,60 @@ async fn create_quiz(
 
     let quiz = match state.store.create(
         req.title.unwrap_or_default(),
-        kb_id.clone().unwrap_or_else(|| "__conversation__".into()),
+        kb_id.clone().unwrap_or_else(|| {
+            if notebook_entry_id.is_some() {
+                "__notebook__".into()
+            } else {
+                "__conversation__".into()
+            }
+        }),
         config,
     ) {
         Ok(quiz) => quiz,
         Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
     };
 
-    match generate_questions(&state, quiz, req.llm, source_text, source_label).await {
-        Ok(quiz) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "quiz": quiz })),
-        )
-            .into_response(),
+    let memory_markdown = if use_memory {
+        quiz_memory_markdown(&state.memory).ok()
+    } else {
+        None
+    };
+
+    match generate_questions(
+        &state,
+        quiz,
+        req.llm,
+        source_text,
+        source_label,
+        memory_markdown.clone(),
+    )
+    .await
+    {
+        Ok(quiz) => {
+            let _ = state.memory.record_event(
+                MemoryEventCategory::Quiz,
+                "created",
+                format!(
+                    "Generated quiz: {} ({} questions)",
+                    quiz.title,
+                    quiz.questions.len()
+                ),
+                Some(quiz.id.clone()),
+                serde_json::json!({
+                    "kb_id": quiz.kb_id,
+                    "topic": quiz.config.topic,
+                    "difficulty": quiz.config.difficulty,
+                    "question_count": quiz.questions.len(),
+                    "notebook_entry_id": notebook_entry_id,
+                    "memory_used": memory_markdown.as_deref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+                }),
+            );
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "quiz": quiz })),
+            )
+                .into_response()
+        }
         Err(err) => error_response(StatusCode::BAD_REQUEST, err),
     }
 }
@@ -131,14 +191,66 @@ async fn submit_answer(
         .store
         .submit_answer(&id, &req.question_id, &req.selected_option_id)
     {
-        Ok(quiz) => (StatusCode::OK, Json(serde_json::json!({ "quiz": quiz }))).into_response(),
+        Ok(quiz) => {
+            let answer = quiz
+                .answers
+                .iter()
+                .rev()
+                .find(|answer| answer.question_id == req.question_id);
+            let question = quiz
+                .questions
+                .iter()
+                .find(|question| question.id == req.question_id);
+            let _ = state.memory.record_event(
+                MemoryEventCategory::Quiz,
+                "answered",
+                format!(
+                    "Answered quiz question {} in {}: {}",
+                    req.question_id,
+                    quiz.title,
+                    answer
+                        .map(|answer| if answer.correct {
+                            "correct"
+                        } else {
+                            "incorrect"
+                        })
+                        .unwrap_or("submitted")
+                ),
+                Some(quiz.id.clone()),
+                serde_json::json!({
+                    "question_id": req.question_id,
+                    "selected_option_id": req.selected_option_id,
+                    "correct": answer.map(|answer| answer.correct),
+                    "tags": question.map(|question| question.tags.clone()).unwrap_or_default(),
+                }),
+            );
+            (StatusCode::OK, Json(serde_json::json!({ "quiz": quiz }))).into_response()
+        }
         Err(err) => error_response(StatusCode::BAD_REQUEST, err),
     }
 }
 
 async fn finish_quiz(State(state): State<QuizState>, Path(id): Path<String>) -> impl IntoResponse {
     match state.store.finish(&id) {
-        Ok(quiz) => (StatusCode::OK, Json(serde_json::json!({ "quiz": quiz }))).into_response(),
+        Ok(quiz) => {
+            let score = quiz.score.clone();
+            let _ = state.memory.record_event(
+                MemoryEventCategory::Quiz,
+                "finished",
+                format!(
+                    "Finished quiz: {} ({}/{})",
+                    quiz.title,
+                    score.as_ref().map(|score| score.correct).unwrap_or(0),
+                    score
+                        .as_ref()
+                        .map(|score| score.total)
+                        .unwrap_or(quiz.questions.len())
+                ),
+                Some(quiz.id.clone()),
+                serde_json::json!({ "score": score }),
+            );
+            (StatusCode::OK, Json(serde_json::json!({ "quiz": quiz }))).into_response()
+        }
         Err(err) => error_response(StatusCode::BAD_REQUEST, err),
     }
 }
@@ -151,18 +263,33 @@ async fn delete_quiz(State(state): State<QuizState>, Path(id): Path<String>) -> 
     }
 }
 
-pub fn quiz_router(store: Arc<QuizStore>, knowledge: Arc<KnowledgeStore>) -> Router {
-    quiz_router_with_rag_root(store, knowledge, tutor_rag::LanceDbRag::default_root())
+pub fn quiz_router(
+    store: Arc<QuizStore>,
+    knowledge: Arc<KnowledgeStore>,
+    notebook: Arc<NotebookStore>,
+    memory: Arc<MemoryStore>,
+) -> Router {
+    quiz_router_with_rag_root(
+        store,
+        knowledge,
+        notebook,
+        memory,
+        tutor_rag::LanceDbRag::default_root(),
+    )
 }
 
 fn quiz_router_with_rag_root(
     store: Arc<QuizStore>,
     knowledge: Arc<KnowledgeStore>,
+    notebook: Arc<NotebookStore>,
+    memory: Arc<MemoryStore>,
     rag_root: impl Into<PathBuf>,
 ) -> Router {
     let state = QuizState {
         store,
         knowledge,
+        notebook,
+        memory,
         rag_root: rag_root.into(),
     };
     Router::new()
@@ -179,10 +306,11 @@ async fn generate_questions(
     llm: Option<CreateLlmConfig>,
     source_text: Option<String>,
     source_label: String,
+    memory_markdown: Option<String>,
 ) -> anyhow::Result<QuizSession> {
     if let Some(source_text) = source_text {
         let hits = source_hits_from_text(&quiz, &source_label, &source_text);
-        let questions = questions_for_hits(&quiz, llm, &hits).await?;
+        let questions = questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
         return state.store.replace_questions(&quiz.id, questions);
     }
 
@@ -204,7 +332,7 @@ async fn generate_questions(
     if hits.is_empty() {
         anyhow::bail!("no source chunks found for quiz generation");
     }
-    let questions = questions_for_hits(&quiz, llm, &hits).await?;
+    let questions = questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
     state.store.replace_questions(&quiz.id, questions)
 }
 
@@ -212,6 +340,7 @@ async fn questions_for_hits(
     quiz: &QuizSession,
     llm: Option<CreateLlmConfig>,
     hits: &[tutor_rag::SearchHit],
+    memory_markdown: Option<String>,
 ) -> anyhow::Result<Vec<QuizQuestion>> {
     if let Some(llm) = llm.and_then(llm_config_from_request) {
         let sources = hits
@@ -228,6 +357,7 @@ async fn questions_for_hits(
                 topic: quiz.config.topic.clone(),
                 difficulty: format!("{:?}", quiz.config.difficulty).to_ascii_lowercase(),
                 question_count: quiz.config.question_count,
+                memory_markdown,
             },
             &sources,
         )
@@ -289,6 +419,50 @@ fn llm_config_from_request(config: CreateLlmConfig) -> Option<tutor_agent::LlmCo
         config.chat_path.filter(|value| !value.trim().is_empty()),
         None,
     ))
+}
+
+fn should_use_memory_for_quiz(req: &CreateQuizRequest) -> bool {
+    let text = [
+        req.title.as_deref().unwrap_or_default(),
+        req.topic.as_deref().unwrap_or_default(),
+        req.source_label.as_deref().unwrap_or_default(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    let indicators = [
+        "personalized",
+        "personalised",
+        "adaptive",
+        "review",
+        "practice",
+        "follow-up",
+        "follow up",
+        "weak",
+        "weakness",
+        "mistake",
+        "wrong",
+        "\u{4e2a}\u{6027}\u{5316}",
+        "\u{590d}\u{4e60}",
+        "\u{7ec3}\u{4e60}",
+        "\u{9519}\u{9898}",
+        "\u{8584}\u{5f31}",
+        "\u{5f31}\u{70b9}",
+        "\u{8ddf}\u{8fdb}",
+        "\u{5dee}\u{5f02}\u{5316}",
+    ];
+    indicators.iter().any(|indicator| text.contains(indicator))
+}
+
+fn quiz_memory_markdown(memory: &MemoryStore) -> anyhow::Result<String> {
+    let mut sections = Vec::new();
+    for path in ["L3/profile.md", "L3/recent.md", "L3/teaching_strategy.md"] {
+        let file = memory.read(path)?;
+        let markdown = file.markdown.trim();
+        if !markdown.is_empty() {
+            sections.push(format!("## {path}\n\n{markdown}"));
+        }
+    }
+    Ok(sections.join("\n\n"))
 }
 
 fn questions_from_generated(
@@ -454,6 +628,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
+        let notebook = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let embedding = tutor_rag::EmbeddingConfig {
             provider: "local-test".into(),
             model: "hash".into(),
@@ -490,7 +668,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let app = quiz_router_with_rag_root(store, knowledge, rag_root);
+        let app = quiz_router_with_rag_root(store, knowledge, notebook, memory.clone(), rag_root);
 
         let create = serde_json::json!({
             "kb_id": kb.id,
@@ -522,6 +700,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
         assert_eq!(body["quiz"]["score"]["correct"], 1);
+        assert!(memory.recent_events(10).unwrap().len() >= 2);
     }
 
     #[tokio::test]
@@ -529,12 +708,91 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
-        let app = quiz_router_with_rag_root(store, knowledge, dir.path().join("rag"));
+        let notebook = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let app =
+            quiz_router_with_rag_root(store, knowledge, notebook, memory, dir.path().join("rag"));
 
         let create = serde_json::json!({
             "topic": "element reactions",
             "source_text": "Element reactions are triggered by switching between one or two characters. Talents and weapons shape role builds.",
             "source_label": "current conversation",
+            "question_count": 1
+        });
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/api/quizzes", create))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response).await;
+        assert_eq!(body["quiz"]["kb_id"], "__conversation__");
+        let quiz_id = body["quiz"]["id"].as_str().unwrap();
+        assert_eq!(body["quiz"]["questions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["quiz"]["questions"][0]["citations"][0]["source"],
+            "current conversation"
+        );
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/quizzes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["quizzes"].as_array().unwrap().len(), 1);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/api/quizzes/{quiz_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["quiz"]["id"], quiz_id);
+    }
+
+    #[tokio::test]
+    async fn creates_quiz_from_notebook_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
+        let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
+        let notebook = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let entry = notebook
+            .create(crate::notebook_store::NotebookEntryInput {
+                space_id: None,
+                entry_type: crate::notebook_store::NotebookEntryType::ResearchReport,
+                title: "OPC report".into(),
+                markdown: "OPC corrects lithography mask patterns before wafer exposure.".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+        let app =
+            quiz_router_with_rag_root(store, knowledge, notebook, memory, dir.path().join("rag"));
+
+        let create = serde_json::json!({
+            "notebook_entry_id": entry.id,
+            "topic": "OPC review",
             "question_count": 1
         });
         let response = app
@@ -544,12 +802,42 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response).await;
-        assert_eq!(body["quiz"]["kb_id"], "__conversation__");
-        assert_eq!(body["quiz"]["questions"].as_array().unwrap().len(), 1);
+        assert_eq!(body["quiz"]["kb_id"], "__notebook__");
         assert_eq!(
             body["quiz"]["questions"][0]["citations"][0]["source"],
-            "current conversation"
+            "notebook: OPC report"
         );
+    }
+
+    #[test]
+    fn detects_memory_aware_quiz_intent() {
+        let req = CreateQuizRequest {
+            title: None,
+            kb_id: None,
+            notebook_entry_id: None,
+            source_text: Some("source".into()),
+            source_label: None,
+            topic: Some(
+                "\u{9488}\u{5bf9}\u{6211}\u{7684}\u{8584}\u{5f31}\u{70b9}\u{51fa}\u{9898}".into(),
+            ),
+            difficulty: None,
+            question_count: None,
+            llm: None,
+        };
+        assert!(should_use_memory_for_quiz(&req));
+
+        let req = CreateQuizRequest {
+            title: None,
+            kb_id: None,
+            notebook_entry_id: None,
+            source_text: Some("source".into()),
+            source_label: None,
+            topic: Some("element reactions".into()),
+            difficulty: None,
+            question_count: None,
+            llm: None,
+        };
+        assert!(!should_use_memory_for_quiz(&req));
     }
 
     fn json_request(method: Method, uri: &str, body: serde_json::Value) -> Request<Body> {

@@ -20,7 +20,14 @@ use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
 
+use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
+
+#[derive(Clone)]
+struct WsState {
+    pool: Arc<SessionPool>,
+    memory: Arc<MemoryStore>,
+}
 
 #[derive(Clone)]
 struct PersistedEventSink {
@@ -77,13 +84,14 @@ enum ClientMessage {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    State(pool): State<Arc<SessionPool>>,
+    State(state): State<WsState>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, pool, session_id))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, session_id))
 }
 
-async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: String) {
+async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
+    let pool = state.pool.clone();
     let entry = match pool.ensure_entry(&session_id).await {
         Some(e) => e,
         None => return,
@@ -115,7 +123,13 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
                             .ensure_entry(&session_id)
                             .await
                             .unwrap_or_else(|| entry.clone());
-                        run_tutor_message(pool.clone(), active_entry, content).await;
+                        run_tutor_message(
+                            pool.clone(),
+                            state.memory.clone(),
+                            active_entry,
+                            content,
+                        )
+                        .await;
                     }
                     Ok(ClientMessage::ApprovalResponse {
                         request_id,
@@ -153,13 +167,19 @@ async fn handle_socket(socket: WebSocket, pool: Arc<SessionPool>, session_id: St
     send_task.abort();
 }
 
-pub fn ws_router(pool: Arc<SessionPool>) -> Router {
+pub fn ws_router(pool: Arc<SessionPool>, memory: Arc<MemoryStore>) -> Router {
+    let state = WsState { pool, memory };
     Router::new()
         .route("/ws/sessions/{session_id}", get(ws_handler))
-        .with_state(pool)
+        .with_state(state)
 }
 
-async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content: String) {
+async fn run_tutor_message(
+    pool: Arc<SessionPool>,
+    memory: Arc<MemoryStore>,
+    entry: SessionEntry,
+    content: String,
+) {
     let history_len = pool.history_len(&entry.id).await + 1;
     let _ = entry
         .stream
@@ -228,6 +248,25 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
 
     match result {
         Ok((answer, streamed)) => {
+            if matches!(entry.capability.as_str(), "chat" | "research") {
+                let category = if entry.capability == "research" {
+                    MemoryEventCategory::Research
+                } else {
+                    MemoryEventCategory::Chat
+                };
+                let _ = memory.record_event(
+                    category,
+                    "answered",
+                    summarize_exchange(&content, &answer),
+                    Some(entry.id.clone()),
+                    serde_json::json!({
+                        "session_id": entry.id,
+                        "capability": entry.capability,
+                        "user": content.chars().take(500).collect::<String>(),
+                        "assistant": answer.chars().take(1000).collect::<String>(),
+                    }),
+                );
+            }
             let final_text = if streamed { "" } else { &answer };
             let _ = entry.stream.content(final_text, false).await;
             let _ = pool.refresh_compact_summary(&entry.id).await;
@@ -271,6 +310,16 @@ async fn run_tutor_message(pool: Arc<SessionPool>, entry: SessionEntry, content:
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
+}
+
+fn summarize_exchange(user: &str, assistant: &str) -> String {
+    let user = user.split_whitespace().collect::<Vec<_>>().join(" ");
+    let assistant = assistant.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!(
+        "User asked: {}; assistant answered: {}",
+        user.chars().take(160).collect::<String>(),
+        assistant.chars().take(220).collect::<String>()
+    )
 }
 
 fn web_search_config_for_session(

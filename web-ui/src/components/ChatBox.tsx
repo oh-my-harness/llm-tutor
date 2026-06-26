@@ -5,7 +5,6 @@ import {
   ArrowUp,
   AtSign,
   Brain,
-  BookOpenCheck,
   CheckCircle2,
   ChevronDown,
   Code2,
@@ -71,7 +70,7 @@ interface Props {
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
-  onSaveToBook?: (markdown: string) => Promise<void>
+  onSaveToNotebook?: (markdown: string) => Promise<void>
   onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onQuizFinish?: (quizId: string) => Promise<void>
   disabled: boolean
@@ -130,7 +129,7 @@ export function ChatBox({
   onCapabilityChange,
   onKnowledgeBaseChange,
   onLlmConfigChange,
-  onSaveToBook,
+  onSaveToNotebook,
   onQuizAnswer,
   onQuizFinish,
   disabled,
@@ -232,17 +231,17 @@ export function ChatBox({
                   ) : (
                     <>
                       <MarkdownMessage text={msg.text} />
-                      {capability === 'research' && msg.text.trim() && onSaveToBook && (
+                      {capability === 'research' && msg.text.trim() && onSaveToNotebook && (
                         <div className="mt-3 flex justify-end">
                           <button
                             className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
                             type="button"
                             onClick={() => {
-                              void onSaveToBook(msg.text)
+                              void onSaveToNotebook(msg.text)
                             }}
                           >
-                            <BookOpenCheck size={16} />
-                            保存到书籍
+                            <FileText size={16} />
+                            保存到笔记本
                           </button>
                         </div>
                       )}
@@ -381,7 +380,7 @@ function ChatQuizCard({
     return (
       <div className="rounded-lg border border-blue-100 bg-white p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
-          <BookOpenCheck size={18} />
+          <FileQuestion size={18} />
           Quiz
         </div>
         <p className="mt-3 text-sm text-gray-600">测验还没有生成题目。</p>

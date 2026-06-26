@@ -21,7 +21,11 @@ pub struct BookChapter {
     pub id: String,
     pub title: String,
     pub markdown: String,
+    #[serde(default)]
     pub source_report_id: Option<String>,
+    #[serde(default)]
+    pub source_notebook_entry_id: Option<String>,
+    #[serde(default)]
     pub source_session_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -80,6 +84,7 @@ impl BookStore {
         title: String,
         markdown: String,
         source_report_id: Option<String>,
+        source_notebook_entry_id: Option<String>,
         source_session_id: Option<String>,
     ) -> Result<Book> {
         if markdown.trim().is_empty() {
@@ -95,6 +100,8 @@ impl BookStore {
             title: normalize_title(&title),
             markdown,
             source_report_id: source_report_id.filter(|value| !value.trim().is_empty()),
+            source_notebook_entry_id: source_notebook_entry_id
+                .filter(|value| !value.trim().is_empty()),
             source_session_id: source_session_id.filter(|value| !value.trim().is_empty()),
             created_at: now,
             updated_at: now,
@@ -147,10 +154,15 @@ mod tests {
                 "Chapter 1".into(),
                 "# Report".into(),
                 None,
+                Some("notebook-1".into()),
                 Some("session-1".into()),
             )
             .unwrap();
         assert_eq!(book.chapters.len(), 1);
+        assert_eq!(
+            store.list()[0].chapters[0].source_notebook_entry_id,
+            Some("notebook-1".into())
+        );
         assert_eq!(
             store.list()[0].chapters[0].source_session_id,
             Some("session-1".into())

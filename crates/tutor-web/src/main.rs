@@ -5,6 +5,8 @@ use tower_http::cors::{Any, CorsLayer};
 
 mod book_store;
 mod knowledge_store;
+mod memory_store;
+mod notebook_store;
 mod quiz_store;
 mod routes;
 mod session;
@@ -16,6 +18,8 @@ async fn main() -> anyhow::Result<()> {
     let knowledge = knowledge_store::KnowledgeStore::new();
     let quizzes = std::sync::Arc::new(quiz_store::QuizStore::new());
     let books = std::sync::Arc::new(book_store::BookStore::new());
+    let notebook = std::sync::Arc::new(notebook_store::NotebookStore::new());
+    let memory = std::sync::Arc::new(memory_store::MemoryStore::new());
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -24,10 +28,18 @@ async fn main() -> anyhow::Result<()> {
 
     let app = axum::Router::new()
         .merge(routes::knowledge::knowledge_router(knowledge.clone()))
-        .merge(routes::quiz::quiz_router(quizzes, knowledge.clone()))
+        .merge(routes::quiz::quiz_router(
+            quizzes,
+            knowledge.clone(),
+            notebook.clone(),
+            memory.clone(),
+        ))
         .merge(routes::books::books_router(books))
+        .merge(routes::notebook::notebook_router(notebook, memory.clone()))
+        .merge(routes::memory::memory_router(memory.clone()))
+        .merge(routes::settings::settings_router())
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
-        .merge(routes::ws::ws_router(pool.clone()))
+        .merge(routes::ws::ws_router(pool.clone(), memory.clone()))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .layer(cors);
 

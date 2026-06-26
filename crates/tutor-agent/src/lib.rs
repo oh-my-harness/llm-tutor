@@ -6,6 +6,7 @@ pub mod error;
 pub mod event_sink;
 pub mod governance;
 pub mod llm_provider;
+pub mod memory;
 pub mod phase_manager;
 pub mod quiz;
 pub mod replan_hook;

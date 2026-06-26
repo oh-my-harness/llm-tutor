@@ -1,0 +1,1159 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  BookMarked,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Edit3,
+  FileQuestion,
+  FileText,
+  NotebookPen,
+  Plus,
+  RefreshCw,
+  Save,
+  Send,
+  Target,
+  Trash2,
+  UserRound,
+  X,
+} from 'lucide-react'
+import type { QuizQuestion, QuizSession } from '../quizTypes'
+import { MarkdownMessage } from './MarkdownMessage'
+
+type SpaceTab = 'notebook' | 'quiz_bank' | 'student_profile'
+
+interface NotebookEntry {
+  id: string
+  space_id: string
+  entry_type: 'note' | 'research_report' | 'chat_answer' | 'source_snippet' | 'quiz_summary' | 'deep_solve_result'
+  title: string
+  markdown: string
+  metadata?: Record<string, unknown> | null
+  source_session_id?: string | null
+  source_message_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface Book {
+  id: string
+  title: string
+}
+
+interface MemoryFile {
+  path: string
+  level: string
+  name: string
+  markdown: string
+}
+
+const tabs: Array<{ key: SpaceTab; label: string; icon: typeof NotebookPen }> = [
+  { key: 'notebook', label: 'Notebook', icon: NotebookPen },
+  { key: 'quiz_bank', label: 'Quiz Bank', icon: FileQuestion },
+  { key: 'student_profile', label: 'Student Profile', icon: UserRound },
+]
+
+const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
+
+export function SpacePage() {
+  const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
+  const [quizzes, setQuizzes] = useState<QuizSession[]>([])
+  const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
+  const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
+  const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
+  const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftMarkdown, setDraftMarkdown] = useState('')
+  const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editMarkdown, setEditMarkdown] = useState('')
+  const [editingMemoryPath, setEditingMemoryPath] = useState<string | null>(null)
+  const [memoryDraft, setMemoryDraft] = useState('')
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const [status, setStatus] = useState('Ready')
+  const [loading, setLoading] = useState(false)
+
+  const activeQuiz = quizzes.find((quiz) => quiz.id === activeQuizId) ?? null
+  const activeQuestion = activeQuiz?.questions[questionIndex] ?? null
+  const activeNotebookEntry = notebookEntries.find((entry) => entry.id === activeNotebookId) ?? null
+  const profile = useMemo(() => buildProfile(quizzes), [quizzes])
+
+  const refreshQuizzes = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/quizzes')
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const items = (data.quizzes ?? []) as QuizSession[]
+      setQuizzes(items)
+      setActiveQuizId((current) => current && items.some((quiz) => quiz.id === current) ? current : items[0]?.id ?? null)
+      setStatus(items.length ? 'Quiz records loaded' : 'No quiz records yet')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const refreshNotebook = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/entries?space_id=default')
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const entries = (data.entries ?? []) as NotebookEntry[]
+      setNotebookEntries(entries)
+      setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
+      setStatus(entries.length ? 'Notebook entries loaded' : 'No notebook entries yet')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const refreshMemory = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/memory/files')
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      setMemoryFiles((data.files ?? []) as MemoryFile[])
+      setStatus('Memory files loaded')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshQuizzes()
+    void refreshNotebook()
+    void refreshMemory()
+  }, [refreshNotebook, refreshQuizzes, refreshMemory])
+
+  useEffect(() => {
+    setQuestionIndex(0)
+  }, [activeQuizId])
+
+  const refreshActiveTab = () => {
+    if (activeTab === 'notebook') void refreshNotebook()
+    else if (activeTab === 'quiz_bank') void refreshQuizzes()
+    else void refreshMemory()
+  }
+
+  const createNotebookEntry = async () => {
+    const title = draftTitle.trim() || 'Untitled note'
+    const markdown = draftMarkdown.trim()
+    if (!markdown) {
+      setStatus('Notebook markdown is empty')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          space_id: 'default',
+          entry_type: 'note',
+          title,
+          markdown,
+        }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const entry = data.entry as NotebookEntry
+      setNotebookEntries((items) => [entry, ...items.filter((item) => item.id !== entry.id)])
+      setActiveNotebookId(entry.id)
+      setDraftTitle('')
+      setDraftMarkdown('')
+      setStatus('Notebook entry created')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteNotebookEntry = async (entry: NotebookEntry) => {
+    if (!window.confirm(`Delete "${entry.title}"?`)) return
+    const previous = notebookEntries
+    setNotebookEntries((items) => items.filter((item) => item.id !== entry.id))
+    setActiveNotebookId((current) => current === entry.id ? null : current)
+    try {
+      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      setStatus('Notebook entry deleted')
+    } catch (err) {
+      setNotebookEntries(previous)
+      setStatus(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const startEditNotebookEntry = (entry: NotebookEntry) => {
+    setEditingNotebookId(entry.id)
+    setEditTitle(entry.title)
+    setEditMarkdown(entry.markdown)
+  }
+
+  const cancelEditNotebookEntry = () => {
+    setEditingNotebookId(null)
+    setEditTitle('')
+    setEditMarkdown('')
+  }
+
+  const saveNotebookEntry = async (entry: NotebookEntry) => {
+    const title = editTitle.trim() || 'Untitled note'
+    const markdown = editMarkdown.trim()
+    if (!markdown) {
+      setStatus('Notebook markdown is empty')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(entry.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, markdown }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const updated = data.entry as NotebookEntry
+      setNotebookEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
+      setEditingNotebookId(null)
+      setStatus('Notebook entry updated')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const sendNotebookEntryToBook = async (entry: NotebookEntry) => {
+    setLoading(true)
+    try {
+      const booksRes = await fetch('/api/books')
+      const booksData = await safeJson(booksRes)
+      if (!booksRes.ok) throw new Error(errorMessage(booksData, booksRes.status))
+      let books = (booksData.books ?? []) as Book[]
+      if (books.length === 0) {
+        const createBookRes = await fetch('/api/books', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Notebook Exports',
+            description: 'Notebook entries promoted into book chapters.',
+          }),
+        })
+        const createBookData = await safeJson(createBookRes)
+        if (!createBookRes.ok) throw new Error(errorMessage(createBookData, createBookRes.status))
+        books = [createBookData.book as Book]
+      }
+      const targetBook = books[0]
+      if (!targetBook) throw new Error('No target book available')
+      const chapterRes = await fetch(`/api/books/${encodeURIComponent(targetBook.id)}/chapters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: entry.title,
+          markdown: entry.markdown,
+          source_notebook_entry_id: entry.id,
+          source_session_id: entry.source_session_id,
+        }),
+      })
+      const chapterData = await safeJson(chapterRes)
+      if (!chapterRes.ok) throw new Error(errorMessage(chapterData, chapterRes.status))
+      setStatus(`Sent to book: ${targetBook.title}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const generateQuizFromNotebookEntry = async (entry: NotebookEntry) => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/quizzes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notebook_entry_id: entry.id,
+          title: `${entry.title} Quiz`,
+          topic: `${entry.title} review`,
+          difficulty: 'medium',
+          question_count: 5,
+        }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const quiz = data.quiz as QuizSession
+      setQuizzes((items) => [quiz, ...items.filter((item) => item.id !== quiz.id)])
+      setActiveQuizId(quiz.id)
+      setQuestionIndex(0)
+      setActiveTab('quiz_bank')
+      setStatus('Quiz generated from notebook entry')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteQuiz = async (quiz: QuizSession) => {
+    if (!window.confirm(`Delete "${quiz.title}"?`)) return
+    const previous = quizzes
+    setQuizzes((items) => items.filter((item) => item.id !== quiz.id))
+    setActiveQuizId((current) => current === quiz.id ? null : current)
+    try {
+      const res = await fetch(`/api/quizzes/${encodeURIComponent(quiz.id)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      setStatus('Quiz deleted')
+    } catch (err) {
+      setQuizzes(previous)
+      setStatus(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const startEditMemory = (file: MemoryFile) => {
+    setEditingMemoryPath(file.path)
+    setMemoryDraft(file.markdown)
+  }
+
+  const cancelEditMemory = () => {
+    setEditingMemoryPath(null)
+    setMemoryDraft('')
+  }
+
+  const saveMemoryFile = async (path: string) => {
+    if (!memoryDraft.trim()) {
+      setStatus('Memory markdown is empty')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/memory/file?path=${encodeURIComponent(path)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: memoryDraft }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const updated = data.file as MemoryFile
+      setMemoryFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
+      setEditingMemoryPath(null)
+      setMemoryDraft('')
+      setStatus('Memory file saved')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="flex h-full min-h-0 bg-white">
+      <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
+        <div className="px-5 py-5">
+          <div className="text-xs font-medium uppercase tracking-wide text-blue-600">Default Space</div>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950">Learning Space</h1>
+          <p className="mt-2 text-sm leading-6 text-gray-500">
+            Organize notes, quiz records, and learner memory in one workspace.
+          </p>
+        </div>
+
+        <nav className="space-y-1 px-3">
+          {tabs.map((tab) => {
+            const Icon = tab.icon
+            const active = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+                  active ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100' : 'text-gray-700 hover:bg-white hover:text-gray-950'
+                }`}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+              >
+                <Icon size={18} />
+                <span>{tab.label}</span>
+              </button>
+            )
+          })}
+        </nav>
+
+        <div className="mt-auto border-t border-gray-200 px-5 py-4 text-xs text-gray-500">
+          Local-first space. Multi-space management can come later.
+        </div>
+      </aside>
+
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-4 border-b border-gray-100 px-8 py-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-950">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
+            <p className="mt-1 text-sm text-gray-500">{subtitleFor(activeTab)}</p>
+          </div>
+          <button
+            className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+            type="button"
+            disabled={loading}
+            onClick={refreshActiveTab}
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </header>
+
+        {activeTab === 'notebook' && (
+          <NotebookTab
+            entries={notebookEntries}
+            activeEntry={activeNotebookEntry}
+            draftTitle={draftTitle}
+            draftMarkdown={draftMarkdown}
+            status={status}
+            loading={loading}
+            editingEntryId={editingNotebookId}
+            editTitle={editTitle}
+            editMarkdown={editMarkdown}
+            onSelectEntry={setActiveNotebookId}
+            onDraftTitleChange={setDraftTitle}
+            onDraftMarkdownChange={setDraftMarkdown}
+            onCreateEntry={() => void createNotebookEntry()}
+            onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
+            onStartEdit={startEditNotebookEntry}
+            onCancelEdit={cancelEditNotebookEntry}
+            onEditTitleChange={setEditTitle}
+            onEditMarkdownChange={setEditMarkdown}
+            onSaveEntry={(entry) => void saveNotebookEntry(entry)}
+            onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
+            onGenerateQuiz={(entry) => void generateQuizFromNotebookEntry(entry)}
+          />
+        )}
+        {activeTab === 'quiz_bank' && (
+          <QuizBankTab
+            quizzes={quizzes}
+            activeQuiz={activeQuiz}
+            activeQuestion={activeQuestion}
+            questionIndex={questionIndex}
+            status={status}
+            onSelectQuiz={setActiveQuizId}
+            onDeleteQuiz={(quiz) => void deleteQuiz(quiz)}
+            onQuestionIndexChange={setQuestionIndex}
+          />
+        )}
+        {activeTab === 'student_profile' && (
+          <StudentProfileTab
+            profile={profile}
+            memoryFiles={memoryFiles}
+            editingMemoryPath={editingMemoryPath}
+            memoryDraft={memoryDraft}
+            loading={loading}
+            onStartEditMemory={startEditMemory}
+            onCancelEditMemory={cancelEditMemory}
+            onMemoryDraftChange={setMemoryDraft}
+            onSaveMemoryFile={(path) => void saveMemoryFile(path)}
+          />
+        )}
+      </section>
+    </main>
+  )
+}
+
+function NotebookTab({
+  entries,
+  activeEntry,
+  draftTitle,
+  draftMarkdown,
+  status,
+  loading,
+  editingEntryId,
+  editTitle,
+  editMarkdown,
+  onSelectEntry,
+  onDraftTitleChange,
+  onDraftMarkdownChange,
+  onCreateEntry,
+  onDeleteEntry,
+  onStartEdit,
+  onCancelEdit,
+  onEditTitleChange,
+  onEditMarkdownChange,
+  onSaveEntry,
+  onSendToBook,
+  onGenerateQuiz,
+}: {
+  entries: NotebookEntry[]
+  activeEntry: NotebookEntry | null
+  draftTitle: string
+  draftMarkdown: string
+  status: string
+  loading: boolean
+  editingEntryId: string | null
+  editTitle: string
+  editMarkdown: string
+  onSelectEntry: (id: string) => void
+  onDraftTitleChange: (value: string) => void
+  onDraftMarkdownChange: (value: string) => void
+  onCreateEntry: () => void
+  onDeleteEntry: (entry: NotebookEntry) => void
+  onStartEdit: (entry: NotebookEntry) => void
+  onCancelEdit: () => void
+  onEditTitleChange: (value: string) => void
+  onEditMarkdownChange: (value: string) => void
+  onSaveEntry: (entry: NotebookEntry) => void
+  onSendToBook: (entry: NotebookEntry) => void
+  onGenerateQuiz: (entry: NotebookEntry) => void
+}) {
+  const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
+        <div className="space-y-3 border-b border-gray-100 p-4">
+          <input
+            className={inputClassName}
+            value={draftTitle}
+            onChange={(event) => onDraftTitleChange(event.target.value)}
+            placeholder="Note title"
+          />
+          <textarea
+            className={`${inputClassName} min-h-28 resize-none leading-6`}
+            value={draftMarkdown}
+            onChange={(event) => onDraftMarkdownChange(event.target.value)}
+            placeholder="Write Markdown..."
+          />
+          <button
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
+            type="button"
+            disabled={!draftMarkdown.trim()}
+            onClick={onCreateEntry}
+          >
+            <Plus size={16} />
+            New note
+          </button>
+          <div className="text-xs text-gray-500">{status}</div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          {entries.length === 0 ? (
+            <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No notebook entries yet</div>
+          ) : (
+            <div className="space-y-2">
+              {entries.map((entry) => (
+                <button
+                  key={entry.id}
+                  className={`group flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm ${
+                    activeEntry?.id === entry.id ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
+                  }`}
+                  type="button"
+                  onClick={() => onSelectEntry(entry.id)}
+                >
+                  <FileText size={17} className="mt-0.5 shrink-0 text-blue-600" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-gray-900">{entry.title}</span>
+                    <span className="mt-0.5 block text-xs text-gray-500">{entry.entry_type.replaceAll('_', ' ')}</span>
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDeleteEntry(entry)
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {!activeEntry ? (
+          <EmptyDetail
+            icon={BookMarked}
+            title="Create or select a note"
+            description="Notebook stores research reports, useful chat answers, source snippets, quiz summaries, and solve results as Markdown entries."
+          />
+        ) : (
+          <>
+            <div className="flex items-start gap-4 border-b border-gray-100 px-8 py-5">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-600">{activeEntry.entry_type.replaceAll('_', ' ')}</div>
+                {isEditing ? (
+                  <input
+                    className={`${inputClassName} mt-2 max-w-2xl text-base font-semibold`}
+                    value={editTitle}
+                    onChange={(event) => onEditTitleChange(event.target.value)}
+                  />
+                ) : (
+                  <h3 className="mt-1 truncate text-xl font-semibold text-gray-950">{activeEntry.title}</h3>
+                )}
+              </div>
+              {isEditing ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    className={secondaryButtonClassName}
+                    type="button"
+                    disabled={loading || !editMarkdown.trim()}
+                    onClick={() => onSaveEntry(activeEntry)}
+                  >
+                    <Save size={16} />
+                    Save
+                  </button>
+                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={onCancelEdit}>
+                    <X size={16} />
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onSendToBook(activeEntry)}>
+                    <Send size={16} />
+                    Send to Book
+                  </button>
+                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onGenerateQuiz(activeEntry)}>
+                    <FileQuestion size={16} />
+                    Generate Quiz
+                  </button>
+                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onStartEdit(activeEntry)}>
+                    <Edit3 size={16} />
+                    Edit
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              {isEditing ? (
+                <textarea
+                  className={`${inputClassName} min-h-[520px] max-w-4xl resize-y font-mono leading-6`}
+                  value={editMarkdown}
+                  onChange={(event) => onEditMarkdownChange(event.target.value)}
+                />
+              ) : (
+                <pre className="max-w-4xl whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-5 font-sans text-sm leading-6 text-gray-700">
+                  {activeEntry.markdown}
+                </pre>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function QuizBankTab({
+  quizzes,
+  activeQuiz,
+  activeQuestion,
+  questionIndex,
+  status,
+  onSelectQuiz,
+  onDeleteQuiz,
+  onQuestionIndexChange,
+}: {
+  quizzes: QuizSession[]
+  activeQuiz: QuizSession | null
+  activeQuestion: QuizQuestion | null
+  questionIndex: number
+  status: string
+  onSelectQuiz: (id: string) => void
+  onDeleteQuiz: (quiz: QuizSession) => void
+  onQuestionIndexChange: (index: number) => void
+}) {
+  const activeAnswer = activeQuiz && activeQuestion
+    ? activeQuiz.answers.find((answer) => answer.question_id === activeQuestion.id) ?? null
+    : null
+  const missedQuestions = useMemo(() => {
+    if (!activeQuiz) return []
+    return activeQuiz.questions.filter((question) => {
+      const answer = activeQuiz.answers.find((item) => item.question_id === question.id)
+      return answer && !answer.correct
+    })
+  }, [activeQuiz])
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
+        <div className="px-4 py-3 text-xs text-gray-500">{status}</div>
+        <div className="flex-1 overflow-y-auto px-3 pb-4">
+          {quizzes.length === 0 ? (
+            <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No quiz records yet</div>
+          ) : (
+            <div className="space-y-2">
+              {quizzes.map((quiz) => {
+                const active = activeQuiz?.id === quiz.id
+                const score = quiz.score ?? { correct: 0, total: quiz.questions.length }
+                const answeredCount = quiz.answers.length
+                return (
+                  <button
+                    key={quiz.id}
+                    className={`group flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm ${
+                      active ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
+                    }`}
+                    type="button"
+                    onClick={() => onSelectQuiz(quiz.id)}
+                  >
+                    <FileQuestion size={17} className="mt-0.5 shrink-0 text-blue-600" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-gray-900">{quiz.title}</span>
+                      <span className="mt-0.5 block text-xs text-gray-500">
+                        {score.correct}/{score.total} correct · answered {answeredCount}/{quiz.questions.length} · {quiz.status}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs text-gray-400">
+                        Created {formatTime(quiz.created_at)} · Updated {formatTime(quiz.updated_at)}
+                      </span>
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onDeleteQuiz(quiz)
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {!activeQuiz || !activeQuestion ? (
+          <EmptyDetail
+            icon={FileQuestion}
+            title="Select a quiz record"
+            description="Quiz Bank is for review and re-practice. Generate new quizzes from the chat composer."
+          />
+        ) : (
+          <>
+            <div className="flex items-center border-b border-gray-100 px-8 py-5">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-950">{activeQuiz.title}</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Question {questionIndex + 1} of {activeQuiz.questions.length} · {difficultyLabel(activeQuestion.difficulty)}
+                </p>
+              </div>
+              <ScorePill quiz={activeQuiz} />
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="max-w-4xl">
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {activeQuestion.tags.map((tag) => (
+                    <span key={tag} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">{tag}</span>
+                  ))}
+                </div>
+                <h4 className="text-2xl font-semibold leading-9 text-gray-950">{activeQuestion.stem}</h4>
+
+                <div className="mt-6 space-y-3">
+                  {activeQuestion.options.map((option) => {
+                    const selected = activeAnswer?.selected_option_id === option.id
+                    const correct = activeQuestion.correct_option_id === option.id
+                    return (
+                      <div
+                        key={option.id}
+                        className={`flex items-start gap-3 rounded-lg border p-4 ${
+                          correct
+                            ? 'border-emerald-300 bg-emerald-50'
+                            : selected
+                              ? 'border-red-200 bg-red-50'
+                              : 'border-gray-200 bg-white'
+                        }`}
+                      >
+                        <span className={correct ? 'text-emerald-700' : selected ? 'text-red-600' : 'text-gray-400'}>
+                          <CheckCircle2 size={19} />
+                        </span>
+                        <span>
+                          <span className="font-medium text-gray-950">{option.id}.</span>{' '}
+                          <span className="text-gray-700">{option.text}</span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <section className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-sm font-semibold text-gray-950">Explanation</div>
+                  <p className="mt-2 text-sm leading-6 text-gray-600">{activeQuestion.explanation}</p>
+                  {activeQuestion.citations.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {activeQuestion.citations.map((citation, index) => (
+                        <div key={`${citation.source}-${index}`} className="rounded-md bg-white p-3 text-xs ring-1 ring-gray-100">
+                          <div className="font-medium text-gray-900">{citation.source}</div>
+                          <div className="mt-1 leading-5 text-gray-600">{citation.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {missedQuestions.length > 0 && (
+                  <section className="mt-6 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+                    <div className="text-sm font-semibold text-gray-950">Missed-question review</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {missedQuestions.map((question) => {
+                        const index = activeQuiz.questions.findIndex((item) => item.id === question.id)
+                        return (
+                          <button
+                            key={question.id}
+                            className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-100 hover:bg-blue-50"
+                            type="button"
+                            onClick={() => {
+                              if (index >= 0) onQuestionIndexChange(index)
+                            }}
+                          >
+                            Q{index + 1}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+              </div>
+            </div>
+
+            <footer className="flex items-center gap-3 border-t border-gray-100 px-8 py-4">
+              <button className={secondaryButtonClassName} type="button" disabled={questionIndex === 0} onClick={() => onQuestionIndexChange(Math.max(0, questionIndex - 1))}>
+                <ChevronLeft size={16} />
+                Previous
+              </button>
+              <button className={secondaryButtonClassName} type="button" disabled={questionIndex >= activeQuiz.questions.length - 1} onClick={() => onQuestionIndexChange(Math.min(activeQuiz.questions.length - 1, questionIndex + 1))}>
+                Next
+                <ChevronRight size={16} />
+              </button>
+            </footer>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StudentProfileTab({
+  profile,
+  memoryFiles,
+  editingMemoryPath,
+  memoryDraft,
+  loading,
+  onStartEditMemory,
+  onCancelEditMemory,
+  onMemoryDraftChange,
+  onSaveMemoryFile,
+}: {
+  profile: ReturnType<typeof buildProfile>
+  memoryFiles: MemoryFile[]
+  editingMemoryPath: string | null
+  memoryDraft: string
+  loading: boolean
+  onStartEditMemory: (file: MemoryFile) => void
+  onCancelEditMemory: () => void
+  onMemoryDraftChange: (value: string) => void
+  onSaveMemoryFile: (path: string) => void
+}) {
+  const filesByPath = new Map(memoryFiles.map((file) => [file.path, file]))
+
+  return (
+    <div className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Metric label="Quiz records" value={String(profile.quizCount)} />
+        <Metric label="Answered" value={String(profile.answeredCount)} />
+        <Metric label="Accuracy" value={profile.accuracyLabel} />
+      </div>
+
+      <div className="mt-6 grid gap-5 lg:grid-cols-2">
+        <section className="rounded-lg border border-gray-200 bg-white p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+            <Target size={18} className="text-blue-600" />
+            Current weak signals
+          </div>
+          {profile.weakTags.length === 0 ? (
+            <p className="mt-3 text-sm leading-6 text-gray-500">No wrong-answer pattern yet. Finish quizzes to build this profile.</p>
+          ) : (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {profile.weakTags.map(([tag, count]) => (
+                <span key={tag} className="rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700">
+                  {tag} x {count}
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-gray-200 bg-white p-5">
+          <div className="text-sm font-semibold text-gray-950">Profile source</div>
+          <p className="mt-3 text-sm leading-6 text-gray-500">
+            Student Profile is rendered from visible Markdown memory plus quiz stats. Edit the Markdown below to correct the profile.
+          </p>
+        </section>
+      </div>
+
+      <div className="mt-6 grid gap-5 xl:grid-cols-3">
+        {profileMemoryPaths.map((path) => {
+          const file = filesByPath.get(path)
+          return (
+            <MemoryProfileCard
+              key={path}
+              path={path}
+              file={file}
+              editing={editingMemoryPath === path}
+              draft={memoryDraft}
+              loading={loading}
+              onStartEdit={onStartEditMemory}
+              onCancel={onCancelEditMemory}
+              onDraftChange={onMemoryDraftChange}
+              onSave={onSaveMemoryFile}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MemoryProfileCard({
+  path,
+  file,
+  editing,
+  draft,
+  loading,
+  onStartEdit,
+  onCancel,
+  onDraftChange,
+  onSave,
+}: {
+  path: string
+  file?: MemoryFile
+  editing: boolean
+  draft: string
+  loading: boolean
+  onStartEdit: (file: MemoryFile) => void
+  onCancel: () => void
+  onDraftChange: (value: string) => void
+  onSave: (path: string) => void
+}) {
+  const title = memoryFileLabel(path)
+  const references = file ? parseMemorySourceRefs(file.markdown) : []
+  return (
+    <section className="flex min-h-[360px] flex-col rounded-lg border border-gray-200 bg-white">
+      <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-gray-950">{title}</div>
+          <div className="truncate text-xs text-gray-500">{path}</div>
+        </div>
+        {file && !editing && (
+          <button className={`${secondaryButtonClassName} ml-auto`} type="button" disabled={loading} onClick={() => onStartEdit(file)}>
+            <Edit3 size={16} />
+            Edit
+          </button>
+        )}
+        {editing && (
+          <div className="ml-auto flex items-center gap-2">
+            <button className={secondaryButtonClassName} type="button" disabled={loading || !draft.trim()} onClick={() => onSave(path)}>
+              <Save size={16} />
+              Save
+            </button>
+            <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={onCancel}>
+              <X size={16} />
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {!file ? (
+          <div className="text-sm text-gray-400">Memory file has not loaded yet.</div>
+        ) : editing ? (
+          <textarea
+            className={`${inputClassName} min-h-[260px] resize-y font-mono leading-6`}
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+          />
+        ) : (
+          <div className="space-y-4">
+            <div className="prose-sm max-w-none">
+              <MarkdownMessage text={file.markdown || ' '} />
+            </div>
+            {references.length > 0 && (
+              <MemorySourceRefs references={references} />
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function MemorySourceRefs({ references }: { references: MemorySourceReference[] }) {
+  return (
+    <section className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Memory references</div>
+      <div className="mt-2 space-y-2">
+        {references.map((reference) => (
+          <div key={`${reference.index}-${reference.target}`} className="rounded-md bg-white px-3 py-2 text-xs ring-1 ring-blue-100">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-700">[{reference.index}]</span>
+              <span className="font-medium text-gray-900">{reference.kind}</span>
+            </div>
+            <div className="mt-1 break-all font-mono text-[11px] leading-5 text-gray-500">{reference.target}</div>
+            {reference.label && <div className="mt-1 text-gray-600">{reference.label}</div>}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-5">
+      <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-gray-950">{value}</div>
+    </div>
+  )
+}
+
+function ScorePill({ quiz }: { quiz: QuizSession }) {
+  const score = quiz.score ?? { correct: 0, total: quiz.questions.length }
+  return (
+    <div className="ml-auto rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
+      Score {score.correct}/{score.total}
+    </div>
+  )
+}
+
+function EmptyDetail({ icon: Icon, title, description }: { icon: typeof FileQuestion; title: string; description: string }) {
+  return (
+    <div className="flex flex-1 items-center justify-center px-6">
+      <div className="max-w-md text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+          <Icon size={28} />
+        </div>
+        <h3 className="mt-5 text-2xl font-semibold text-gray-950">{title}</h3>
+        <p className="mt-2 text-sm leading-6 text-gray-500">{description}</p>
+      </div>
+    </div>
+  )
+}
+
+function buildProfile(quizzes: QuizSession[]) {
+  let answeredCount = 0
+  let correctCount = 0
+  const weakTags = new Map<string, number>()
+
+  quizzes.forEach((quiz) => {
+    quiz.answers.forEach((answer) => {
+      answeredCount += 1
+      if (answer.correct) correctCount += 1
+      if (!answer.correct) {
+        const question = quiz.questions.find((item) => item.id === answer.question_id)
+        question?.tags.forEach((tag) => weakTags.set(tag, (weakTags.get(tag) ?? 0) + 1))
+      }
+    })
+  })
+
+  const accuracy = answeredCount ? Math.round((correctCount / answeredCount) * 100) : null
+  return {
+    quizCount: quizzes.length,
+    answeredCount,
+    accuracyLabel: accuracy == null ? 'No data' : `${accuracy}%`,
+    weakTags: [...weakTags.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+  }
+}
+
+function memoryFileLabel(path: string) {
+  const labels: Record<string, string> = {
+    'L3/profile.md': 'Student profile',
+    'L3/recent.md': 'Recent context',
+    'L3/teaching_strategy.md': 'Teaching strategy',
+  }
+  return labels[path] ?? path
+}
+
+interface MemorySourceReference {
+  index: number
+  target: string
+  kind: string
+  label: string
+}
+
+function parseMemorySourceRefs(markdown: string): MemorySourceReference[] {
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => line.match(/^\[\^(\d+)\]:\s*(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => {
+      const target = match[2]?.trim() ?? ''
+      return {
+        index: Number(match[1]),
+        target,
+        ...describeMemorySourceTarget(target),
+      }
+    })
+    .filter((reference) => Number.isFinite(reference.index) && reference.index > 0 && reference.target)
+}
+
+function describeMemorySourceTarget(target: string): Pick<MemorySourceReference, 'kind' | 'label'> {
+  const [kind = 'source', ...rest] = target.split(':')
+  const normalizedKind = kind.trim() || 'source'
+  const label = rest.join(':').trim()
+  const labels: Record<string, string> = {
+    chat: 'Chat evidence',
+    quiz: 'Quiz evidence',
+    notebook: 'Notebook evidence',
+    research: 'Research evidence',
+  }
+  return {
+    kind: labels[normalizedKind] ?? `${normalizedKind.charAt(0).toUpperCase()}${normalizedKind.slice(1)} evidence`,
+    label,
+  }
+}
+
+function subtitleFor(tab: SpaceTab) {
+  if (tab === 'notebook') return 'Saved reports, notes, snippets, and reusable learning records.'
+  if (tab === 'quiz_bank') return 'Review historical quizzes and missed questions.'
+  return 'A visible learner profile built from Markdown memory and practice data.'
+}
+
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
+function errorMessage(data: Record<string, unknown>, status: number) {
+  return typeof data.error === 'string' ? data.error : `HTTP ${status}`
+}
+
+function difficultyLabel(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function formatTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
+const secondaryButtonClassName = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3.5 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50'
+const inputClassName = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-50'

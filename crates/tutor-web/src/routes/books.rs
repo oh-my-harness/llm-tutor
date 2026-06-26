@@ -22,6 +22,7 @@ struct CreateChapterRequest {
     title: String,
     markdown: String,
     source_report_id: Option<String>,
+    source_notebook_entry_id: Option<String>,
     source_session_id: Option<String>,
 }
 
@@ -56,6 +57,7 @@ async fn create_chapter(
         req.title,
         req.markdown,
         req.source_report_id,
+        req.source_notebook_entry_id,
         req.source_session_id,
     ) {
         Ok(book) => (
@@ -113,6 +115,7 @@ mod tests {
                 serde_json::json!({
                     "title": "Report",
                     "markdown": "# Report",
+                    "source_notebook_entry_id": "notebook-1",
                     "source_session_id": "session-1"
                 }),
             ))

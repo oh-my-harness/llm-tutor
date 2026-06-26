@@ -5,7 +5,6 @@ import {
   Brain,
   Check,
   Edit3,
-  FileQuestion,
   FileText,
   Grid2X2,
   Library,
@@ -25,7 +24,6 @@ export type AppView =
   | 'writing'
   | 'books'
   | 'knowledge'
-  | 'quiz'
   | 'space'
   | 'memory'
   | 'settings'
@@ -56,7 +54,6 @@ const navItems: Array<{
   { key: 'writing', label: '智能写作', icon: PencilLine },
   { key: 'books', label: '书籍', icon: Library },
   { key: 'knowledge', label: '知识库', icon: BookOpen },
-  { key: 'quiz', label: 'Quiz', icon: FileQuestion },
   { key: 'space', label: '空间', icon: Grid2X2 },
   { key: 'memory', label: '记忆', icon: Brain },
 ]

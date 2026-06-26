@@ -8,7 +8,7 @@ use llm_harness_types::{
     AfterProviderResponseHook, AgentEvent, AgentMessage, AssistantMessage, ContentBlock,
     StopReason, UserMessage,
 };
-use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
+use tutor_tools::{CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
@@ -108,6 +108,7 @@ async fn run_chat_inner(
     };
 
     let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
+        Arc::new(ReadMemoryTool::new()),
         Arc::new(rag_tool),
         Arc::new(match router.web_search.clone() {
             Some(config) => WebSearchTool::with_config(config),
@@ -373,7 +374,10 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
 }
 
 fn chat_system_prompt() -> String {
-    "You are a knowledgeable tutor. Use rag_search to find relevant course material. \
+    "You are a knowledgeable tutor. Use read_memory when personalization is relevant, \
+     such as prior weaknesses, learning preferences, recent study state, follow-up teaching, \
+     review, practice, or adapting explanation style. Memory is only learner profile/context; \
+     do not treat it as an external factual source. Use rag_search to find relevant course material. \
      Web verification rules are strict: when the user asks you to collect facts, trivia, \
      current information, latest information, sources, external references, or information \
      about real-world/public entities, products, games, communities, papers, libraries, \
@@ -390,9 +394,11 @@ fn chat_system_prompt() -> String {
 
 fn research_system_prompt() -> String {
     "You are a research tutor. Your job is to turn the user's topic into a sourced, reusable research report. \
-     Follow this workflow: (1) briefly identify the research question and scope, (2) call web_search for external facts, \
-     (3) call web_fetch on the most relevant sources before relying on them, (4) optionally call rag_search when a knowledge base is associated, \
-     (5) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
+     Use read_memory only to adapt the report to the learner's preferences, scope, or prior weaknesses; \
+     never use memory as a factual source. Follow this workflow: (1) briefly identify the research question and scope, \
+     (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
+     (4) call web_fetch on the most relevant sources before relying on them, (5) optionally call rag_search when a knowledge base is associated, \
+     (6) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
@@ -407,6 +413,8 @@ mod tests {
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
         let prompt = chat_system_prompt();
+        assert!(prompt.contains("Use read_memory when personalization is relevant"));
+        assert!(prompt.contains("do not treat it as an external factual source"));
         assert!(prompt.contains("collect facts"));
         assert!(prompt.contains("trivia"));
         assert!(prompt.contains("must call web_search before answering"));
@@ -416,6 +424,7 @@ mod tests {
     #[test]
     fn research_prompt_requires_search_fetch_and_report() {
         let prompt = research_system_prompt();
+        assert!(prompt.contains("Use read_memory only to adapt"));
         assert!(prompt.contains("call web_search"));
         assert!(prompt.contains("call web_fetch"));
         assert!(prompt.contains("Markdown report"));
