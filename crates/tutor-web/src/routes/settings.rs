@@ -23,7 +23,6 @@ struct TestLlmRequest {
     api_key: Option<String>,
     base_url: Option<String>,
     chat_path: Option<String>,
-    context_window_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,14 +110,13 @@ async fn run_llm_test(request: TestLlmRequest) -> Result<TestLlmResponse, String
     let api_key = non_empty_optional(request.api_key, "请填写 API Key")?;
     let base_url = optional_non_empty(request.base_url);
     let chat_path = optional_non_empty(request.chat_path);
-    let configured_window = request.context_window_tokens.filter(|value| *value > 0);
     let llm = LlmConfig::from_parts(
         provider,
         model.clone(),
         api_key,
         base_url.clone(),
         chat_path,
-        configured_window,
+        None,
     );
     let client = llm.build_client();
     let req = ChatRequest::builder(&model, 16)
@@ -134,14 +132,8 @@ async fn run_llm_test(request: TestLlmRequest) -> Result<TestLlmResponse, String
         .chat(&req)
         .await
         .map_err(|err| format!("模型连接测试失败：{err}"))?;
-    let detection = resolve_context_window(
-        configured_window,
-        &request.provider,
-        &model,
-        base_url.as_deref(),
-        &llm.api_key,
-    )
-    .await;
+    let detection =
+        resolve_context_window(&request.provider, &model, base_url.as_deref(), &llm.api_key).await;
     Ok(TestLlmResponse {
         ok: true,
         provider: request.provider,
@@ -223,19 +215,11 @@ fn parse_llm_provider(provider: &str) -> Result<LlmProviderKind, String> {
 }
 
 async fn resolve_context_window(
-    configured: Option<u32>,
     provider: &str,
     model: &str,
     base_url: Option<&str>,
     api_key: &str,
 ) -> ContextWindowDetection {
-    if let Some(value) = configured {
-        return ContextWindowDetection {
-            context_window: Some(value),
-            source: Some("configured"),
-            detail: Some("Using the user configured context window.".into()),
-        };
-    }
     if let Some(detected) =
         detect_context_window_from_models(provider, model, base_url, api_key).await
     {
@@ -501,28 +485,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn context_window_prefers_configured_value() {
+    async fn context_window_does_not_use_configured_value() {
         assert_eq!(
             resolve_context_window(
-                Some(32_000),
-                "anthropic",
-                "claude-sonnet-4",
+                "custom",
+                "unknown-model",
                 Some("https://example.invalid/v1"),
                 "sk",
             )
             .await,
             ContextWindowDetection {
-                context_window: Some(32_000),
-                source: Some("configured"),
-                detail: Some("Using the user configured context window.".into()),
+                context_window: None,
+                source: None,
+                detail: None,
             }
         );
     }
 
     #[tokio::test]
-    async fn context_window_uses_known_model_before_heuristic() {
+    async fn context_window_uses_known_model() {
         assert_eq!(
-            resolve_context_window(None, "openai", "deepseek-v4-flash", None, "sk",)
+            resolve_context_window("openai", "deepseek-v4-flash", None, "sk",)
                 .await
                 .source,
             Some("known_model")
@@ -532,13 +515,13 @@ mod tests {
     #[tokio::test]
     async fn context_window_infers_common_models() {
         assert_eq!(
-            resolve_context_window(None, "anthropic", "claude-sonnet-4", None, "sk")
+            resolve_context_window("anthropic", "claude-sonnet-4", None, "sk")
                 .await
                 .context_window,
             Some(200_000)
         );
         assert_eq!(
-            resolve_context_window(None, "openai", "gpt-4o", None, "sk")
+            resolve_context_window("openai", "gpt-4o", None, "sk")
                 .await
                 .context_window,
             Some(128_000)

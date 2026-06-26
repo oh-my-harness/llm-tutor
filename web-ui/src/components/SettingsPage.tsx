@@ -234,7 +234,6 @@ export function SettingsPage({ settings, onChange }: Props) {
           api_key: config.apiKey,
           base_url: config.baseUrl,
           chat_path: config.chatPath,
-          context_window_tokens: config.contextWindowTokens,
         }),
       })
       const payload = await response.json().catch(() => ({}))
