@@ -630,6 +630,15 @@ impl MemoryStore {
         apply_text_edits(current, edits)
     }
 
+    pub fn validate_text_edits(
+        &self,
+        current: &str,
+        edits: &[MemoryTextEdit],
+        citeable_refs: &[String],
+    ) -> Result<()> {
+        validate_text_edits(current, edits, citeable_refs)
+    }
+
     fn assist_update(&self, target_path: &str, current: &str) -> Result<MemoryAssistResult> {
         let input = self.consolidation_input(
             target_path,
@@ -1039,6 +1048,52 @@ fn apply_text_edits(current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
         }
     }
     Ok(lines.join("\n"))
+}
+
+fn validate_text_edits(
+    current: &str,
+    edits: &[MemoryTextEdit],
+    citeable_refs: &[String],
+) -> Result<()> {
+    let original_len = current.lines().count();
+    let allowed_refs = allowed_edit_refs(current, citeable_refs);
+    for edit in edits {
+        validate_text_edit(edit, original_len)?;
+        if edit.reason.as_deref().unwrap_or_default().trim().is_empty() {
+            return Err(anyhow!("memory edit requires a reason"));
+        }
+        let refs_required = matches!(
+            edit.op,
+            MemoryTextEditOp::Replace | MemoryTextEditOp::Insert
+        ) && !allowed_refs.is_empty();
+        if refs_required && edit.refs.is_empty() {
+            return Err(anyhow!(
+                "memory replace/insert edit must cite evidence refs"
+            ));
+        }
+        for reference in &edit.refs {
+            if !allowed_refs.contains(reference) {
+                return Err(anyhow!(
+                    "memory edit cites unknown source ref `{reference}`"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn allowed_edit_refs(
+    current: &str,
+    citeable_refs: &[String],
+) -> std::collections::BTreeSet<String> {
+    let mut refs = citeable_refs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for reference in parse_source_refs(current) {
+        refs.insert(reference.target);
+    }
+    refs
 }
 
 fn validate_text_edit(edit: &MemoryTextEdit, original_len: usize) -> Result<()> {
@@ -1966,6 +2021,77 @@ mod tests {
         assert!(proposed.contains("- Same fact. <!--m_1-->"));
         assert!(!proposed.contains("<!--m_2-->"));
         assert!(proposed.contains("- Keep this useful fact."));
+    }
+
+    #[test]
+    fn validate_text_edits_rejects_unknown_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Chat memory\n\n- Existing fact. [^1] <!--m_1-->\n\n[^1]: chat:known";
+
+        let err = store
+            .validate_text_edits(
+                current,
+                &[MemoryTextEdit {
+                    op: MemoryTextEditOp::Delete,
+                    start_line: 3,
+                    end_line: Some(3),
+                    text: None,
+                    refs: vec!["chat:unknown".into()],
+                    reason: Some("unsupported".into()),
+                }],
+                &["chat:known".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unknown source ref"));
+    }
+
+    #[test]
+    fn validate_text_edits_requires_refs_for_replace_when_evidence_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Chat memory\n\n- Existing fact. [^1] <!--m_1-->\n\n[^1]: chat:known";
+
+        let err = store
+            .validate_text_edits(
+                current,
+                &[MemoryTextEdit {
+                    op: MemoryTextEditOp::Replace,
+                    start_line: 3,
+                    end_line: Some(3),
+                    text: Some("- Better fact. [^1] <!--m_1-->".into()),
+                    refs: vec![],
+                    reason: Some("needs evidence".into()),
+                }],
+                &["chat:known".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("must cite evidence refs"));
+    }
+
+    #[test]
+    fn validate_text_edits_requires_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+
+        let err = store
+            .validate_text_edits(
+                "# Chat memory\n\n- Existing fact. <!--m_1-->",
+                &[MemoryTextEdit {
+                    op: MemoryTextEditOp::Delete,
+                    start_line: 3,
+                    end_line: Some(3),
+                    text: None,
+                    refs: vec![],
+                    reason: None,
+                }],
+                &[],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("requires a reason"));
     }
 
     #[test]

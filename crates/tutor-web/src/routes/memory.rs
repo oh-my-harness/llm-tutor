@@ -235,6 +235,13 @@ async fn assist_memory_with_llm(
             reason: edit.reason.clone(),
         })
         .collect::<Vec<_>>();
+    store
+        .validate_text_edits(
+            &input.target.existing_markdown,
+            &edits,
+            &input.chunk.citeable_refs,
+        )
+        .map_err(|err| err.to_string())?;
     let proposed_markdown = match action {
         MemoryAssistAction::Update if output.changed => {
             let facts = output
