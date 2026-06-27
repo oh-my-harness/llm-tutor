@@ -49,6 +49,12 @@ pub struct MemoryEvent {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedMemorySource {
+    pub reference: String,
+    pub event: MemoryEvent,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryEventCategory {
@@ -72,7 +78,14 @@ pub struct MemoryAssistResult {
     pub report_markdown: String,
     pub proposed_markdown: Option<String>,
     pub edits: Vec<MemoryTextEdit>,
+    pub trace: Option<MemoryAssistTrace>,
     pub changed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryAssistTrace {
+    pub input_json: String,
+    pub output_json: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -277,6 +290,32 @@ impl MemoryStore {
         Ok(events)
     }
 
+    pub fn resolve_source_ref(&self, reference: &str) -> Result<ResolvedMemorySource> {
+        self.ensure_skeleton()?;
+        let reference = reference.trim();
+        let (surface, id) = reference
+            .split_once(':')
+            .ok_or_else(|| anyhow!("memory source ref must look like surface:id"))?;
+        let category = category_for_surface(surface)
+            .ok_or_else(|| anyhow!("unsupported memory source surface `{surface}`"))?;
+        let path = self.root.join(event_file(category));
+        let text = fs::read_to_string(path)?;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let event = serde_json::from_str::<MemoryEvent>(line)?;
+            if event.id == id || event.source_id.as_deref() == Some(id) {
+                return Ok(ResolvedMemorySource {
+                    reference: reference.to_string(),
+                    event,
+                });
+            }
+        }
+        Err(anyhow!("memory source ref `{reference}` was not found"))
+    }
+
     pub fn consolidation_preview(&self) -> Result<MemoryConsolidationPreview> {
         let events = self.recent_events(30)?;
         let current = self.read("L3/recent.md")?.markdown;
@@ -471,6 +510,7 @@ impl MemoryStore {
                 report_markdown: "No recent workspace events match this memory file.".into(),
                 proposed_markdown: Some(current.to_string()),
                 edits: Vec::new(),
+                trace: None,
                 changed: false,
             });
         }
@@ -492,6 +532,7 @@ impl MemoryStore {
             ),
             proposed_markdown: Some(proposed),
             edits: Vec::new(),
+            trace: None,
             changed: true,
         })
     }
@@ -660,6 +701,16 @@ fn event_surface(category: MemoryEventCategory) -> &'static str {
         MemoryEventCategory::Quiz => "quiz",
         MemoryEventCategory::Notebook => "notebook",
         MemoryEventCategory::Research => "research",
+    }
+}
+
+fn category_for_surface(surface: &str) -> Option<MemoryEventCategory> {
+    match surface {
+        "chat" => Some(MemoryEventCategory::Chat),
+        "quiz" => Some(MemoryEventCategory::Quiz),
+        "notebook" => Some(MemoryEventCategory::Notebook),
+        "research" => Some(MemoryEventCategory::Research),
+        _ => None,
     }
 }
 
@@ -886,6 +937,7 @@ fn assist_check(target_path: &str, markdown: &str) -> MemoryAssistResult {
         report_markdown: report.join("\n"),
         proposed_markdown: None,
         edits: Vec::new(),
+        trace: None,
         changed: false,
     }
 }
@@ -915,6 +967,7 @@ fn assist_dedupe(target_path: &str, markdown: &str) -> MemoryAssistResult {
         },
         proposed_markdown: Some(proposed),
         edits: Vec::new(),
+        trace: None,
         changed: removed > 0,
     }
 }
@@ -1049,6 +1102,26 @@ mod tests {
         assert_eq!(preview.target_path, "L3/recent.md");
         assert_eq!(preview.event_count, 1);
         assert!(preview.proposed_markdown.contains("Answered OPC"));
+    }
+
+    #[test]
+    fn memory_store_resolves_source_refs_to_l1_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .record_event(
+                MemoryEventCategory::Quiz,
+                "answered",
+                "Answered OPC question correctly",
+                Some("quiz-1".into()),
+                json!({ "question_id": "q1" }),
+            )
+            .unwrap();
+
+        let source = store.resolve_source_ref("quiz:quiz-1").unwrap();
+
+        assert_eq!(source.reference, "quiz:quiz-1");
+        assert_eq!(source.event.summary, "Answered OPC question correctly");
     }
 
     #[test]

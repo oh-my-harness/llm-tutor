@@ -11,7 +11,8 @@ use serde::Deserialize;
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
 use crate::memory_store::{
-    MemoryAssistAction, MemoryFact, MemoryStore, MemoryTextEdit, MemoryTextEditOp,
+    MemoryAssistAction, MemoryAssistTrace, MemoryFact, MemoryStore, MemoryTextEdit,
+    MemoryTextEditOp,
 };
 
 #[derive(Deserialize)]
@@ -27,6 +28,11 @@ struct UpdateMemoryFileRequest {
 #[derive(Deserialize)]
 struct EventsQuery {
     limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct SourceQuery {
+    reference: String,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +98,20 @@ async fn list_events(
         )
             .into_response(),
         Err(err) => error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+    }
+}
+
+async fn get_source(
+    State(store): State<Arc<MemoryStore>>,
+    Query(query): Query<SourceQuery>,
+) -> impl IntoResponse {
+    match store.resolve_source_ref(&query.reference) {
+        Ok(source) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "source": source })),
+        )
+            .into_response(),
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
 
@@ -179,6 +199,7 @@ async fn assist_memory_with_llm(
     )
     .await
     .map_err(|err| err.to_string())?;
+    let output_json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
     let edits = output
         .edits
         .iter()
@@ -229,6 +250,10 @@ async fn assist_memory_with_llm(
         report_markdown: output.report_markdown,
         proposed_markdown,
         edits,
+        trace: Some(MemoryAssistTrace {
+            input_json: serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?,
+            output_json,
+        }),
         changed: output.changed,
     })
 }
@@ -270,6 +295,7 @@ pub fn memory_router(store: Arc<MemoryStore>) -> Router {
         .route("/api/memory/files", get(list_files))
         .route("/api/memory/file", get(get_file).patch(update_file))
         .route("/api/memory/events", get(list_events))
+        .route("/api/memory/source", get(get_source))
         .route(
             "/api/memory/consolidate/preview",
             axum::routing::post(preview_consolidation),
@@ -431,6 +457,41 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body["result"]["changed"], true);
+    }
+
+    #[tokio::test]
+    async fn resolves_memory_source_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        store
+            .record_event(
+                crate::memory_store::MemoryEventCategory::Quiz,
+                "answered",
+                "Answered OPC question correctly",
+                Some("quiz-1".into()),
+                serde_json::json!({ "question_id": "q1" }),
+            )
+            .unwrap();
+        let app = memory_router(store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/memory/source?reference=quiz%3Aquiz-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["source"]["reference"], "quiz:quiz-1");
+        assert_eq!(
+            body["source"]["event"]["summary"],
+            "Answered OPC question correctly"
+        );
     }
 
     fn json_request(method: Method, uri: &str, value: serde_json::Value) -> Request<Body> {

@@ -40,6 +40,10 @@ interface AssistResult {
   report_markdown: string
   proposed_markdown?: string | null
   edits?: MemoryEdit[]
+  trace?: {
+    input_json: string
+    output_json: string
+  } | null
   changed: boolean
 }
 
@@ -466,6 +470,7 @@ function AgentWorkspace({
             {assistResult.edits && assistResult.edits.length > 0 && (
               <EditPreview edits={assistResult.edits} />
             )}
+            {assistResult.trace && <TracePreview trace={assistResult.trace} />}
             {assistResult.changed && (
               <p className="mt-4 text-sm text-blue-700">已生成可预览的记忆变更，请检查 edits 和报告后再应用到草稿。</p>
             )}
@@ -516,6 +521,31 @@ function EditPreview({ edits }: { edits: MemoryEdit[] }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function TracePreview({ trace }: { trace: NonNullable<AssistResult['trace']> }) {
+  return (
+    <details className="mt-4 rounded-lg border border-gray-200 bg-white p-3">
+      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">
+        LLM trace
+      </summary>
+      <div className="mt-3 space-y-3">
+        <TraceBlock title="Input" value={trace.input_json} />
+        <TraceBlock title="Output" value={trace.output_json} />
+      </div>
+    </details>
+  )
+}
+
+function TraceBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-gray-500">{title}</div>
+      <pre className="max-h-56 overflow-auto rounded-md bg-gray-950 p-3 font-mono text-[11px] leading-5 text-gray-100">
+        {value}
+      </pre>
     </div>
   )
 }
