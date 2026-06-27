@@ -222,6 +222,7 @@ impl MemoryStore {
     pub fn write(&self, path: &str, markdown: String) -> Result<MemoryFile> {
         self.ensure_skeleton()?;
         let path = normalize_memory_path(path)?;
+        let markdown = normalize_memory_markdown(&markdown)?;
         if markdown.trim().is_empty() {
             return Err(anyhow!("memory markdown is empty"));
         }
@@ -490,7 +491,7 @@ impl MemoryStore {
                 .collect::<Result<Vec<_>>>()?;
             proposed.push_str(&serialized.join("\n"));
         }
-        Ok(proposed)
+        normalize_memory_markdown(&proposed)
     }
 
     pub fn apply_text_edits(&self, current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
@@ -570,18 +571,7 @@ pub fn parse_memory_markers(markdown: &str) -> Vec<MemoryMarker> {
 }
 
 pub fn parse_source_refs(markdown: &str) -> Vec<MemorySourceRef> {
-    markdown
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let rest = line.strip_prefix("[^")?;
-            let (index, target) = rest.split_once("]:")?;
-            Some(MemorySourceRef {
-                index: index.parse().ok()?,
-                target: target.trim().to_string(),
-            })
-        })
-        .collect()
+    markdown.lines().filter_map(parse_source_ref_line).collect()
 }
 
 pub fn serialize_memory_marker(id: &str) -> Result<String> {
@@ -601,6 +591,125 @@ pub fn serialize_source_ref(reference: &MemorySourceRef) -> Result<String> {
         reference.index,
         reference.target.trim()
     ))
+}
+
+pub fn normalize_memory_markdown(markdown: &str) -> Result<String> {
+    let mut definitions = std::collections::BTreeMap::<usize, String>::new();
+    let mut body_lines = Vec::new();
+    for line in markdown.lines() {
+        if let Some(reference) = parse_source_ref_line(line) {
+            definitions
+                .entry(reference.index)
+                .or_insert(reference.target);
+        } else {
+            body_lines.push(line.to_string());
+        }
+    }
+
+    let mut old_to_new = std::collections::BTreeMap::<usize, usize>::new();
+    let mut target_to_new = std::collections::BTreeMap::<String, usize>::new();
+    let mut normalized_refs = Vec::<MemorySourceRef>::new();
+    for line in &body_lines {
+        for old_index in footnote_indices_in_line(line) {
+            let Some(target) = definitions.get(&old_index).cloned() else {
+                continue;
+            };
+            if let Some(new_index) = target_to_new.get(&target).copied() {
+                old_to_new.insert(old_index, new_index);
+                continue;
+            }
+            let new_index = normalized_refs.len() + 1;
+            target_to_new.insert(target.clone(), new_index);
+            old_to_new.insert(old_index, new_index);
+            normalized_refs.push(MemorySourceRef {
+                index: new_index,
+                target,
+            });
+        }
+    }
+
+    let mut normalized_body = body_lines
+        .iter()
+        .map(|line| replace_footnote_indices(line, &old_to_new))
+        .collect::<Vec<_>>();
+    while normalized_body
+        .last()
+        .is_some_and(|line| line.trim().is_empty())
+    {
+        normalized_body.pop();
+    }
+    let mut result = normalized_body.join("\n");
+    if !normalized_refs.is_empty() {
+        if !result.trim().is_empty() {
+            result.push_str("\n\n");
+        }
+        result.push_str("---\n\n");
+        let refs = normalized_refs
+            .iter()
+            .map(serialize_source_ref)
+            .collect::<Result<Vec<_>>>()?;
+        result.push_str(&refs.join("\n"));
+    }
+    Ok(result)
+}
+
+fn parse_source_ref_line(line: &str) -> Option<MemorySourceRef> {
+    let line = line.trim();
+    let rest = line.strip_prefix("[^")?;
+    let (index, target) = rest.split_once("]:")?;
+    Some(MemorySourceRef {
+        index: index.parse().ok()?,
+        target: target.trim().to_string(),
+    })
+}
+
+fn footnote_indices_in_line(line: &str) -> Vec<usize> {
+    let mut indices = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find("[^") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find(']') else {
+            break;
+        };
+        if let Ok(index) = rest[..end].parse::<usize>() {
+            indices.push(index);
+        }
+        rest = &rest[end + 1..];
+    }
+    indices
+}
+
+fn replace_footnote_indices(
+    line: &str,
+    old_to_new: &std::collections::BTreeMap<usize, usize>,
+) -> String {
+    let mut output = String::new();
+    let mut rest = line;
+    loop {
+        let Some(start) = rest.find("[^") else {
+            output.push_str(rest);
+            break;
+        };
+        output.push_str(&rest[..start]);
+        output.push_str("[^");
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find(']') else {
+            output.push_str(rest);
+            break;
+        };
+        if let Ok(old_index) = rest[..end].parse::<usize>() {
+            if let Some(new_index) = old_to_new.get(&old_index) {
+                output.push_str(&new_index.to_string());
+            } else {
+                output.push_str(&rest[..end]);
+            }
+        } else {
+            output.push_str(&rest[..end]);
+        }
+        output.push(']');
+        rest = &rest[end + 1..];
+    }
+    output
 }
 
 fn apply_text_edits(current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
@@ -1080,6 +1189,37 @@ mod tests {
             .unwrap(),
             "[^1]: quiz:session:q1"
         );
+    }
+
+    #[test]
+    fn normalize_memory_markdown_dedupes_and_removes_unused_refs() {
+        let markdown = "# Quiz memory\n\n- First fact. [^2]\n- Second fact. [^3]\n- Unknown fact. [^9]\n\n[^1]: chat:unused\n[^2]: quiz:q1\n[^3]: quiz:q1\n[^4]: quiz:unused";
+
+        let normalized = normalize_memory_markdown(markdown).unwrap();
+
+        assert!(normalized.contains("- First fact. [^1]"));
+        assert!(normalized.contains("- Second fact. [^1]"));
+        assert!(normalized.contains("- Unknown fact. [^9]"));
+        assert!(normalized.contains("[^1]: quiz:q1"));
+        assert!(!normalized.contains("chat:unused"));
+        assert!(!normalized.contains("quiz:unused"));
+        assert!(!normalized.contains("[^2]:"));
+    }
+
+    #[test]
+    fn memory_store_write_normalizes_source_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let updated = store
+            .write(
+                "L2/quiz.md",
+                "# Quiz memory\n\n- Same source. [^7]\n\n[^7]: quiz:q1\n[^8]: quiz:unused".into(),
+            )
+            .unwrap();
+
+        assert!(updated.markdown.contains("- Same source. [^1]"));
+        assert!(updated.markdown.contains("[^1]: quiz:q1"));
+        assert!(!updated.markdown.contains("quiz:unused"));
     }
 
     #[test]
