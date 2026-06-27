@@ -444,7 +444,7 @@ impl MemoryStore {
         });
         let (citeable_refs, text) = match action {
             MemoryAssistAction::Check => self.audit_source_chunk(&target_path, &current)?,
-            MemoryAssistAction::Dedupe => (Vec::new(), String::new()),
+            MemoryAssistAction::Dedupe => dedupe_source_chunk(&current),
             MemoryAssistAction::Update if target_path.starts_with("L3/") => {
                 self.l3_source_chunk()?
             }
@@ -503,7 +503,7 @@ impl MemoryStore {
         });
         let chunks = match action {
             MemoryAssistAction::Check => vec![self.audit_source_chunk(&target_path, &current)?],
-            MemoryAssistAction::Dedupe => vec![(Vec::new(), String::new())],
+            MemoryAssistAction::Dedupe => vec![dedupe_source_chunk(&current)],
             MemoryAssistAction::Update if target_path.starts_with("L3/") => {
                 self.l3_source_chunks()?
             }
@@ -1457,6 +1457,35 @@ fn event_source_chunks(events: &[MemoryEvent], chunk_size: usize) -> Vec<(Vec<St
         .collect()
 }
 
+fn dedupe_source_chunk(markdown: &str) -> (Vec<String>, String) {
+    let citeable_refs = parse_source_refs(markdown)
+        .into_iter()
+        .map(|reference| reference.target)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let refs = if citeable_refs.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n# Existing source refs\n{}",
+            citeable_refs
+                .iter()
+                .map(|reference| format!("- {reference}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+    (
+        citeable_refs,
+        format!(
+            "# Line-numbered view\n{}{}",
+            line_numbered_markdown(markdown),
+            refs
+        ),
+    )
+}
+
 fn line_numbered_markdown(markdown: &str) -> String {
     markdown
         .lines()
@@ -2067,6 +2096,58 @@ mod tests {
         assert!(input.chunk.text.contains("source_kind: L2 surface memory"));
         assert!(input.chunk.text.contains("source_path: L2/chat.md"));
         assert!(input.chunk.text.contains("Learner asks for more diagrams"));
+    }
+
+    #[test]
+    fn dedupe_consolidation_input_uses_line_numbered_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let markdown = "# Quiz memory\n\n## Weak topics\n\n- Same fact. [^1] <!--m_1-->\n- Same fact. [^2] <!--m_2-->\n\n---\n\n[^1]: quiz:q1\n[^2]: quiz:q2";
+
+        let input = store
+            .consolidation_input(
+                "L2/quiz.md",
+                MemoryAssistAction::Dedupe,
+                Some(markdown.into()),
+            )
+            .unwrap();
+
+        assert_eq!(input.job.mode, ConsolidationMode::Dedup);
+        assert_eq!(input.chunk.citeable_refs, vec!["quiz:q1", "quiz:q2"]);
+        assert!(input.chunk.text.contains("# Line-numbered view"));
+        assert!(
+            input
+                .chunk
+                .text
+                .contains("   5: - Same fact. [^1] <!--m_1-->")
+        );
+        assert!(input.chunk.text.contains("# Existing source refs"));
+    }
+
+    #[test]
+    fn consolidation_inputs_keep_dedupe_as_single_numbered_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let markdown = "# Chat memory\n\n- Duplicate. [^1] <!--m_1-->\n- Duplicate. [^1] <!--m_2-->\n\n[^1]: chat:s1";
+
+        let inputs = store
+            .consolidation_inputs(
+                "L2/chat.md",
+                MemoryAssistAction::Dedupe,
+                Some(markdown.into()),
+            )
+            .unwrap();
+
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].chunk.index, 1);
+        assert_eq!(inputs[0].chunk.total, 1);
+        assert_eq!(inputs[0].chunk.citeable_refs, vec!["chat:s1"]);
+        assert!(
+            inputs[0]
+                .chunk
+                .text
+                .contains("   4: - Duplicate. [^1] <!--m_2-->")
+        );
     }
 
     #[test]
