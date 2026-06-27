@@ -27,7 +27,10 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = axum::Router::new()
-        .merge(routes::knowledge::knowledge_router(knowledge.clone()))
+        .merge(routes::knowledge::knowledge_router(
+            knowledge.clone(),
+            memory.clone(),
+        ))
         .merge(routes::quiz::quiz_router(
             quizzes,
             knowledge.clone(),

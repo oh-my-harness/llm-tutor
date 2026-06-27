@@ -48,7 +48,7 @@ interface AssistResult {
   changed: boolean
 }
 
-const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/research.md']
+const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/knowledge.md', 'L2/research.md']
 const l3Paths = ['L3/recent.md', 'L3/profile.md', 'L3/scope.md', 'L3/preferences.md', 'L3/teaching_strategy.md']
 
 export function MemoryPage({ settings }: { settings: LlmSettings }) {

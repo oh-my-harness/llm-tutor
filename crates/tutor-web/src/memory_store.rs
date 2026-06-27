@@ -9,6 +9,7 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
     ("L2/chat.md", "# Chat memory\n\n"),
     ("L2/quiz.md", "# Quiz memory\n\n"),
     ("L2/notebook.md", "# Notebook memory\n\n"),
+    ("L2/knowledge.md", "# Knowledge memory\n\n"),
     ("L2/research.md", "# Research memory\n\n"),
     ("L3/recent.md", "# Recent learning context\n\n"),
     (
@@ -67,6 +68,7 @@ pub enum MemoryEventCategory {
     Chat,
     Quiz,
     Notebook,
+    Knowledge,
     Research,
 }
 
@@ -297,6 +299,7 @@ impl MemoryStore {
             MemoryEventCategory::Chat,
             MemoryEventCategory::Quiz,
             MemoryEventCategory::Notebook,
+            MemoryEventCategory::Knowledge,
             MemoryEventCategory::Research,
         ] {
             let path = self.root.join(event_file(category));
@@ -459,6 +462,7 @@ impl MemoryStore {
             ("chat", "L2/chat.md"),
             ("quiz", "L2/quiz.md"),
             ("notebook", "L2/notebook.md"),
+            ("knowledge", "L2/knowledge.md"),
             ("research", "L2/research.md"),
         ] {
             let markdown = self.read(path)?.markdown;
@@ -873,6 +877,7 @@ fn event_file(category: MemoryEventCategory) -> &'static str {
         MemoryEventCategory::Chat => "L1/chat_events.jsonl",
         MemoryEventCategory::Quiz => "L1/quiz_events.jsonl",
         MemoryEventCategory::Notebook => "L1/notebook_events.jsonl",
+        MemoryEventCategory::Knowledge => "L1/knowledge_events.jsonl",
         MemoryEventCategory::Research => "L1/research_events.jsonl",
     }
 }
@@ -882,6 +887,7 @@ fn event_kind_label(category: MemoryEventCategory, action: &str) -> String {
         MemoryEventCategory::Chat => "chat",
         MemoryEventCategory::Quiz => "quiz",
         MemoryEventCategory::Notebook => "notebook",
+        MemoryEventCategory::Knowledge => "knowledge",
         MemoryEventCategory::Research => "research",
     };
     format!("{category}/{action}")
@@ -892,6 +898,7 @@ fn event_surface(category: MemoryEventCategory) -> &'static str {
         MemoryEventCategory::Chat => "chat",
         MemoryEventCategory::Quiz => "quiz",
         MemoryEventCategory::Notebook => "notebook",
+        MemoryEventCategory::Knowledge => "knowledge",
         MemoryEventCategory::Research => "research",
     }
 }
@@ -901,6 +908,7 @@ fn category_for_surface(surface: &str) -> Option<MemoryEventCategory> {
         "chat" => Some(MemoryEventCategory::Chat),
         "quiz" => Some(MemoryEventCategory::Quiz),
         "notebook" => Some(MemoryEventCategory::Notebook),
+        "knowledge" => Some(MemoryEventCategory::Knowledge),
         "research" => Some(MemoryEventCategory::Research),
         _ => None,
     }
@@ -921,6 +929,8 @@ fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<
         Some(MemoryEventCategory::Quiz)
     } else if target_path.contains("notebook") || target_path.contains("scope") {
         Some(MemoryEventCategory::Notebook)
+    } else if target_path.contains("knowledge") {
+        Some(MemoryEventCategory::Knowledge)
     } else if target_path.contains("research") {
         Some(MemoryEventCategory::Research)
     } else {
@@ -949,6 +959,11 @@ fn target_catalog(target_path: &str, existing_markdown: String) -> Consolidation
             "Notebook memory",
             "Recurring note themes, preferred formats, and open questions.",
             vec!["Themes", "Formats", "Open questions"],
+        ),
+        "L2/knowledge.md" => (
+            "Knowledge memory",
+            "Document interests, frequent queries, and knowledge gaps.",
+            vec!["Interests", "Frequent queries", "Gaps"],
         ),
         "L2/research.md" => (
             "Research memory",
@@ -1369,6 +1384,16 @@ mod tests {
     }
 
     #[test]
+    fn memory_store_lists_knowledge_surface_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let files = store.list().unwrap();
+
+        assert!(files.iter().any(|file| file.path == "L2/knowledge.md"));
+        assert!(dir.path().join("memory/L2/knowledge.md").exists());
+    }
+
+    #[test]
     fn memory_store_resolves_source_refs_to_l1_events() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
@@ -1445,6 +1470,49 @@ mod tests {
         assert!(input.chunk.text.contains("@entity chat"));
         assert!(input.chunk.text.contains("@entity quiz"));
         assert!(!input.chunk.text.contains("chat:"));
+    }
+
+    #[test]
+    fn knowledge_consolidation_input_uses_knowledge_events_and_l3_surface_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .record_event(
+                MemoryEventCategory::Knowledge,
+                "search",
+                "Searched semiconductor notes for photoresist.",
+                Some("kb-1".into()),
+                json!({ "query": "photoresist" }),
+            )
+            .unwrap();
+
+        let l2_input = store
+            .consolidation_input("L2/knowledge.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert_eq!(l2_input.job.key, "knowledge");
+        assert_eq!(l2_input.chunk.citeable_refs, vec!["knowledge:kb-1"]);
+        assert!(l2_input.chunk.text.contains("@entity knowledge:kb-1"));
+        assert!(
+            l2_input
+                .target
+                .allowed_sections
+                .contains(&"Frequent queries".into())
+        );
+
+        store
+            .write(
+                "L2/knowledge.md",
+                "# Knowledge memory\n\n- Learner searches semiconductor documents. <!--m_kb-->"
+                    .into(),
+            )
+            .unwrap();
+        let l3_input = store
+            .consolidation_input("L3/scope.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert!(l3_input.chunk.citeable_refs.contains(&"knowledge".into()));
+        assert!(l3_input.chunk.text.contains("@entity knowledge"));
     }
 
     #[test]

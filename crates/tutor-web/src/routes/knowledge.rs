@@ -15,11 +15,13 @@ use serde::{Deserialize, Serialize};
 use crate::knowledge_store::{
     KnowledgeBaseView, KnowledgeDocument, KnowledgeStore, normalize_embedding_config,
 };
+use crate::memory_store::{MemoryEventCategory, MemoryStore};
 
 #[derive(Clone)]
 struct KnowledgeState {
     store: Arc<KnowledgeStore>,
     jobs: Arc<IngestionJobs>,
+    memory: Arc<MemoryStore>,
 }
 
 #[derive(Default)]
@@ -92,11 +94,24 @@ async fn create_knowledge_base(
         .store
         .create(req.name, normalize_embedding_config(req.embedding))
     {
-        Ok(item) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "knowledge_base": item })),
-        )
-            .into_response(),
+        Ok(item) => {
+            record_knowledge_event(
+                &state,
+                "create_kb",
+                format!("Created knowledge base `{}`.", item.name),
+                Some(item.id.clone()),
+                serde_json::json!({
+                    "kb": item.id,
+                    "name": item.name,
+                    "embedding": item.embedding,
+                }),
+            );
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "knowledge_base": item })),
+            )
+                .into_response()
+        }
         Err(err) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": err.to_string() })),
@@ -117,7 +132,16 @@ async fn delete_knowledge_base(
     }
 
     match state.store.delete(&kb) {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            record_knowledge_event(
+                &state,
+                "delete_kb",
+                format!("Deleted knowledge base `{kb}`."),
+                Some(kb),
+                serde_json::json!({ "kb_deleted": true }),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "knowledge base not found" })),
@@ -384,7 +408,25 @@ async fn ingest_text_document(
         file_path: None,
         created_at: Utc::now(),
     };
-    Ok((state.store.add_document(kb, document)?, chunks))
+    let view = state.store.add_document(kb, document.clone())?;
+    record_knowledge_event(
+        state,
+        "ingest_document",
+        format!(
+            "Added document `{}` to knowledge base `{}` and indexed {} chunks.",
+            document.name, kb, chunks
+        ),
+        Some(document.id.clone()),
+        serde_json::json!({
+            "kb": kb,
+            "document_id": document.id,
+            "document": document.name,
+            "source": document.source,
+            "chunks": chunks,
+            "size_bytes": size_bytes,
+        }),
+    );
+    Ok((view, chunks))
 }
 
 async fn ingest_upload_document(
@@ -538,11 +580,30 @@ async fn search_knowledge(
     match tutor_rag::KnowledgeRetriever::search(&rag, Some(&kb), &req.query, req.top_k.unwrap_or(5))
         .await
     {
-        Ok(hits) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "kb": kb, "hits": hits })),
-        )
-            .into_response(),
+        Ok(hits) => {
+            record_knowledge_event(
+                &state,
+                "search",
+                format!(
+                    "Searched knowledge base `{}` for `{}` and got {} hits.",
+                    kb,
+                    req.query.trim(),
+                    hits.len()
+                ),
+                Some(kb.clone()),
+                serde_json::json!({
+                    "kb": kb,
+                    "query": req.query,
+                    "top_k": req.top_k.unwrap_or(5),
+                    "hits": hits.len(),
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "kb": kb, "hits": hits })),
+            )
+                .into_response()
+        }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": err.to_string() })),
@@ -595,11 +656,28 @@ async fn delete_document(
     }
 
     match state.store.delete_document(&kb, &document_id) {
-        Ok(Some(_)) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "knowledge_base": state.store.get(&kb).map(KnowledgeBaseView::from) })),
-        )
-            .into_response(),
+        Ok(Some(_)) => {
+            record_knowledge_event(
+                &state,
+                "delete_document",
+                format!(
+                    "Deleted document `{}` from knowledge base `{}`.",
+                    document.name, kb
+                ),
+                Some(document_id),
+                serde_json::json!({
+                    "kb": kb,
+                    "document_id": document.id,
+                    "document": document.name,
+                    "source": document.source,
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "knowledge_base": state.store.get(&kb).map(KnowledgeBaseView::from) })),
+            )
+                .into_response()
+        }
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "document not found" })),
@@ -683,12 +761,25 @@ async fn reindex_document(
                 96,
                 Some(chunks),
             );
-            Ok((
-                task_state
-                    .store
-                    .update_document_chunks(&kb, &document_id, chunks)?,
-                chunks,
-            ))
+            let view = task_state
+                .store
+                .update_document_chunks(&kb, &document_id, chunks)?;
+            record_knowledge_event(
+                &task_state,
+                "reindex_document",
+                format!(
+                    "Reindexed document `{}` in knowledge base `{}` into {} chunks.",
+                    document.name, kb, chunks
+                ),
+                Some(document_id.clone()),
+                serde_json::json!({
+                    "kb": kb,
+                    "document_id": document.id,
+                    "document": document.name,
+                    "chunks": chunks,
+                }),
+            );
+            Ok((view, chunks))
         }
         .await;
         finish_job(&task_state.jobs, &job_id, result);
@@ -811,10 +902,27 @@ impl DocumentIndexSource for KnowledgeDocument {
     }
 }
 
-pub fn knowledge_router(store: Arc<KnowledgeStore>) -> Router {
+fn record_knowledge_event(
+    state: &KnowledgeState,
+    action: impl Into<String>,
+    summary: impl Into<String>,
+    source_id: Option<String>,
+    payload: serde_json::Value,
+) {
+    let _ = state.memory.record_event(
+        MemoryEventCategory::Knowledge,
+        action,
+        summary,
+        source_id,
+        payload,
+    );
+}
+
+pub fn knowledge_router(store: Arc<KnowledgeStore>, memory: Arc<MemoryStore>) -> Router {
     let state = KnowledgeState {
         store,
         jobs: Arc::new(IngestionJobs::default()),
+        memory,
     };
     Router::new()
         .route("/api/attachments/parse", post(parse_chat_attachment))
@@ -886,7 +994,8 @@ mod tests {
     async fn parses_chat_attachment_upload() {
         let root = tempfile::tempdir().unwrap();
         let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
-        let app = knowledge_router(store);
+        let memory = Arc::new(MemoryStore::new_with_root(root.path().join("memory")));
+        let app = knowledge_router(store, memory.clone());
 
         let boundary = "X-LLM-TUTOR-ATTACHMENT";
         let upload_body = format!(
@@ -920,7 +1029,8 @@ mod tests {
     async fn upload_search_and_chunks_work_without_real_llm() {
         let root = tempfile::tempdir().unwrap();
         let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
-        let app = knowledge_router(store);
+        let memory = Arc::new(MemoryStore::new_with_root(root.path().join("memory")));
+        let app = knowledge_router(store, memory.clone());
 
         let create_body = serde_json::json!({
             "name": "Physics",
@@ -1014,6 +1124,14 @@ mod tests {
         let hits = body["hits"].as_array().unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0]["source"], "lesson.txt");
+
+        let events = memory.recent_events(20).unwrap();
+        assert!(events.iter().any(|event| {
+            event.category == MemoryEventCategory::Knowledge && event.action == "ingest_document"
+        }));
+        assert!(events.iter().any(|event| {
+            event.category == MemoryEventCategory::Knowledge && event.action == "search"
+        }));
 
         let response = app
             .oneshot(
