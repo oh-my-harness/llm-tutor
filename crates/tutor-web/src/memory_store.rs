@@ -26,6 +26,7 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
 
 const DEFAULT_DIRS: &[&str] = &["L1", "L2", "L3"];
 const MEMORY_UPDATE_CHUNK_SIZE: usize = 10;
+const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
 
 #[derive(Clone)]
 pub struct MemoryStore {
@@ -1522,6 +1523,9 @@ fn validate_memory_facts(
         if fact.text.trim().is_empty() {
             return Err(anyhow!("memory fact text is empty"));
         }
+        if fact.text.chars().count() > MAX_MEMORY_FACT_TEXT_CHARS {
+            return Err(anyhow!("memory fact text is too long"));
+        }
         if !allowed_sections.is_empty() && !allowed_sections.contains(fact.section.trim()) {
             return Err(anyhow!(
                 "memory fact uses unsupported section `{}`",
@@ -2186,6 +2190,27 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("unsupported section"));
+    }
+
+    #[test]
+    fn append_memory_facts_rejects_overlong_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let err = store
+            .append_memory_facts(
+                "L2/quiz.md",
+                "# Quiz memory\n\n",
+                &[MemoryFact {
+                    text: "x".repeat(MAX_MEMORY_FACT_TEXT_CHARS + 1),
+                    section: "Weak topics".into(),
+                    refs: vec!["quiz:q1".into()],
+                }],
+                &["quiz:q1".into()],
+                &["Weak topics".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("too long"));
     }
 
     #[test]

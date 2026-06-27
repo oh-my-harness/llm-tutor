@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, TutorError};
 use crate::llm_provider::LlmConfig;
 
+const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryWorkflowAction {
@@ -135,6 +137,11 @@ pub fn parse_memory_workflow_output(
                     "update workflow returned an invalid memory fact".into(),
                 ));
             }
+            if fact.text.chars().count() > MAX_MEMORY_FACT_TEXT_CHARS {
+                return Err(TutorError::Internal(
+                    "update workflow returned an overlong memory fact".into(),
+                ));
+            }
         }
         if parsed.changed && parsed.facts.is_empty() {
             return Err(TutorError::Internal(
@@ -259,9 +266,8 @@ fn response_text(content: &[ResponseContent]) -> String {
 }
 
 fn extract_json_object(text: &str) -> Option<&str> {
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    (start <= end).then_some(&text[start..=end])
+    let text = text.trim();
+    (text.starts_with('{') && text.ends_with('}')).then_some(text)
 }
 
 fn memory_schema() -> serde_json::Value {
@@ -389,6 +395,79 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("requires facts"));
+    }
+
+    #[test]
+    fn rejects_non_json_prose_around_workflow_output() {
+        let err = parse_memory_workflow_output(
+            r##"Here is the JSON: {"report_markdown":"# Report","proposed_markdown":null,"facts":[],"edits":[],"changed":false}"##,
+            MemoryWorkflowAction::Check,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("did not contain JSON"));
+    }
+
+    #[test]
+    fn rejects_malformed_workflow_json() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[],"edits":[],"changed":false"##,
+            MemoryWorkflowAction::Check,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("did not contain JSON"));
+    }
+
+    #[test]
+    fn rejects_workflow_proposed_markdown() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":"# Model wrote markdown","facts":[],"edits":[],"changed":false}"##,
+            MemoryWorkflowAction::Check,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must not return proposed_markdown")
+        );
+    }
+
+    #[test]
+    fn rejects_update_edits() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[{"text":"Learner should review OPC.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[{"op":"delete","start_line":4,"end_line":4,"text":null,"refs":["quiz:q1"],"reason":"not allowed in update"}],"changed":true}"##,
+            MemoryWorkflowAction::Update,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("update workflow must not return edits")
+        );
+    }
+
+    #[test]
+    fn rejects_check_facts() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[{"text":"Learner should review OPC.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":false}"##,
+            MemoryWorkflowAction::Check,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must not return facts"));
+    }
+
+    #[test]
+    fn rejects_overlong_update_fact() {
+        let text = "x".repeat(MAX_MEMORY_FACT_TEXT_CHARS + 1);
+        let payload = serde_json::json!({
+            "report_markdown": "# Report",
+            "proposed_markdown": null,
+            "facts": [{ "text": text, "section": "Weak topics", "refs": ["quiz:q1"] }],
+            "edits": [],
+            "changed": true
+        });
+
+        let err = parse_memory_workflow_output(&payload.to_string(), MemoryWorkflowAction::Update)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("overlong memory fact"));
     }
 
     #[test]
