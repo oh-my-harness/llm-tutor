@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 const DEFAULT_FILES: &[(&str, &str)] = &[
     ("L2/chat.md", "# Chat memory\n\n"),
@@ -92,6 +91,56 @@ pub struct MemoryMarker {
 pub struct MemorySourceRef {
     pub index: usize,
     pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsolidationMode {
+    Update,
+    Audit,
+    Dedup,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationJob {
+    pub mode: ConsolidationMode,
+    pub layer: String,
+    pub key: String,
+    pub language: String,
+    pub today: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationTarget {
+    pub title: String,
+    #[serde(rename = "existingMarkdown")]
+    pub existing_markdown: String,
+    #[serde(rename = "allowedSections")]
+    pub allowed_sections: Vec<String>,
+    pub focus: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationChunk {
+    pub index: usize,
+    pub total: usize,
+    #[serde(rename = "citeableRefs")]
+    pub citeable_refs: Vec<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationInput {
+    pub job: ConsolidationJob,
+    pub target: ConsolidationTarget,
+    pub chunk: ConsolidationChunk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryFact {
+    pub text: String,
+    pub section: String,
+    pub refs: Vec<String>,
 }
 
 impl MemoryStore {
@@ -265,31 +314,136 @@ impl MemoryStore {
         }
     }
 
-    fn assist_update(&self, target_path: &str, current: &str) -> Result<MemoryAssistResult> {
-        let events = recent_events_for_target(self.recent_events(60)?, target_path);
-        let event_count = events.len();
-        let event_markdown = events
-            .iter()
-            .rev()
-            .map(|event| {
-                let source = event
-                    .source_id
-                    .as_deref()
-                    .map(|source| format!(" [^{}]", short_ref_index(source)))
-                    .unwrap_or_default();
-                format!(
-                    "- [{}] {}: {}{} <!--m_{}-->",
-                    event.created_at.format("%Y-%m-%d %H:%M"),
-                    event_kind_label(event.category, &event.action),
-                    event.summary,
-                    source,
-                    event.id.replace('-', "")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+    pub fn consolidation_input(
+        &self,
+        target_path: &str,
+        action: MemoryAssistAction,
+        markdown: Option<String>,
+    ) -> Result<ConsolidationInput> {
+        self.ensure_skeleton()?;
+        let path = normalize_memory_path(target_path)?;
+        let target_path = path_to_slash(&path);
+        let current = markdown.unwrap_or_else(|| {
+            self.read(&target_path)
+                .map(|file| file.markdown)
+                .unwrap_or_default()
+        });
+        let events = recent_events_for_target(self.recent_events(60)?, &target_path);
+        let citeable_refs = events.iter().map(event_citeable_ref).collect::<Vec<_>>();
+        Ok(ConsolidationInput {
+            job: ConsolidationJob {
+                mode: match action {
+                    MemoryAssistAction::Update => ConsolidationMode::Update,
+                    MemoryAssistAction::Check => ConsolidationMode::Audit,
+                    MemoryAssistAction::Dedupe => ConsolidationMode::Dedup,
+                },
+                layer: target_path
+                    .split('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                key: target_path
+                    .trim_end_matches(".md")
+                    .split('/')
+                    .next_back()
+                    .unwrap_or_default()
+                    .to_string(),
+                language: "zh".into(),
+                today: Utc::now().date_naive().to_string(),
+            },
+            target: target_catalog(&target_path, current),
+            chunk: ConsolidationChunk {
+                index: 1,
+                total: 1,
+                citeable_refs,
+                text: render_event_chunk(&events),
+            },
+        })
+    }
 
-        if event_markdown.is_empty() {
+    pub fn append_memory_facts(
+        &self,
+        target_path: &str,
+        current: &str,
+        facts: &[MemoryFact],
+        citeable_refs: &[String],
+        allowed_sections: &[String],
+    ) -> Result<String> {
+        let target_path = path_to_slash(&normalize_memory_path(target_path)?);
+        if facts.is_empty() {
+            return Ok(current.to_string());
+        }
+        validate_memory_facts(facts, citeable_refs, allowed_sections)?;
+
+        let mut proposed = current.trim().to_string();
+        if proposed.is_empty() {
+            proposed = target_catalog(&target_path, String::new()).title;
+            proposed = format!("# {proposed}");
+        }
+
+        let mut existing_refs = parse_source_refs(&proposed)
+            .into_iter()
+            .map(|reference| (reference.target, reference.index))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut next_index = existing_refs.values().copied().max().unwrap_or(0) + 1;
+        let mut ref_lines = Vec::new();
+        let mut body_lines = Vec::new();
+        for fact in facts {
+            let footnotes = fact
+                .refs
+                .iter()
+                .map(|reference| {
+                    let index = if let Some(index) = existing_refs.get(reference) {
+                        *index
+                    } else {
+                        let index = next_index;
+                        next_index += 1;
+                        existing_refs.insert(reference.clone(), index);
+                        ref_lines.push(MemorySourceRef {
+                            index,
+                            target: reference.clone(),
+                        });
+                        index
+                    };
+                    format!("[^{index}]")
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let id = format!("m_{}", uuid::Uuid::new_v4().simple());
+            body_lines.push(format!(
+                "### {}\n\n- {} {} {}",
+                fact.section.trim(),
+                fact.text.trim(),
+                footnotes,
+                serialize_memory_marker(&id)?
+            ));
+        }
+
+        if !proposed.ends_with('\n') {
+            proposed.push('\n');
+        }
+        proposed.push('\n');
+        proposed.push_str("## Agent update draft\n\n");
+        proposed.push_str(&body_lines.join("\n"));
+
+        if !ref_lines.is_empty() {
+            proposed.push_str("\n\n---\n\n");
+            let serialized = ref_lines
+                .iter()
+                .map(serialize_source_ref)
+                .collect::<Result<Vec<_>>>()?;
+            proposed.push_str(&serialized.join("\n"));
+        }
+        Ok(proposed)
+    }
+
+    fn assist_update(&self, target_path: &str, current: &str) -> Result<MemoryAssistResult> {
+        let input = self.consolidation_input(
+            target_path,
+            MemoryAssistAction::Update,
+            Some(current.to_string()),
+        )?;
+        if input.chunk.citeable_refs.is_empty() {
             return Ok(MemoryAssistResult {
                 target_path: target_path.into(),
                 action: MemoryAssistAction::Update,
@@ -298,29 +452,21 @@ impl MemoryStore {
                 changed: false,
             });
         }
-
-        let mut proposed = current.trim().to_string();
-        if !proposed.is_empty() {
-            proposed.push_str("\n\n");
-        }
-        proposed.push_str("## Agent update draft\n\n");
-        proposed.push_str(&event_markdown);
-
-        let refs = events
-            .iter()
-            .filter_map(|event| event.source_id.as_deref())
-            .map(|source| format!("[^{}]: {}", short_ref_index(source), source))
-            .collect::<std::collections::BTreeSet<_>>();
-        if !refs.is_empty() {
-            proposed.push_str("\n\n---\n\n");
-            proposed.push_str(&refs.into_iter().collect::<Vec<_>>().join("\n"));
-        }
+        let facts = facts_from_input_chunk(&input);
+        let proposed = self.append_memory_facts(
+            target_path,
+            current,
+            &facts,
+            &input.chunk.citeable_refs,
+            &input.target.allowed_sections,
+        )?;
 
         Ok(MemoryAssistResult {
             target_path: target_path.into(),
             action: MemoryAssistAction::Update,
             report_markdown: format!(
-                "Prepared an update draft from {event_count} recent matching events."
+                "Prepared an update draft from {} normalized source events.",
+                input.chunk.citeable_refs.len()
             ),
             proposed_markdown: Some(proposed),
             changed: true,
@@ -412,6 +558,20 @@ fn event_kind_label(category: MemoryEventCategory, action: &str) -> String {
     format!("{category}/{action}")
 }
 
+fn event_surface(category: MemoryEventCategory) -> &'static str {
+    match category {
+        MemoryEventCategory::Chat => "chat",
+        MemoryEventCategory::Quiz => "quiz",
+        MemoryEventCategory::Notebook => "notebook",
+        MemoryEventCategory::Research => "research",
+    }
+}
+
+fn event_citeable_ref(event: &MemoryEvent) -> String {
+    let id = event.source_id.as_deref().unwrap_or(&event.id);
+    format!("{}:{}", event_surface(event.category), id)
+}
+
 fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<MemoryEvent> {
     let category = if target_path.contains("chat") {
         Some(MemoryEventCategory::Chat)
@@ -432,6 +592,159 @@ fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<
         .filter(|event| category.is_none_or(|category| event.category == category))
         .take(20)
         .collect()
+}
+
+fn target_catalog(target_path: &str, existing_markdown: String) -> ConsolidationTarget {
+    let (title, focus, sections) = match target_path {
+        "L2/chat.md" => (
+            "Chat memory",
+            "Stable misconceptions, demonstrated mastery, and recurring topics.",
+            vec!["Misconceptions", "Mastery", "Topics"],
+        ),
+        "L2/quiz.md" => (
+            "Quiz memory",
+            "Error patterns, strong topics, weak topics, and question types.",
+            vec!["Error patterns", "Strong topics", "Weak topics"],
+        ),
+        "L2/notebook.md" => (
+            "Notebook memory",
+            "Recurring note themes, preferred formats, and open questions.",
+            vec!["Themes", "Formats", "Open questions"],
+        ),
+        "L2/research.md" => (
+            "Research memory",
+            "Research topics, preferred report shape, and unresolved questions.",
+            vec!["Topics", "Report preferences", "Open questions"],
+        ),
+        "L3/recent.md" => (
+            "Recent learning context",
+            "Rolling timeline of recent learning activity.",
+            vec!["This week", "Earlier"],
+        ),
+        "L3/profile.md" => (
+            "Student profile",
+            "Durable learner identity, learning style, strengths, and weaknesses.",
+            vec!["Identity", "Learning style", "Strengths", "Weaknesses"],
+        ),
+        "L3/scope.md" => (
+            "Learning scope",
+            "Concepts the learner has engaged with and confidence labels.",
+            vec!["Familiar", "Practicing", "Unsure"],
+        ),
+        "L3/preferences.md" => (
+            "Learning preferences",
+            "Explicit user-stated long-term preferences.",
+            vec!["Preferences"],
+        ),
+        "L3/teaching_strategy.md" => (
+            "Teaching strategy",
+            "How the tutor should adapt examples, difficulty, hints, and reviews.",
+            vec!["Explanation style", "Practice strategy", "Review strategy"],
+        ),
+        _ => ("Memory", "Durable learner memory.", vec!["Notes"]),
+    };
+    ConsolidationTarget {
+        title: title.into(),
+        existing_markdown,
+        allowed_sections: sections.into_iter().map(str::to_string).collect(),
+        focus: focus.into(),
+    }
+}
+
+fn render_event_chunk(events: &[MemoryEvent]) -> String {
+    if events.is_empty() {
+        return String::new();
+    }
+    let refs = events
+        .iter()
+        .map(event_citeable_ref)
+        .map(|reference| format!("- {reference}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let entities = events
+        .iter()
+        .map(|event| {
+            let reference = event_citeable_ref(event);
+            format!(
+                "@entity {reference}\ntitle: {}\nts: {}\ncontent:\n{}\nmetadata:\n{}",
+                event_kind_label(event.category, &event.action),
+                event.created_at.to_rfc3339(),
+                event.summary.trim(),
+                event.payload
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!("# Chunk-local citeable refs\n{refs}\n\n{entities}")
+}
+
+fn facts_from_input_chunk(input: &ConsolidationInput) -> Vec<MemoryFact> {
+    if input.chunk.citeable_refs.is_empty() {
+        return Vec::new();
+    }
+    let section = input
+        .target
+        .allowed_sections
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "Notes".into());
+    input
+        .chunk
+        .text
+        .split("\n\n")
+        .filter(|block| block.starts_with("@entity "))
+        .zip(input.chunk.citeable_refs.iter())
+        .filter_map(|(block, reference)| {
+            let content = block
+                .split("content:\n")
+                .nth(1)?
+                .split("\nmetadata:")
+                .next()?;
+            let text = content.trim();
+            (!text.is_empty()).then(|| MemoryFact {
+                text: text.chars().take(240).collect(),
+                section: section.clone(),
+                refs: vec![reference.clone()],
+            })
+        })
+        .collect()
+}
+
+fn validate_memory_facts(
+    facts: &[MemoryFact],
+    citeable_refs: &[String],
+    allowed_sections: &[String],
+) -> Result<()> {
+    let citeable_refs = citeable_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let allowed_sections = allowed_sections
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    for fact in facts {
+        if fact.text.trim().is_empty() {
+            return Err(anyhow!("memory fact text is empty"));
+        }
+        if !allowed_sections.is_empty() && !allowed_sections.contains(fact.section.trim()) {
+            return Err(anyhow!(
+                "memory fact uses unsupported section `{}`",
+                fact.section
+            ));
+        }
+        if fact.refs.is_empty() {
+            return Err(anyhow!("memory fact must cite at least one source"));
+        }
+        for reference in &fact.refs {
+            if !citeable_refs.contains(reference.as_str()) {
+                return Err(anyhow!(
+                    "memory fact cites unknown source ref `{reference}`"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn assist_check(target_path: &str, markdown: &str) -> MemoryAssistResult {
@@ -533,14 +846,6 @@ fn normalize_memory_line(line: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn short_ref_index(source: &str) -> usize {
-    let mut hash = 0usize;
-    for byte in source.bytes() {
-        hash = hash.wrapping_mul(31).wrapping_add(byte as usize);
-    }
-    hash % 997 + 1
-}
-
 fn clean_optional(value: String) -> Option<String> {
     let value = value.trim().to_string();
     (!value.is_empty()).then_some(value)
@@ -577,6 +882,7 @@ fn default_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn memory_store_creates_skeleton_and_updates_file() {
@@ -645,5 +951,77 @@ mod tests {
         assert_eq!(preview.target_path, "L3/recent.md");
         assert_eq!(preview.event_count, 1);
         assert!(preview.proposed_markdown.contains("Answered OPC"));
+    }
+
+    #[test]
+    fn consolidation_input_normalizes_events_with_citeable_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .record_event(
+                MemoryEventCategory::Quiz,
+                "answered",
+                "Missed an OPC distractor question",
+                Some("quiz-attempt-1".into()),
+                json!({ "question_id": "q1" }),
+            )
+            .unwrap();
+
+        let input = store
+            .consolidation_input("L2/quiz.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert_eq!(input.job.layer, "L2");
+        assert_eq!(input.job.key, "quiz");
+        assert_eq!(input.chunk.citeable_refs, vec!["quiz:quiz-attempt-1"]);
+        assert!(input.chunk.text.contains("@entity quiz:quiz-attempt-1"));
+        assert!(
+            input
+                .target
+                .allowed_sections
+                .contains(&"Weak topics".into())
+        );
+    }
+
+    #[test]
+    fn append_memory_facts_rejects_unciteable_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let err = store
+            .append_memory_facts(
+                "L3/profile.md",
+                "# Student profile\n\n",
+                &[MemoryFact {
+                    text: "Learner needs more visual examples.".into(),
+                    section: "Learning style".into(),
+                    refs: vec!["chat:missing".into()],
+                }],
+                &["chat:existing".into()],
+                &["Learning style".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unknown source ref"));
+    }
+
+    #[test]
+    fn append_memory_facts_rejects_unsupported_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let err = store
+            .append_memory_facts(
+                "L3/profile.md",
+                "# Student profile\n\n",
+                &[MemoryFact {
+                    text: "Learner needs more visual examples.".into(),
+                    section: "Made up".into(),
+                    refs: vec!["chat:existing".into()],
+                }],
+                &["chat:existing".into()],
+                &["Learning style".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unsupported section"));
     }
 }

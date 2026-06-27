@@ -20,13 +20,14 @@ pub struct MemoryWorkflowInput {
     pub target_path: String,
     pub action: MemoryWorkflowAction,
     pub current_markdown: String,
-    pub recent_events_markdown: String,
+    pub consolidation_input_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryWorkflowOutput {
     pub report_markdown: String,
     pub proposed_markdown: Option<String>,
+    pub facts: Vec<MemoryWorkflowFact>,
     pub changed: bool,
 }
 
@@ -34,7 +35,16 @@ pub struct MemoryWorkflowOutput {
 struct MemoryWorkflowJson {
     report_markdown: String,
     proposed_markdown: Option<String>,
+    #[serde(default)]
+    facts: Vec<MemoryWorkflowFact>,
     changed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryWorkflowFact {
+    pub text: String,
+    pub section: String,
+    pub refs: Vec<String>,
 }
 
 pub async fn run_memory_workflow(
@@ -95,7 +105,21 @@ pub fn parse_memory_workflow_output(
             "check workflow must not return proposed_markdown".into(),
         ));
     }
-    if parsed.changed && action != MemoryWorkflowAction::Check && proposed_markdown.is_none() {
+    if action == MemoryWorkflowAction::Update {
+        for fact in &parsed.facts {
+            if fact.text.trim().is_empty() || fact.section.trim().is_empty() || fact.refs.is_empty()
+            {
+                return Err(TutorError::Internal(
+                    "update workflow returned an invalid memory fact".into(),
+                ));
+            }
+        }
+        if parsed.changed && parsed.facts.is_empty() {
+            return Err(TutorError::Internal(
+                "changed update workflow requires facts".into(),
+            ));
+        }
+    } else if parsed.changed && proposed_markdown.is_none() {
         return Err(TutorError::Internal(
             "changed memory workflow requires proposed_markdown".into(),
         ));
@@ -103,6 +127,7 @@ pub fn parse_memory_workflow_output(
     Ok(MemoryWorkflowOutput {
         report_markdown,
         proposed_markdown,
+        facts: parsed.facts,
         changed: parsed.changed,
     })
 }
@@ -114,7 +139,7 @@ fn system_prompt() -> String {
 fn memory_prompt(input: &MemoryWorkflowInput) -> String {
     let action_rules = match input.action {
         MemoryWorkflowAction::Update => {
-            "- Produce a revised Markdown document in proposed_markdown.\n- Consolidate recent events into stable learner memory, not a raw event log.\n- Prefer durable observations over one-off details.\n- Keep existing useful content and improve organization."
+            "- Return memory facts in facts; proposed_markdown must be null.\n- Extract durable observations from the normalized consolidation input, not a raw event log.\n- Prefer learning-relevant facts over one-off chatter.\n- Each fact must cite only refs listed in chunk.citeableRefs.\n- Use only sections listed in target.allowedSections."
         }
         MemoryWorkflowAction::Check => {
             "- Do not change the document.\n- proposed_markdown must be null.\n- Report contradictions, stale facts, missing evidence markers, duplicate points, unclear wording, and risky overgeneralizations."
@@ -123,16 +148,17 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
             "- Produce a revised Markdown document in proposed_markdown.\n- Merge duplicate or overlapping bullets.\n- Preserve source markers and references when still useful.\n- Do not delete unique useful memory."
         }
     };
-    let events = if input.recent_events_markdown.trim().is_empty() {
+    let source = if input.consolidation_input_json.trim().is_empty() {
         "(none)".to_string()
     } else {
-        input.recent_events_markdown.clone()
+        input.consolidation_input_json.clone()
     };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown:\n```markdown\n{current}\n```\n\nRecent workspace events:\n```markdown\n{events}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":\"# Updated markdown\\n... or null\",\"changed\":true}}",
+        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown:\n```markdown\n{current}\n```\n\nNormalized consolidation input:\n```json\n{source}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":null,\"facts\":[{{\"text\":\"concise learner fact\",\"section\":\"one allowed section\",\"refs\":[\"chat:source-id\"]}}],\"changed\":true}}\n\nFor check and dedupe, facts must be []; for update, proposed_markdown must be null.",
         target_path = input.target_path,
         action = input.action,
         current = input.current_markdown,
+        source = source,
     )
 }
 
@@ -156,7 +182,7 @@ fn memory_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
-        "properties": {
+            "properties": {
             "report_markdown": { "type": "string" },
             "proposed_markdown": {
                 "anyOf": [
@@ -164,9 +190,25 @@ fn memory_schema() -> serde_json::Value {
                     { "type": "null" }
                 ]
             },
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "text": { "type": "string" },
+                        "section": { "type": "string" },
+                        "refs": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "required": ["text", "section", "refs"]
+                }
+            },
             "changed": { "type": "boolean" }
         },
-        "required": ["report_markdown", "proposed_markdown", "changed"]
+        "required": ["report_markdown", "proposed_markdown", "facts", "changed"]
     })
 }
 
@@ -220,36 +262,31 @@ mod tests {
     }
 
     #[test]
-    fn rejects_changed_update_without_proposal() {
+    fn rejects_changed_update_without_facts() {
         let err = parse_memory_workflow_output(
             r##"{"report_markdown":"# Report","proposed_markdown":null,"changed":true}"##,
             MemoryWorkflowAction::Update,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("requires proposed_markdown"));
+        assert!(err.to_string().contains("requires facts"));
     }
 
     #[tokio::test]
     async fn workflow_uses_llm_json_response() {
         let provider = Arc::new(MockProvider {
-            text: r##"{"report_markdown":"# Memory report\n\nMerged recent quiz weakness.","proposed_markdown":"# Quiz memory\n\n- Learner should review OPC distractors.","changed":true}"##.into(),
+            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"changed":true}"##.into(),
             json_schema: true,
         });
         let input = MemoryWorkflowInput {
             target_path: "L2/quiz.md".into(),
             action: MemoryWorkflowAction::Update,
             current_markdown: "# Quiz memory\n\n".into(),
-            recent_events_markdown: "- Missed an OPC distractor.".into(),
+            consolidation_input_json: r#"{"chunk":{"citeableRefs":["quiz:q1"]},"target":{"allowedSections":["Weak topics"]}}"#.into(),
         };
         let output = run_memory_workflow_with_client(provider, "mock-model", &input)
             .await
             .unwrap();
         assert!(output.changed);
-        assert!(
-            output
-                .proposed_markdown
-                .unwrap()
-                .contains("OPC distractors")
-        );
+        assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
     }
 }

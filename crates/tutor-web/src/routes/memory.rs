@@ -10,7 +10,7 @@ use axum::{
 use serde::Deserialize;
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
-use crate::memory_store::{MemoryAssistAction, MemoryStore};
+use crate::memory_store::{MemoryAssistAction, MemoryFact, MemoryStore};
 
 #[derive(Deserialize)]
 struct MemoryFileQuery {
@@ -157,26 +157,11 @@ async fn assist_memory_with_llm(
                 .markdown
         }
     };
-    let events = store.recent_events(60).map_err(|err| err.to_string())?;
-    let recent_events_markdown = events
-        .iter()
-        .rev()
-        .map(|event| {
-            format!(
-                "- [{}] {:?}/{}: {}{}",
-                event.created_at.format("%Y-%m-%d %H:%M"),
-                event.category,
-                event.action,
-                event.summary,
-                event
-                    .source_id
-                    .as_deref()
-                    .map(|source| format!(" (source: {source})"))
-                    .unwrap_or_default()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let input = store
+        .consolidation_input(&target_path, action, Some(current.clone()))
+        .map_err(|err| err.to_string())?;
+    let consolidation_input_json =
+        serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?;
     let output = tutor_agent::memory::run_memory_workflow(
         &llm,
         &tutor_agent::memory::MemoryWorkflowInput {
@@ -187,16 +172,40 @@ async fn assist_memory_with_llm(
                 MemoryAssistAction::Dedupe => tutor_agent::memory::MemoryWorkflowAction::Dedupe,
             },
             current_markdown: current,
-            recent_events_markdown,
+            consolidation_input_json,
         },
     )
     .await
     .map_err(|err| err.to_string())?;
+    let proposed_markdown = if action == MemoryAssistAction::Update && output.changed {
+        let facts = output
+            .facts
+            .into_iter()
+            .map(|fact| MemoryFact {
+                text: fact.text,
+                section: fact.section,
+                refs: fact.refs,
+            })
+            .collect::<Vec<_>>();
+        Some(
+            store
+                .append_memory_facts(
+                    &target_path,
+                    &input.target.existing_markdown,
+                    &facts,
+                    &input.chunk.citeable_refs,
+                    &input.target.allowed_sections,
+                )
+                .map_err(|err| err.to_string())?,
+        )
+    } else {
+        output.proposed_markdown
+    };
     Ok(crate::memory_store::MemoryAssistResult {
         target_path,
         action,
         report_markdown: output.report_markdown,
-        proposed_markdown: output.proposed_markdown,
+        proposed_markdown,
         changed: output.changed,
     })
 }
