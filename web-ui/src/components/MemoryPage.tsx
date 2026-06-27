@@ -33,6 +33,12 @@ interface AssistResult {
   action: AssistAction
   report_markdown: string
   proposed_markdown?: string | null
+  edits?: Array<{
+    op: 'replace' | 'delete' | 'insert'
+    start_line: number
+    end_line?: number | null
+    text?: string | null
+  }>
   changed: boolean
 }
 

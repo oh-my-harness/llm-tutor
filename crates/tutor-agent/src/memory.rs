@@ -28,6 +28,7 @@ pub struct MemoryWorkflowOutput {
     pub report_markdown: String,
     pub proposed_markdown: Option<String>,
     pub facts: Vec<MemoryWorkflowFact>,
+    pub edits: Vec<MemoryWorkflowEdit>,
     pub changed: bool,
 }
 
@@ -37,6 +38,8 @@ struct MemoryWorkflowJson {
     proposed_markdown: Option<String>,
     #[serde(default)]
     facts: Vec<MemoryWorkflowFact>,
+    #[serde(default)]
+    edits: Vec<MemoryWorkflowEdit>,
     changed: bool,
 }
 
@@ -45,6 +48,22 @@ pub struct MemoryWorkflowFact {
     pub text: String,
     pub section: String,
     pub refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryWorkflowEdit {
+    pub op: MemoryWorkflowEditOp,
+    pub start_line: usize,
+    pub end_line: Option<usize>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryWorkflowEditOp {
+    Replace,
+    Delete,
+    Insert,
 }
 
 pub async fn run_memory_workflow(
@@ -100,9 +119,9 @@ pub fn parse_memory_workflow_output(
         .proposed_markdown
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    if action == MemoryWorkflowAction::Check && proposed_markdown.is_some() {
+    if proposed_markdown.is_some() {
         return Err(TutorError::Internal(
-            "check workflow must not return proposed_markdown".into(),
+            "memory workflow must not return proposed_markdown".into(),
         ));
     }
     if action == MemoryWorkflowAction::Update {
@@ -119,17 +138,72 @@ pub fn parse_memory_workflow_output(
                 "changed update workflow requires facts".into(),
             ));
         }
-    } else if parsed.changed && proposed_markdown.is_none() {
-        return Err(TutorError::Internal(
-            "changed memory workflow requires proposed_markdown".into(),
-        ));
+        if !parsed.edits.is_empty() {
+            return Err(TutorError::Internal(
+                "update workflow must not return edits".into(),
+            ));
+        }
+    } else {
+        if !parsed.facts.is_empty() {
+            return Err(TutorError::Internal(
+                "check and dedupe workflows must not return facts".into(),
+            ));
+        }
+        for edit in &parsed.edits {
+            validate_workflow_edit(edit)?;
+        }
+        if action == MemoryWorkflowAction::Dedupe && parsed.changed && parsed.edits.is_empty() {
+            return Err(TutorError::Internal(
+                "changed dedupe workflow requires edits".into(),
+            ));
+        }
     }
     Ok(MemoryWorkflowOutput {
         report_markdown,
         proposed_markdown,
         facts: parsed.facts,
+        edits: parsed.edits,
         changed: parsed.changed,
     })
+}
+
+fn validate_workflow_edit(edit: &MemoryWorkflowEdit) -> Result<()> {
+    if edit.start_line == 0 {
+        return Err(TutorError::Internal(
+            "memory edit start_line must be >= 1".into(),
+        ));
+    }
+    match edit.op {
+        MemoryWorkflowEditOp::Replace => {
+            let end_line = edit.end_line.unwrap_or(edit.start_line);
+            if end_line < edit.start_line {
+                return Err(TutorError::Internal(
+                    "memory replace edit has invalid line range".into(),
+                ));
+            }
+            if edit.text.as_deref().unwrap_or_default().trim().is_empty() {
+                return Err(TutorError::Internal(
+                    "memory replace edit requires text".into(),
+                ));
+            }
+        }
+        MemoryWorkflowEditOp::Delete => {
+            let end_line = edit.end_line.unwrap_or(edit.start_line);
+            if end_line < edit.start_line {
+                return Err(TutorError::Internal(
+                    "memory delete edit has invalid line range".into(),
+                ));
+            }
+        }
+        MemoryWorkflowEditOp::Insert => {
+            if edit.text.as_deref().unwrap_or_default().trim().is_empty() {
+                return Err(TutorError::Internal(
+                    "memory insert edit requires text".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn system_prompt() -> String {
@@ -142,10 +216,10 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
             "- Return memory facts in facts; proposed_markdown must be null.\n- Extract durable observations from the normalized consolidation input, not a raw event log.\n- Prefer learning-relevant facts over one-off chatter.\n- Each fact must cite only refs listed in chunk.citeableRefs.\n- Use only sections listed in target.allowedSections."
         }
         MemoryWorkflowAction::Check => {
-            "- Do not change the document.\n- proposed_markdown must be null.\n- Report contradictions, stale facts, missing evidence markers, duplicate points, unclear wording, and risky overgeneralizations."
+            "- Do not return proposed_markdown.\n- Report contradictions, stale facts, missing evidence markers, duplicate points, unclear wording, and risky overgeneralizations.\n- If useful, include suggested line edits in edits, but the product may show them as recommendations instead of applying them."
         }
         MemoryWorkflowAction::Dedupe => {
-            "- Produce a revised Markdown document in proposed_markdown.\n- Merge duplicate or overlapping bullets.\n- Preserve source markers and references when still useful.\n- Do not delete unique useful memory."
+            "- Return line edits in edits; proposed_markdown must be null.\n- Merge duplicate or overlapping bullets.\n- Preserve source markers and references when still useful.\n- Do not delete unique useful memory.\n- Use replace/delete/insert edits against the current Markdown line numbers."
         }
     };
     let source = if input.consolidation_input_json.trim().is_empty() {
@@ -154,12 +228,21 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
         input.consolidation_input_json.clone()
     };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown:\n```markdown\n{current}\n```\n\nNormalized consolidation input:\n```json\n{source}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":null,\"facts\":[{{\"text\":\"concise learner fact\",\"section\":\"one allowed section\",\"refs\":[\"chat:source-id\"]}}],\"changed\":true}}\n\nFor check and dedupe, facts must be []; for update, proposed_markdown must be null.",
+        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers:\n```text\n{numbered_current}\n```\n\nNormalized consolidation input:\n```json\n{source}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":null,\"facts\":[{{\"text\":\"concise learner fact\",\"section\":\"one allowed section\",\"refs\":[\"chat:source-id\"]}}],\"edits\":[{{\"op\":\"delete\",\"start_line\":7,\"end_line\":7,\"text\":null}}],\"changed\":true}}\n\nFor update, edits must be [] and proposed_markdown must be null. For check and dedupe, facts must be [] and proposed_markdown must be null.",
         target_path = input.target_path,
         action = input.action,
-        current = input.current_markdown,
+        numbered_current = line_numbered_markdown(&input.current_markdown),
         source = source,
     )
+}
+
+fn line_numbered_markdown(markdown: &str) -> String {
+    markdown
+        .lines()
+        .enumerate()
+        .map(|(index, line)| format!("{:>4}: {}", index + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn response_text(content: &[ResponseContent]) -> String {
@@ -206,9 +289,33 @@ fn memory_schema() -> serde_json::Value {
                     "required": ["text", "section", "refs"]
                 }
             },
+            "edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "op": { "type": "string", "enum": ["replace", "delete", "insert"] },
+                        "start_line": { "type": "integer", "minimum": 1 },
+                        "end_line": {
+                            "anyOf": [
+                                { "type": "integer", "minimum": 1 },
+                                { "type": "null" }
+                            ]
+                        },
+                        "text": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ]
+                        }
+                    },
+                    "required": ["op", "start_line", "end_line", "text"]
+                }
+            },
             "changed": { "type": "boolean" }
         },
-        "required": ["report_markdown", "proposed_markdown", "facts", "changed"]
+        "required": ["report_markdown", "proposed_markdown", "facts", "edits", "changed"]
     })
 }
 
@@ -253,7 +360,7 @@ mod tests {
     #[test]
     fn parses_check_output_without_proposal() {
         let output = parse_memory_workflow_output(
-            r##"{"report_markdown":"# Report\n\nLooks consistent.","proposed_markdown":null,"changed":false}"##,
+            r##"{"report_markdown":"# Report\n\nLooks consistent.","proposed_markdown":null,"facts":[],"edits":[],"changed":false}"##,
             MemoryWorkflowAction::Check,
         )
         .unwrap();
@@ -264,17 +371,27 @@ mod tests {
     #[test]
     fn rejects_changed_update_without_facts() {
         let err = parse_memory_workflow_output(
-            r##"{"report_markdown":"# Report","proposed_markdown":null,"changed":true}"##,
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[],"edits":[],"changed":true}"##,
             MemoryWorkflowAction::Update,
         )
         .unwrap_err();
         assert!(err.to_string().contains("requires facts"));
     }
 
+    #[test]
+    fn rejects_changed_dedupe_without_edits() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[],"edits":[],"changed":true}"##,
+            MemoryWorkflowAction::Dedupe,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("requires edits"));
+    }
+
     #[tokio::test]
     async fn workflow_uses_llm_json_response() {
         let provider = Arc::new(MockProvider {
-            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"changed":true}"##.into(),
+            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}"##.into(),
             json_schema: true,
         });
         let input = MemoryWorkflowInput {
@@ -288,5 +405,17 @@ mod tests {
             .unwrap();
         assert!(output.changed);
         assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
+    }
+
+    #[test]
+    fn parses_dedupe_edits() {
+        let output = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report\n\nRemoved duplicate.","proposed_markdown":null,"facts":[],"edits":[{"op":"delete","start_line":4,"end_line":4,"text":null}],"changed":true}"##,
+            MemoryWorkflowAction::Dedupe,
+        )
+        .unwrap();
+
+        assert_eq!(output.edits.len(), 1);
+        assert_eq!(output.edits[0].op, MemoryWorkflowEditOp::Delete);
     }
 }

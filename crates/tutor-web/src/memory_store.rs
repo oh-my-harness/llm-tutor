@@ -71,6 +71,7 @@ pub struct MemoryAssistResult {
     pub action: MemoryAssistAction,
     pub report_markdown: String,
     pub proposed_markdown: Option<String>,
+    pub edits: Vec<MemoryTextEdit>,
     pub changed: bool,
 }
 
@@ -141,6 +142,22 @@ pub struct MemoryFact {
     pub text: String,
     pub section: String,
     pub refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryTextEditOp {
+    Replace,
+    Delete,
+    Insert,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryTextEdit {
+    pub op: MemoryTextEditOp,
+    pub start_line: usize,
+    pub end_line: Option<usize>,
+    pub text: Option<String>,
 }
 
 impl MemoryStore {
@@ -437,6 +454,10 @@ impl MemoryStore {
         Ok(proposed)
     }
 
+    pub fn apply_text_edits(&self, current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
+        apply_text_edits(current, edits)
+    }
+
     fn assist_update(&self, target_path: &str, current: &str) -> Result<MemoryAssistResult> {
         let input = self.consolidation_input(
             target_path,
@@ -449,6 +470,7 @@ impl MemoryStore {
                 action: MemoryAssistAction::Update,
                 report_markdown: "No recent workspace events match this memory file.".into(),
                 proposed_markdown: Some(current.to_string()),
+                edits: Vec::new(),
                 changed: false,
             });
         }
@@ -469,6 +491,7 @@ impl MemoryStore {
                 input.chunk.citeable_refs.len()
             ),
             proposed_markdown: Some(proposed),
+            edits: Vec::new(),
             changed: true,
         })
     }
@@ -537,6 +560,79 @@ pub fn serialize_source_ref(reference: &MemorySourceRef) -> Result<String> {
         reference.index,
         reference.target.trim()
     ))
+}
+
+fn apply_text_edits(current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
+    if edits.is_empty() {
+        return Ok(current.to_string());
+    }
+    let mut lines = current.lines().map(str::to_string).collect::<Vec<_>>();
+    let original_len = lines.len();
+    let mut sorted = edits.to_vec();
+    sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line));
+    for edit in sorted {
+        validate_text_edit(&edit, original_len)?;
+        match edit.op {
+            MemoryTextEditOp::Delete => {
+                let start = edit.start_line - 1;
+                let end = edit.end_line.unwrap_or(edit.start_line);
+                lines.drain(start..end);
+            }
+            MemoryTextEditOp::Replace => {
+                let start = edit.start_line - 1;
+                let end = edit.end_line.unwrap_or(edit.start_line);
+                let replacement = edit
+                    .text
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                lines.splice(start..end, replacement);
+            }
+            MemoryTextEditOp::Insert => {
+                let index = edit.start_line - 1;
+                let insertion = edit
+                    .text
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                lines.splice(index..index, insertion);
+            }
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+fn validate_text_edit(edit: &MemoryTextEdit, original_len: usize) -> Result<()> {
+    if edit.start_line == 0 {
+        return Err(anyhow!("memory edit start_line must be >= 1"));
+    }
+    let end_line = edit.end_line.unwrap_or(edit.start_line);
+    match edit.op {
+        MemoryTextEditOp::Replace | MemoryTextEditOp::Delete => {
+            if end_line < edit.start_line {
+                return Err(anyhow!("memory edit has invalid line range"));
+            }
+            if end_line > original_len {
+                return Err(anyhow!("memory edit line range is out of bounds"));
+            }
+            if matches!(edit.op, MemoryTextEditOp::Replace)
+                && edit.text.as_deref().unwrap_or_default().trim().is_empty()
+            {
+                return Err(anyhow!("memory replace edit requires text"));
+            }
+        }
+        MemoryTextEditOp::Insert => {
+            if edit.start_line > original_len + 1 {
+                return Err(anyhow!("memory insert edit line is out of bounds"));
+            }
+            if edit.text.as_deref().unwrap_or_default().trim().is_empty() {
+                return Err(anyhow!("memory insert edit requires text"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn event_file(category: MemoryEventCategory) -> &'static str {
@@ -789,6 +885,7 @@ fn assist_check(target_path: &str, markdown: &str) -> MemoryAssistResult {
         action: MemoryAssistAction::Check,
         report_markdown: report.join("\n"),
         proposed_markdown: None,
+        edits: Vec::new(),
         changed: false,
     }
 }
@@ -817,6 +914,7 @@ fn assist_dedupe(target_path: &str, markdown: &str) -> MemoryAssistResult {
             format!("Removed {removed} duplicate bullet/source-ref lines.")
         },
         proposed_markdown: Some(proposed),
+        edits: Vec::new(),
         changed: removed > 0,
     }
 }
@@ -1023,5 +1121,56 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("unsupported section"));
+    }
+
+    #[test]
+    fn apply_text_edits_deletes_and_replaces_by_original_line_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current =
+            "# Quiz memory\n\n- Same fact. <!--m_1-->\n- Same fact. <!--m_2-->\n- Keep this.";
+
+        let proposed = store
+            .apply_text_edits(
+                current,
+                &[
+                    MemoryTextEdit {
+                        op: MemoryTextEditOp::Replace,
+                        start_line: 5,
+                        end_line: Some(5),
+                        text: Some("- Keep this useful fact.".into()),
+                    },
+                    MemoryTextEdit {
+                        op: MemoryTextEditOp::Delete,
+                        start_line: 4,
+                        end_line: Some(4),
+                        text: None,
+                    },
+                ],
+            )
+            .unwrap();
+
+        assert!(proposed.contains("- Same fact. <!--m_1-->"));
+        assert!(!proposed.contains("<!--m_2-->"));
+        assert!(proposed.contains("- Keep this useful fact."));
+    }
+
+    #[test]
+    fn apply_text_edits_rejects_out_of_bounds_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let err = store
+            .apply_text_edits(
+                "# Profile\n",
+                &[MemoryTextEdit {
+                    op: MemoryTextEditOp::Delete,
+                    start_line: 5,
+                    end_line: Some(5),
+                    text: None,
+                }],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("out of bounds"));
     }
 }
