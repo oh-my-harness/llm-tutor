@@ -671,13 +671,23 @@ impl MemoryStore {
         validate_memory_facts(&target_path, facts, citeable_refs, allowed_sections)?;
 
         let mut entries = parse_memory_entries(current);
-        entries.extend(facts.iter().map(|fact| MemoryEntry {
-            line_number: 0,
-            section: Some(fact.section.trim().to_string()),
-            text: fact.text.trim().to_string(),
-            marker: format!("m_{}", uuid::Uuid::new_v4().simple()),
-            source_refs: fact.refs.clone(),
-        }));
+        for fact in facts {
+            let normalized = normalize_memory_fact_text(&fact.text);
+            if let Some(entry) = entries
+                .iter_mut()
+                .find(|entry| normalize_memory_fact_text(&entry.text) == normalized)
+            {
+                merge_source_refs(&mut entry.source_refs, &fact.refs);
+                continue;
+            }
+            entries.push(MemoryEntry {
+                line_number: 0,
+                section: Some(fact.section.trim().to_string()),
+                text: fact.text.trim().to_string(),
+                marker: format!("m_{}", uuid::Uuid::new_v4().simple()),
+                source_refs: fact.refs.clone(),
+            });
+        }
         let title = memory_title(current)
             .unwrap_or_else(|| target_catalog(&target_path, String::new()).title);
         normalize_memory_markdown(&serialize_memory_entries(&title, &entries)?)
@@ -1700,6 +1710,28 @@ fn normalize_memory_line(line: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn normalize_memory_fact_text(text: &str) -> String {
+    text.split("<!--")
+        .next()
+        .unwrap_or(text)
+        .split("[^")
+        .next()
+        .unwrap_or(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['.', '。'])
+        .to_ascii_lowercase()
+}
+
+fn merge_source_refs(target: &mut Vec<String>, refs: &[String]) {
+    for reference in refs {
+        if !target.iter().any(|item| item == reference) {
+            target.push(reference.clone());
+        }
+    }
+}
+
 fn has_memory_content(markdown: &str) -> bool {
     markdown
         .lines()
@@ -2291,6 +2323,72 @@ mod tests {
         assert!(proposed.contains("Learner answers lithography basics correctly. [^2]"));
         assert_eq!(proposed.matches("[^1]: quiz:q1").count(), 1);
         assert_eq!(proposed.matches("[^2]: quiz:q2").count(), 1);
+    }
+
+    #[test]
+    fn append_memory_facts_merges_existing_duplicate_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Quiz memory\n\n## Weak topics\n\n- Learner should review OPC distractors. [^1] <!--m_existing-->\n\n---\n\n[^1]: quiz:q1";
+
+        let proposed = store
+            .append_memory_facts(
+                "L2/quiz.md",
+                current,
+                &[MemoryFact {
+                    text: "Learner should review OPC distractors.".into(),
+                    section: "Weak topics".into(),
+                    refs: vec!["quiz:q2".into()],
+                }],
+                &["quiz:q1".into(), "quiz:q2".into()],
+                &["Weak topics".into()],
+            )
+            .unwrap();
+
+        assert_eq!(
+            proposed
+                .matches("Learner should review OPC distractors")
+                .count(),
+            1
+        );
+        assert!(proposed.contains("Learner should review OPC distractors. [^1] [^2]"));
+        assert!(proposed.contains("[^1]: quiz:q1"));
+        assert!(proposed.contains("[^2]: quiz:q2"));
+        assert!(proposed.contains("<!--m_existing-->"));
+    }
+
+    #[test]
+    fn append_memory_facts_merges_duplicate_facts_in_same_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+
+        let proposed = store
+            .append_memory_facts(
+                "L2/chat.md",
+                "# Chat memory\n\n",
+                &[
+                    MemoryFact {
+                        text: "Learner prefers visual examples.".into(),
+                        section: "Topics".into(),
+                        refs: vec!["chat:s1".into()],
+                    },
+                    MemoryFact {
+                        text: "Learner prefers visual examples".into(),
+                        section: "Topics".into(),
+                        refs: vec!["chat:s2".into()],
+                    },
+                ],
+                &["chat:s1".into(), "chat:s2".into()],
+                &["Topics".into()],
+            )
+            .unwrap();
+
+        assert_eq!(
+            proposed.matches("Learner prefers visual examples").count(),
+            1
+        );
+        assert!(proposed.contains("[^1]: chat:s1"));
+        assert!(proposed.contains("[^2]: chat:s2"));
     }
 
     #[test]
