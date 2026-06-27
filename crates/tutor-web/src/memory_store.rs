@@ -385,8 +385,15 @@ impl MemoryStore {
                 .map(|file| file.markdown)
                 .unwrap_or_default()
         });
-        let events = recent_events_for_target(self.recent_events(60)?, &target_path);
-        let citeable_refs = events.iter().map(event_citeable_ref).collect::<Vec<_>>();
+        let (citeable_refs, text) = if target_path.starts_with("L3/") {
+            self.l3_source_chunk()?
+        } else {
+            let events = recent_events_for_target(self.recent_events(60)?, &target_path);
+            (
+                events.iter().map(event_citeable_ref).collect::<Vec<_>>(),
+                render_event_chunk(&events),
+            )
+        };
         Ok(ConsolidationInput {
             job: ConsolidationJob {
                 mode: match action {
@@ -413,9 +420,44 @@ impl MemoryStore {
                 index: 1,
                 total: 1,
                 citeable_refs,
-                text: render_event_chunk(&events),
+                text,
             },
         })
+    }
+
+    fn l3_source_chunk(&self) -> Result<(Vec<String>, String)> {
+        let mut refs = Vec::new();
+        let mut entities = Vec::new();
+        for (surface, path) in [
+            ("chat", "L2/chat.md"),
+            ("quiz", "L2/quiz.md"),
+            ("notebook", "L2/notebook.md"),
+            ("research", "L2/research.md"),
+        ] {
+            let markdown = self.read(path)?.markdown;
+            if !has_memory_content(&markdown) {
+                continue;
+            }
+            refs.push(surface.to_string());
+            entities.push(format!(
+                "@entity {surface}\ntitle: {path}\ncontent:\n{}",
+                markdown.trim()
+            ));
+        }
+        let text = if refs.is_empty() {
+            String::new()
+        } else {
+            let rendered_refs = refs
+                .iter()
+                .map(|reference| format!("- {reference}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                "# Chunk-local citeable refs\n{rendered_refs}\n\n{}",
+                entities.join("\n\n")
+            )
+        };
+        Ok((refs, text))
     }
 
     pub fn append_memory_facts(
@@ -430,7 +472,7 @@ impl MemoryStore {
         if facts.is_empty() {
             return Ok(current.to_string());
         }
-        validate_memory_facts(facts, citeable_refs, allowed_sections)?;
+        validate_memory_facts(&target_path, facts, citeable_refs, allowed_sections)?;
 
         let mut proposed = current.trim().to_string();
         if proposed.is_empty() {
@@ -947,10 +989,18 @@ fn facts_from_input_chunk(input: &ConsolidationInput) -> Vec<MemoryFact> {
     input
         .chunk
         .text
-        .split("\n\n")
-        .filter(|block| block.starts_with("@entity "))
-        .zip(input.chunk.citeable_refs.iter())
-        .filter_map(|(block, reference)| {
+        .split("@entity ")
+        .skip(1)
+        .filter_map(|block| {
+            let reference = block.lines().next()?.trim();
+            if !input
+                .chunk
+                .citeable_refs
+                .iter()
+                .any(|item| item == reference)
+            {
+                return None;
+            }
             let content = block
                 .split("content:\n")
                 .nth(1)?
@@ -960,13 +1010,14 @@ fn facts_from_input_chunk(input: &ConsolidationInput) -> Vec<MemoryFact> {
             (!text.is_empty()).then(|| MemoryFact {
                 text: text.chars().take(240).collect(),
                 section: section.clone(),
-                refs: vec![reference.clone()],
+                refs: vec![reference.to_string()],
             })
         })
         .collect()
 }
 
 fn validate_memory_facts(
+    target_path: &str,
     facts: &[MemoryFact],
     citeable_refs: &[String],
     allowed_sections: &[String],
@@ -993,6 +1044,13 @@ fn validate_memory_facts(
             return Err(anyhow!("memory fact must cite at least one source"));
         }
         for reference in &fact.refs {
+            if target_path.starts_with("L3/") {
+                if reference.contains(':') || category_for_surface(reference).is_none() {
+                    return Err(anyhow!(
+                        "L3 memory fact must cite a bare allowed surface, got `{reference}`"
+                    ));
+                }
+            }
             if !citeable_refs.contains(reference.as_str()) {
                 return Err(anyhow!(
                     "memory fact cites unknown source ref `{reference}`"
@@ -1104,6 +1162,12 @@ fn normalize_memory_line(line: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_ascii_lowercase()
+}
+
+fn has_memory_content(markdown: &str) -> bool {
+    markdown
+        .lines()
+        .any(|line| line.trim_start().starts_with("- "))
 }
 
 fn clean_optional(value: String) -> Option<String> {
@@ -1295,7 +1359,57 @@ mod tests {
     }
 
     #[test]
+    fn l3_consolidation_input_uses_l2_memory_surfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n- Learner often asks for visual explanations. <!--m_chat-->"
+                    .into(),
+            )
+            .unwrap();
+        store
+            .write(
+                "L2/quiz.md",
+                "# Quiz memory\n\n- Learner missed OPC distractors. <!--m_quiz-->".into(),
+            )
+            .unwrap();
+
+        let input = store
+            .consolidation_input("L3/profile.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert_eq!(input.job.layer, "L3");
+        assert_eq!(input.chunk.citeable_refs, vec!["chat", "quiz"]);
+        assert!(input.chunk.text.contains("@entity chat"));
+        assert!(input.chunk.text.contains("@entity quiz"));
+        assert!(!input.chunk.text.contains("chat:"));
+    }
+
+    #[test]
     fn append_memory_facts_rejects_unciteable_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let err = store
+            .append_memory_facts(
+                "L2/chat.md",
+                "# Chat memory\n\n",
+                &[MemoryFact {
+                    text: "Learner needs more visual examples.".into(),
+                    section: "Topics".into(),
+                    refs: vec!["chat:missing".into()],
+                }],
+                &["chat:existing".into()],
+                &["Topics".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unknown source ref"));
+    }
+
+    #[test]
+    fn append_l3_memory_facts_rejects_l1_style_refs() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
         let err = store
@@ -1303,16 +1417,16 @@ mod tests {
                 "L3/profile.md",
                 "# Student profile\n\n",
                 &[MemoryFact {
-                    text: "Learner needs more visual examples.".into(),
+                    text: "Learner benefits from visual examples.".into(),
                     section: "Learning style".into(),
-                    refs: vec!["chat:missing".into()],
+                    refs: vec!["chat:session-1".into()],
                 }],
-                &["chat:existing".into()],
+                &["chat:session-1".into()],
                 &["Learning style".into()],
             )
             .unwrap_err();
 
-        assert!(err.to_string().contains("unknown source ref"));
+        assert!(err.to_string().contains("bare allowed surface"));
     }
 
     #[test]
