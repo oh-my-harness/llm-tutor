@@ -299,6 +299,7 @@ impl SolveOrchestrator {
         use std::sync::Arc;
         use tutor_tools::{
             CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool,
+            WriteMemoryTool,
         };
 
         use crate::phase_manager::PhaseManager;
@@ -369,6 +370,7 @@ impl SolveOrchestrator {
 
             let solve_tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
                 Arc::new(ReadMemoryTool::new()),
+                Arc::new(WriteMemoryTool::new()),
                 Arc::new(RagSearchTool::new()),
                 Arc::new(match self.web_search.clone() {
                     Some(config) => WebSearchTool::with_config(config),
@@ -385,6 +387,7 @@ impl SolveOrchestrator {
             let phase_mgr = Arc::new(PhaseManager::new(vec![
                 "rag_search".into(),
                 "read_memory".into(),
+                "write_memory".into(),
                 "web_search".into(),
                 "web_fetch".into(),
                 "code_exec".into(),
@@ -399,7 +402,8 @@ impl SolveOrchestrator {
                     "You are solving step {id}: {goal}\n\
                      Use read_memory when the step should adapt to the learner's prior weaknesses, \
                      preferences, recent learning state, or teaching strategy. Memory is learner context, \
-                     not a factual source. Use rag_search for course knowledge, web_search for external discovery, \
+                     not a factual source. Use write_memory only when the user explicitly asks you to remember \
+                     a durable preference or approves recording it. Use rag_search for course knowledge, web_search for external discovery, \
                      web_fetch to read important source pages, and code_exec to run code.\n\
                      For non-trivial numeric calculations, approximations, transcendental functions, \
                      statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
