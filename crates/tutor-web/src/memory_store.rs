@@ -116,6 +116,14 @@ pub struct MemorySourceRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryEntry {
+    pub line_number: usize,
+    pub text: String,
+    pub marker: String,
+    pub source_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsolidationMode {
     Update,
@@ -712,6 +720,79 @@ pub fn parse_source_refs(markdown: &str) -> Vec<MemorySourceRef> {
     markdown.lines().filter_map(parse_source_ref_line).collect()
 }
 
+pub fn parse_memory_entries(markdown: &str) -> Vec<MemoryEntry> {
+    let definitions = parse_source_refs(markdown)
+        .into_iter()
+        .map(|reference| (reference.index, reference.target))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    markdown
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| parse_memory_entry_line(index + 1, line, &definitions))
+        .collect()
+}
+
+pub fn serialize_memory_entries(title: &str, entries: &[MemoryEntry]) -> Result<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(anyhow!("memory title is empty"));
+    }
+    let mut refs_by_target = std::collections::BTreeMap::<String, usize>::new();
+    let mut next_ref = 1usize;
+    let mut lines = vec![format!("# {title}")];
+    if !entries.is_empty() {
+        lines.push(String::new());
+    }
+    for entry in entries {
+        if entry.text.trim().is_empty() {
+            return Err(anyhow!("memory entry text is empty"));
+        }
+        let marker = serialize_memory_marker(&entry.marker)?;
+        let refs = entry
+            .source_refs
+            .iter()
+            .filter_map(|target| {
+                let target = target.trim();
+                if target.is_empty() {
+                    return None;
+                }
+                let index = if let Some(index) = refs_by_target.get(target) {
+                    *index
+                } else {
+                    let index = next_ref;
+                    next_ref += 1;
+                    refs_by_target.insert(target.to_string(), index);
+                    index
+                };
+                Some(format!("[^{index}]"))
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let refs = if refs.is_empty() {
+            String::new()
+        } else {
+            format!(" {refs}")
+        };
+        lines.push(format!("- {}{} {}", entry.text.trim(), refs, marker));
+    }
+    if !refs_by_target.is_empty() {
+        lines.push(String::new());
+        lines.push("---".into());
+        lines.push(String::new());
+        let refs = refs_by_target
+            .iter()
+            .map(|(target, index)| {
+                serialize_source_ref(&MemorySourceRef {
+                    index: *index,
+                    target: target.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        lines.extend(refs);
+    }
+    Ok(lines.join("\n"))
+}
+
 pub fn serialize_memory_marker(id: &str) -> Result<String> {
     let id = id.trim();
     if id.is_empty() || !id.starts_with("m_") || id.contains("-->") {
@@ -799,6 +880,74 @@ fn parse_source_ref_line(line: &str) -> Option<MemorySourceRef> {
         index: index.parse().ok()?,
         target: target.trim().to_string(),
     })
+}
+
+fn parse_memory_entry_line(
+    line_number: usize,
+    line: &str,
+    definitions: &std::collections::BTreeMap<usize, String>,
+) -> Option<MemoryEntry> {
+    let trimmed = line.trim();
+    let bullet = trimmed.strip_prefix("- ")?;
+    let marker = marker_in_line(bullet)?;
+    let source_refs = footnote_indices_in_line(bullet)
+        .into_iter()
+        .filter_map(|index| definitions.get(&index).cloned())
+        .collect::<Vec<_>>();
+    let text = strip_entry_markup(bullet).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some(MemoryEntry {
+        line_number,
+        text,
+        marker,
+        source_refs,
+    })
+}
+
+fn marker_in_line(line: &str) -> Option<String> {
+    let start = line.find("<!--")?;
+    let rest = &line[start + 4..];
+    let end = rest.find("-->")?;
+    let marker = rest[..end].trim();
+    marker.starts_with("m_").then(|| marker.to_string())
+}
+
+fn strip_entry_markup(line: &str) -> String {
+    let mut output = String::new();
+    let mut rest = line;
+    loop {
+        let footnote_pos = rest.find("[^");
+        let marker_pos = rest.find("<!--");
+        let Some(next_pos) = (match (footnote_pos, marker_pos) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }) else {
+            output.push_str(rest);
+            break;
+        };
+        output.push_str(&rest[..next_pos]);
+        rest = &rest[next_pos..];
+        if rest.starts_with("[^") {
+            if let Some(end) = rest.find(']') {
+                rest = &rest[end + 1..];
+            } else {
+                output.push_str(rest);
+                break;
+            }
+        } else if rest.starts_with("<!--") {
+            if let Some(end) = rest.find("-->") {
+                rest = &rest[end + 3..];
+            } else {
+                output.push_str(rest);
+                break;
+            }
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn footnote_indices_in_line(line: &str) -> Vec<usize> {
@@ -1435,6 +1584,37 @@ mod tests {
         assert!(!normalized.contains("chat:unused"));
         assert!(!normalized.contains("quiz:unused"));
         assert!(!normalized.contains("[^2]:"));
+    }
+
+    #[test]
+    fn memory_entries_round_trip_with_shared_source_refs() {
+        let markdown = "# Quiz memory\n\n- First fact. [^2] <!--m_1-->\n- Second fact. [^3] <!--m_2-->\n\n---\n\n[^2]: quiz:q1\n[^3]: quiz:q1\n[^4]: quiz:unused";
+
+        let entries = parse_memory_entries(markdown);
+        let serialized = serialize_memory_entries("Quiz memory", &entries).unwrap();
+        let reparsed = parse_memory_entries(&serialized);
+
+        assert_eq!(entries, reparsed);
+        assert!(serialized.contains("- First fact. [^1] <!--m_1-->"));
+        assert!(serialized.contains("- Second fact. [^1] <!--m_2-->"));
+        assert!(serialized.contains("[^1]: quiz:q1"));
+        assert!(!serialized.contains("quiz:unused"));
+        assert!(!serialized.contains("[^2]:"));
+    }
+
+    #[test]
+    fn memory_entry_serializer_removes_refs_for_deleted_entries() {
+        let markdown = "# Chat memory\n\n- Keep this. [^1] <!--m_keep-->\n- Delete this. [^2] <!--m_drop-->\n\n---\n\n[^1]: chat:keep\n[^2]: chat:drop";
+        let entries = parse_memory_entries(markdown)
+            .into_iter()
+            .filter(|entry| entry.marker != "m_drop")
+            .collect::<Vec<_>>();
+
+        let serialized = serialize_memory_entries("Chat memory", &entries).unwrap();
+
+        assert!(serialized.contains("chat:keep"));
+        assert!(!serialized.contains("chat:drop"));
+        assert_eq!(parse_memory_entries(&serialized).len(), 1);
     }
 
     #[test]
