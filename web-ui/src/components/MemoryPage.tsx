@@ -20,6 +20,12 @@ import { settingsForSession, type LlmSettings } from '../settings'
 type Layer = 'overview' | 'L2' | 'L3'
 type AssistAction = 'update' | 'check' | 'dedupe'
 type ViewMode = 'rendered' | 'source'
+type MemoryEdit = {
+  op: 'replace' | 'delete' | 'insert'
+  start_line: number
+  end_line?: number | null
+  text?: string | null
+}
 
 interface MemoryFile {
   path: string
@@ -33,12 +39,7 @@ interface AssistResult {
   action: AssistAction
   report_markdown: string
   proposed_markdown?: string | null
-  edits?: Array<{
-    op: 'replace' | 'delete' | 'insert'
-    start_line: number
-    end_line?: number | null
-    text?: string | null
-  }>
+  edits?: MemoryEdit[]
   changed: boolean
 }
 
@@ -144,9 +145,6 @@ export function MemoryPage({ settings }: { settings: LlmSettings }) {
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const result = data.result as AssistResult
       setAssistResult(result)
-      if (result.proposed_markdown && action !== 'check') {
-        setDraft(result.proposed_markdown)
-      }
       setStatus(`${assistLabel(action)} complete`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
@@ -182,6 +180,10 @@ export function MemoryPage({ settings }: { settings: LlmSettings }) {
             onViewModeChange={setViewMode}
             onSave={() => void saveActiveFile()}
             onRunAssist={(action) => void runAssist(action)}
+            onApplyProposal={(markdown) => {
+              setDraft(markdown)
+              setStatus('Memory draft updated from agent proposal')
+            }}
             onReset={() => {
               setDraft(activeFile?.markdown ?? '')
               setAssistResult(null)
@@ -320,6 +322,7 @@ function LayerWorkspace({
   onViewModeChange,
   onSave,
   onRunAssist,
+  onApplyProposal,
   onReset,
 }: {
   layer: 'L2' | 'L3'
@@ -336,6 +339,7 @@ function LayerWorkspace({
   onViewModeChange: (mode: ViewMode) => void
   onSave: () => void
   onRunAssist: (action: AssistAction) => void
+  onApplyProposal: (markdown: string) => void
   onReset: () => void
 }) {
   return (
@@ -418,6 +422,7 @@ function LayerWorkspace({
           loading={loading}
           assistResult={assistResult}
           onRunAssist={onRunAssist}
+          onApplyProposal={onApplyProposal}
           onReset={onReset}
         />
       </div>
@@ -429,11 +434,13 @@ function AgentWorkspace({
   loading,
   assistResult,
   onRunAssist,
+  onApplyProposal,
   onReset,
 }: {
   loading: boolean
   assistResult: AssistResult | null
   onRunAssist: (action: AssistAction) => void
+  onApplyProposal: (markdown: string) => void
   onReset: () => void
 }) {
   return (
@@ -456,8 +463,21 @@ function AgentWorkspace({
         {assistResult ? (
           <article className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
             <MarkdownMessage text={assistResult.report_markdown} />
+            {assistResult.edits && assistResult.edits.length > 0 && (
+              <EditPreview edits={assistResult.edits} />
+            )}
             {assistResult.changed && (
-              <p className="mt-4 text-sm text-blue-700">已生成可保存的 Markdown 草稿，请检查左侧内容后点击保存。</p>
+              <p className="mt-4 text-sm text-blue-700">已生成可预览的记忆变更，请检查 edits 和报告后再应用到草稿。</p>
+            )}
+            {assistResult.proposed_markdown && (
+              <button
+                className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
+                type="button"
+                onClick={() => onApplyProposal(assistResult.proposed_markdown ?? '')}
+              >
+                <Wand2 size={15} />
+                应用到草稿
+              </button>
             )}
           </article>
         ) : (
@@ -477,6 +497,29 @@ function AgentWorkspace({
   )
 }
 
+function EditPreview({ edits }: { edits: MemoryEdit[] }) {
+  return (
+    <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Line edits</div>
+      <div className="space-y-2">
+        {edits.map((edit, index) => (
+          <div key={`${edit.op}-${edit.start_line}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-700">
+            <div className="flex items-center gap-2">
+              <span className={`rounded px-1.5 py-0.5 font-medium ${editBadgeClassName(edit.op)}`}>{edit.op}</span>
+              <span>{formatEditRange(edit)}</span>
+            </div>
+            {edit.text && (
+              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-[11px] leading-5 text-gray-700">
+                {edit.text}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AssistButton({ icon: Icon, label, disabled, onClick }: { icon: typeof Brain; label: string; disabled: boolean; onClick: () => void }) {
   return (
     <button className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50" disabled={disabled} type="button" onClick={onClick}>
@@ -484,6 +527,17 @@ function AssistButton({ icon: Icon, label, disabled, onClick }: { icon: typeof B
       {label}
     </button>
   )
+}
+
+function formatEditRange(edit: MemoryEdit) {
+  const end = edit.end_line ?? edit.start_line
+  return end === edit.start_line ? `line ${edit.start_line}` : `lines ${edit.start_line}-${end}`
+}
+
+function editBadgeClassName(op: MemoryEdit['op']) {
+  if (op === 'delete') return 'bg-red-50 text-red-700'
+  if (op === 'replace') return 'bg-amber-50 text-amber-700'
+  return 'bg-green-50 text-green-700'
 }
 
 function memoryFileLabel(path: string) {
