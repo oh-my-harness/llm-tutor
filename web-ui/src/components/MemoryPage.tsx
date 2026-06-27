@@ -8,6 +8,7 @@ import {
   GitBranch,
   Layers3,
   RefreshCw,
+  RotateCcw,
   Save,
   Send,
   Sparkles,
@@ -126,6 +127,30 @@ export function MemoryPage({ settings }: { settings: LlmSettings }) {
     }
   }
 
+  const undoActiveFile = async () => {
+    if (!activeFile) return
+    setLoading(true)
+    try {
+      const res = await fetch('/api/memory/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_path: activeFile.path }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const updated = (data.result as { file?: MemoryFile }).file
+      if (!updated) throw new Error('Undo response did not include a memory file')
+      setFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
+      setDraft(updated.markdown)
+      setAssistResult(null)
+      setStatus('Memory restored from latest snapshot')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const runAssist = async (action: AssistAction) => {
     if (!activeFile) return
     const llm = settingsForSession(settings)
@@ -183,6 +208,7 @@ export function MemoryPage({ settings }: { settings: LlmSettings }) {
             onDraftChange={setDraft}
             onViewModeChange={setViewMode}
             onSave={() => void saveActiveFile()}
+            onUndo={() => void undoActiveFile()}
             onRunAssist={(action) => void runAssist(action)}
             onApplyProposal={(markdown) => {
               setDraft(markdown)
@@ -325,6 +351,7 @@ function LayerWorkspace({
   onDraftChange,
   onViewModeChange,
   onSave,
+  onUndo,
   onRunAssist,
   onApplyProposal,
   onReset,
@@ -342,6 +369,7 @@ function LayerWorkspace({
   onDraftChange: (value: string) => void
   onViewModeChange: (mode: ViewMode) => void
   onSave: () => void
+  onUndo: () => void
   onRunAssist: (action: AssistAction) => void
   onApplyProposal: (markdown: string) => void
   onReset: () => void
@@ -405,6 +433,10 @@ function LayerWorkspace({
             <button className={secondaryButtonClassName} type="button" disabled={loading || !activeFile || draft === activeFile.markdown} onClick={onSave}>
               <Save size={16} />
               保存
+            </button>
+            <button className={secondaryButtonClassName} type="button" disabled={loading || !activeFile} onClick={onUndo}>
+              <RotateCcw size={16} />
+              撤销
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-5">

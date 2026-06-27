@@ -39,6 +39,12 @@ pub struct MemoryFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryUndoResult {
+    pub file: MemoryFile,
+    pub restored_from: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEvent {
     pub id: String,
     pub category: MemoryEventCategory,
@@ -226,8 +232,29 @@ impl MemoryStore {
         if markdown.trim().is_empty() {
             return Err(anyhow!("memory markdown is empty"));
         }
-        fs::write(self.root.join(&path), markdown)?;
+        let full_path = self.root.join(&path);
+        if full_path.exists() {
+            self.write_undo_snapshot(&path, &fs::read_to_string(&full_path)?)?;
+        }
+        fs::write(full_path, markdown)?;
         self.read(&path_to_slash(&path))
+    }
+
+    pub fn undo_latest_write(&self, path: &str) -> Result<MemoryUndoResult> {
+        self.ensure_skeleton()?;
+        let path = normalize_memory_path(path)?;
+        let undo_path = self.undo_path(&path);
+        if !undo_path.exists() {
+            return Err(anyhow!("no memory undo snapshot exists for this file"));
+        }
+        let markdown = fs::read_to_string(&undo_path)?;
+        fs::write(self.root.join(&path), markdown)?;
+        fs::remove_file(&undo_path)?;
+        let restored_from = path_to_slash(&path);
+        Ok(MemoryUndoResult {
+            file: self.read(&restored_from)?,
+            restored_from,
+        })
     }
 
     pub fn record_event(
@@ -585,6 +612,7 @@ impl MemoryStore {
         for dir in DEFAULT_DIRS {
             fs::create_dir_all(self.root.join(dir))?;
         }
+        fs::create_dir_all(self.root.join(".undo"))?;
         for (path, default_markdown) in DEFAULT_FILES {
             let full_path = self.root.join(path);
             if !full_path.exists() {
@@ -592,6 +620,19 @@ impl MemoryStore {
             }
         }
         Ok(())
+    }
+
+    fn write_undo_snapshot(&self, path: &Path, markdown: &str) -> Result<()> {
+        let undo_path = self.undo_path(path);
+        if let Some(parent) = undo_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(undo_path, markdown)?;
+        Ok(())
+    }
+
+    fn undo_path(&self, path: &Path) -> PathBuf {
+        self.root.join(".undo").join(path).with_extension("md.bak")
     }
 }
 
@@ -1284,6 +1325,25 @@ mod tests {
         assert!(updated.markdown.contains("- Same source. [^1]"));
         assert!(updated.markdown.contains("[^1]: quiz:q1"));
         assert!(!updated.markdown.contains("quiz:unused"));
+    }
+
+    #[test]
+    fn memory_store_can_undo_latest_write_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .write("L2/chat.md", "# Chat memory\n\n- Original.".into())
+            .unwrap();
+        store
+            .write("L2/chat.md", "# Chat memory\n\n- Changed.".into())
+            .unwrap();
+
+        let restored = store.undo_latest_write("L2/chat.md").unwrap();
+
+        assert!(restored.file.markdown.contains("Original"));
+        assert!(!restored.file.markdown.contains("Changed"));
+        let err = store.undo_latest_write("L2/chat.md").unwrap_err();
+        assert!(err.to_string().contains("no memory undo snapshot"));
     }
 
     #[test]

@@ -42,6 +42,11 @@ struct ApplyConsolidationRequest {
 }
 
 #[derive(Deserialize)]
+struct UndoMemoryRequest {
+    target_path: String,
+}
+
+#[derive(Deserialize)]
 struct AssistMemoryRequest {
     target_path: String,
     action: MemoryAssistAction,
@@ -132,6 +137,20 @@ async fn apply_consolidation(
 ) -> impl IntoResponse {
     match store.write(&req.target_path, req.markdown) {
         Ok(file) => (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response(),
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    }
+}
+
+async fn undo_memory(
+    State(store): State<Arc<MemoryStore>>,
+    Json(req): Json<UndoMemoryRequest>,
+) -> impl IntoResponse {
+    match store.undo_latest_write(&req.target_path) {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "result": result })),
+        )
+            .into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
@@ -304,6 +323,7 @@ pub fn memory_router(store: Arc<MemoryStore>) -> Router {
             "/api/memory/consolidate/apply",
             axum::routing::post(apply_consolidation),
         )
+        .route("/api/memory/undo", axum::routing::post(undo_memory))
         .route("/api/memory/assist", axum::routing::post(assist_memory))
         .with_state(store)
 }
@@ -457,6 +477,45 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body["result"]["changed"], true);
+    }
+
+    #[tokio::test]
+    async fn undo_restores_latest_memory_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        store
+            .write("L2/chat.md", "# Chat memory\n\n- Original.".into())
+            .unwrap();
+        let app = memory_router(store);
+
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                Method::PATCH,
+                "/api/memory/file?path=L2%2Fchat.md",
+                serde_json::json!({ "markdown": "# Chat memory\n\n- Changed." }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(json_request(
+                Method::POST,
+                "/api/memory/undo",
+                serde_json::json!({ "target_path": "L2/chat.md" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert!(
+            body["result"]["file"]["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("Original")
+        );
     }
 
     #[tokio::test]
