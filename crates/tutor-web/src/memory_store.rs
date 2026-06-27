@@ -130,6 +130,7 @@ pub struct MemorySourceRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryEntry {
     pub line_number: usize,
+    pub section: Option<String>,
     pub text: String,
     pub marker: String,
     pub source_refs: Vec<String>,
@@ -666,66 +667,17 @@ impl MemoryStore {
         }
         validate_memory_facts(&target_path, facts, citeable_refs, allowed_sections)?;
 
-        let mut proposed = current.trim().to_string();
-        if proposed.is_empty() {
-            proposed = target_catalog(&target_path, String::new()).title;
-            proposed = format!("# {proposed}");
-        }
-
-        let mut existing_refs = parse_source_refs(&proposed)
-            .into_iter()
-            .map(|reference| (reference.target, reference.index))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut next_index = existing_refs.values().copied().max().unwrap_or(0) + 1;
-        let mut ref_lines = Vec::new();
-        let mut body_lines = Vec::new();
-        for fact in facts {
-            let footnotes = fact
-                .refs
-                .iter()
-                .map(|reference| {
-                    let index = if let Some(index) = existing_refs.get(reference) {
-                        *index
-                    } else {
-                        let index = next_index;
-                        next_index += 1;
-                        existing_refs.insert(reference.clone(), index);
-                        ref_lines.push(MemorySourceRef {
-                            index,
-                            target: reference.clone(),
-                        });
-                        index
-                    };
-                    format!("[^{index}]")
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            let id = format!("m_{}", uuid::Uuid::new_v4().simple());
-            body_lines.push(format!(
-                "### {}\n\n- {} {} {}",
-                fact.section.trim(),
-                fact.text.trim(),
-                footnotes,
-                serialize_memory_marker(&id)?
-            ));
-        }
-
-        if !proposed.ends_with('\n') {
-            proposed.push('\n');
-        }
-        proposed.push('\n');
-        proposed.push_str("## Agent update draft\n\n");
-        proposed.push_str(&body_lines.join("\n"));
-
-        if !ref_lines.is_empty() {
-            proposed.push_str("\n\n---\n\n");
-            let serialized = ref_lines
-                .iter()
-                .map(serialize_source_ref)
-                .collect::<Result<Vec<_>>>()?;
-            proposed.push_str(&serialized.join("\n"));
-        }
-        normalize_memory_markdown(&proposed)
+        let mut entries = parse_memory_entries(current);
+        entries.extend(facts.iter().map(|fact| MemoryEntry {
+            line_number: 0,
+            section: Some(fact.section.trim().to_string()),
+            text: fact.text.trim().to_string(),
+            marker: format!("m_{}", uuid::Uuid::new_v4().simple()),
+            source_refs: fact.refs.clone(),
+        }));
+        let title = memory_title(current)
+            .unwrap_or_else(|| target_catalog(&target_path, String::new()).title);
+        normalize_memory_markdown(&serialize_memory_entries(&title, &entries)?)
     }
 
     pub fn apply_text_edits(&self, current: &str, edits: &[MemoryTextEdit]) -> Result<String> {
@@ -836,11 +788,19 @@ pub fn parse_memory_entries(markdown: &str) -> Vec<MemoryEntry> {
         .into_iter()
         .map(|reference| (reference.index, reference.target))
         .collect::<std::collections::BTreeMap<_, _>>();
-    markdown
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| parse_memory_entry_line(index + 1, line, &definitions))
-        .collect()
+    let mut section = None::<String>;
+    let mut entries = Vec::new();
+    for (index, line) in markdown.lines().enumerate() {
+        if let Some(heading) = memory_section_heading(line) {
+            section = Some(heading);
+            continue;
+        }
+        if let Some(entry) = parse_memory_entry_line(index + 1, line, section.clone(), &definitions)
+        {
+            entries.push(entry);
+        }
+    }
+    entries
 }
 
 pub fn serialize_memory_entries(title: &str, entries: &[MemoryEntry]) -> Result<String> {
@@ -851,12 +811,31 @@ pub fn serialize_memory_entries(title: &str, entries: &[MemoryEntry]) -> Result<
     let mut refs_by_target = std::collections::BTreeMap::<String, usize>::new();
     let mut next_ref = 1usize;
     let mut lines = vec![format!("# {title}")];
-    if !entries.is_empty() {
-        lines.push(String::new());
-    }
+    let mut last_section = None::<String>;
     for entry in entries {
         if entry.text.trim().is_empty() {
             return Err(anyhow!("memory entry text is empty"));
+        }
+        let section = entry
+            .section
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if lines.len() == 1 {
+            lines.push(String::new());
+            if let Some(section) = &section {
+                lines.push(format!("## {section}"));
+                lines.push(String::new());
+            }
+            last_section = section;
+        } else if section != last_section {
+            lines.push(String::new());
+            if let Some(section) = &section {
+                lines.push(format!("## {section}"));
+                lines.push(String::new());
+            }
+            last_section = section;
         }
         let marker = serialize_memory_marker(&entry.marker)?;
         let refs = entry
@@ -996,6 +975,7 @@ fn parse_source_ref_line(line: &str) -> Option<MemorySourceRef> {
 fn parse_memory_entry_line(
     line_number: usize,
     line: &str,
+    section: Option<String>,
     definitions: &std::collections::BTreeMap<usize, String>,
 ) -> Option<MemoryEntry> {
     let trimmed = line.trim();
@@ -1011,10 +991,30 @@ fn parse_memory_entry_line(
     }
     Some(MemoryEntry {
         line_number,
+        section,
         text,
         marker,
         source_refs,
     })
+}
+
+fn memory_title(markdown: &str) -> Option<String> {
+    markdown.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("# ")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn memory_section_heading(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let heading = trimmed
+        .strip_prefix("## ")
+        .or_else(|| trimmed.strip_prefix("### "))?
+        .trim();
+    (!heading.is_empty()).then(|| heading.to_string())
 }
 
 fn marker_in_line(line: &str) -> Option<String> {
@@ -1790,6 +1790,26 @@ mod tests {
     }
 
     #[test]
+    fn memory_entry_serializer_preserves_sections() {
+        let markdown = "# Quiz memory\n\n## Weak topics\n\n- Needs OPC review. [^1] <!--m_1-->\n\n## Strong topics\n\n- Understands basic lithography. [^2] <!--m_2-->\n\n---\n\n[^1]: quiz:q1\n[^2]: quiz:q2";
+
+        let entries = parse_memory_entries(markdown);
+        let serialized = serialize_memory_entries("Quiz memory", &entries).unwrap();
+
+        assert_eq!(entries[0].section.as_deref(), Some("Weak topics"));
+        assert_eq!(entries[1].section.as_deref(), Some("Strong topics"));
+        assert!(serialized.contains("## Weak topics\n\n- Needs OPC review."));
+        assert!(serialized.contains("## Strong topics\n\n- Understands basic lithography."));
+        assert_eq!(
+            parse_memory_entries(&serialized)
+                .iter()
+                .map(|entry| entry.section.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("Weak topics"), Some("Strong topics")]
+        );
+    }
+
+    #[test]
     fn memory_store_write_normalizes_source_refs() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
@@ -2166,6 +2186,42 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("unsupported section"));
+    }
+
+    #[test]
+    fn append_memory_facts_uses_section_serializer_and_shared_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Quiz memory\n\n## Weak topics\n\n- Existing fact. [^1] <!--m_existing-->\n\n---\n\n[^1]: quiz:q1";
+
+        let proposed = store
+            .append_memory_facts(
+                "L2/quiz.md",
+                current,
+                &[
+                    MemoryFact {
+                        text: "Learner still confuses OPC distractors.".into(),
+                        section: "Weak topics".into(),
+                        refs: vec!["quiz:q1".into()],
+                    },
+                    MemoryFact {
+                        text: "Learner answers lithography basics correctly.".into(),
+                        section: "Strong topics".into(),
+                        refs: vec!["quiz:q2".into()],
+                    },
+                ],
+                &["quiz:q1".into(), "quiz:q2".into()],
+                &["Weak topics".into(), "Strong topics".into()],
+            )
+            .unwrap();
+
+        assert!(!proposed.contains("Agent update draft"));
+        assert!(proposed.contains("## Weak topics"));
+        assert!(proposed.contains("## Strong topics"));
+        assert!(proposed.contains("Learner still confuses OPC distractors. [^1]"));
+        assert!(proposed.contains("Learner answers lithography basics correctly. [^2]"));
+        assert_eq!(proposed.matches("[^1]: quiz:q1").count(), 1);
+        assert_eq!(proposed.matches("[^2]: quiz:q2").count(), 1);
     }
 
     #[test]
