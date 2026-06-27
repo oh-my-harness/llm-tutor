@@ -694,6 +694,21 @@ impl MemoryStore {
         validate_text_edits(current, edits, citeable_refs)
     }
 
+    pub fn validate_text_edits_for_action(
+        &self,
+        action: MemoryAssistAction,
+        current: &str,
+        edits: &[MemoryTextEdit],
+        citeable_refs: &[String],
+    ) -> Result<()> {
+        if action == MemoryAssistAction::Dedupe
+            && edits.iter().any(|edit| edit.op == MemoryTextEditOp::Insert)
+        {
+            return Err(anyhow!("memory dedupe edit must not insert new facts"));
+        }
+        validate_text_edits(current, edits, citeable_refs)
+    }
+
     fn assist_update(&self, target_path: &str, current: &str) -> Result<MemoryAssistResult> {
         let input = self.consolidation_input(
             target_path,
@@ -1159,9 +1174,11 @@ fn validate_text_edits(
     citeable_refs: &[String],
 ) -> Result<()> {
     let original_len = current.lines().count();
+    let lines = current.lines().collect::<Vec<_>>();
     let allowed_refs = allowed_edit_refs(current, citeable_refs);
     for edit in edits {
         validate_text_edit(edit, original_len)?;
+        validate_edit_visible_lines(edit, &lines)?;
         if edit.reason.as_deref().unwrap_or_default().trim().is_empty() {
             return Err(anyhow!("memory edit requires a reason"));
         }
@@ -1183,6 +1200,27 @@ fn validate_text_edits(
         }
     }
     Ok(())
+}
+
+fn validate_edit_visible_lines(edit: &MemoryTextEdit, lines: &[&str]) -> Result<()> {
+    if edit.op == MemoryTextEditOp::Insert {
+        return Ok(());
+    }
+    let end_line = edit.end_line.unwrap_or(edit.start_line);
+    for line_number in edit.start_line..=end_line {
+        let line = lines.get(line_number - 1).copied().unwrap_or_default();
+        if is_protected_memory_line(line) {
+            return Err(anyhow!(
+                "memory edit cannot target protected line {line_number}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_protected_memory_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.is_empty() || trimmed == "---" || trimmed.starts_with('#') || trimmed.starts_with("[^")
 }
 
 fn allowed_edit_refs(
@@ -2354,6 +2392,66 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("requires a reason"));
+    }
+
+    #[test]
+    fn validate_text_edits_rejects_protected_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Chat memory\n\n## Topics\n\n- Editable fact. [^1] <!--m_1-->\n\n---\n\n[^1]: chat:known";
+
+        for (line, label) in [
+            (1, "title"),
+            (2, "blank"),
+            (3, "section"),
+            (7, "separator"),
+            (8, "ref"),
+        ] {
+            let err = store
+                .validate_text_edits(
+                    current,
+                    &[MemoryTextEdit {
+                        op: MemoryTextEditOp::Delete,
+                        start_line: line,
+                        end_line: Some(line),
+                        text: None,
+                        refs: vec![],
+                        reason: Some(format!("delete {label}")),
+                    }],
+                    &["chat:known".into()],
+                )
+                .unwrap_err();
+
+            assert!(
+                err.to_string().contains("protected line"),
+                "expected protected-line error for {label}, got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_dedupe_edits_rejects_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let current = "# Quiz memory\n\n- Existing fact. [^1] <!--m_1-->\n\n[^1]: quiz:q1";
+
+        let err = store
+            .validate_text_edits_for_action(
+                MemoryAssistAction::Dedupe,
+                current,
+                &[MemoryTextEdit {
+                    op: MemoryTextEditOp::Insert,
+                    start_line: 4,
+                    end_line: None,
+                    text: Some("- New fact. [^1] <!--m_new-->".into()),
+                    refs: vec!["quiz:q1".into()],
+                    reason: Some("not allowed in dedupe".into()),
+                }],
+                &["quiz:q1".into()],
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("must not insert"));
     }
 
     #[test]

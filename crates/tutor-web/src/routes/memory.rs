@@ -224,7 +224,8 @@ async fn assist_memory_with_llm(
     let output_json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
     let edits = workflow_edits_to_memory_edits(&output.edits);
     store
-        .validate_text_edits(
+        .validate_text_edits_for_action(
+            action,
             &input.target.existing_markdown,
             &edits,
             &input.chunk.citeable_refs,

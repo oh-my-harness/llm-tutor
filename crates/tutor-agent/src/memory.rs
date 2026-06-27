@@ -162,6 +162,16 @@ pub fn parse_memory_workflow_output(
         for edit in &parsed.edits {
             validate_workflow_edit(edit)?;
         }
+        if action == MemoryWorkflowAction::Dedupe
+            && parsed
+                .edits
+                .iter()
+                .any(|edit| edit.op == MemoryWorkflowEditOp::Insert)
+        {
+            return Err(TutorError::Internal(
+                "dedupe workflow must not insert new facts".into(),
+            ));
+        }
         if action == MemoryWorkflowAction::Dedupe && parsed.changed && parsed.edits.is_empty() {
             return Err(TutorError::Internal(
                 "changed dedupe workflow requires edits".into(),
@@ -478,6 +488,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("requires edits"));
+    }
+
+    #[test]
+    fn rejects_dedupe_insert() {
+        let err = parse_memory_workflow_output(
+            r##"{"report_markdown":"# Report","proposed_markdown":null,"facts":[],"edits":[{"op":"insert","start_line":4,"end_line":null,"text":"- New fact.","refs":["quiz:q1"],"reason":"not allowed"}],"changed":true}"##,
+            MemoryWorkflowAction::Dedupe,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("must not insert"));
     }
 
     #[tokio::test]
