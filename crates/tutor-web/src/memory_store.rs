@@ -25,6 +25,7 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
 ];
 
 const DEFAULT_DIRS: &[&str] = &["L1", "L2", "L3"];
+const MEMORY_UPDATE_CHUNK_SIZE: usize = 10;
 
 #[derive(Clone)]
 pub struct MemoryStore {
@@ -94,6 +95,17 @@ pub struct MemoryAssistResult {
 pub struct MemoryAssistTrace {
     pub input_json: String,
     pub output_json: String,
+    #[serde(default)]
+    pub chunks: Vec<MemoryAssistTraceChunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryAssistTraceChunk {
+    pub index: usize,
+    pub total: usize,
+    #[serde(rename = "citeableRefs")]
+    pub citeable_refs: Vec<String>,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -471,6 +483,74 @@ impl MemoryStore {
         })
     }
 
+    pub fn consolidation_inputs(
+        &self,
+        target_path: &str,
+        action: MemoryAssistAction,
+        markdown: Option<String>,
+    ) -> Result<Vec<ConsolidationInput>> {
+        self.ensure_skeleton()?;
+        let path = normalize_memory_path(target_path)?;
+        let target_path = path_to_slash(&path);
+        let current = markdown.unwrap_or_else(|| {
+            self.read(&target_path)
+                .map(|file| file.markdown)
+                .unwrap_or_default()
+        });
+        let chunks = match action {
+            MemoryAssistAction::Check => vec![self.audit_source_chunk(&target_path, &current)?],
+            MemoryAssistAction::Dedupe => vec![(Vec::new(), String::new())],
+            MemoryAssistAction::Update if target_path.starts_with("L3/") => {
+                self.l3_source_chunks()?
+            }
+            MemoryAssistAction::Update => {
+                let events = recent_events_for_target(self.recent_events(60)?, &target_path);
+                event_source_chunks(&events, MEMORY_UPDATE_CHUNK_SIZE)
+            }
+        };
+        let chunks = if chunks.is_empty() {
+            vec![(Vec::new(), String::new())]
+        } else {
+            chunks
+        };
+        let total = chunks.len();
+        let job = ConsolidationJob {
+            mode: match action {
+                MemoryAssistAction::Update => ConsolidationMode::Update,
+                MemoryAssistAction::Check => ConsolidationMode::Audit,
+                MemoryAssistAction::Dedupe => ConsolidationMode::Dedup,
+            },
+            layer: target_path
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+            key: target_path
+                .trim_end_matches(".md")
+                .split('/')
+                .next_back()
+                .unwrap_or_default()
+                .to_string(),
+            language: "zh".into(),
+            today: Utc::now().date_naive().to_string(),
+        };
+        let target = target_catalog(&target_path, current);
+        Ok(chunks
+            .into_iter()
+            .enumerate()
+            .map(|(index, (citeable_refs, text))| ConsolidationInput {
+                job: job.clone(),
+                target: target.clone(),
+                chunk: ConsolidationChunk {
+                    index: index + 1,
+                    total,
+                    citeable_refs,
+                    text,
+                },
+            })
+            .collect())
+    }
+
     fn l3_source_chunk(&self) -> Result<(Vec<String>, String)> {
         let mut refs = Vec::new();
         let mut entities = Vec::new();
@@ -505,6 +585,28 @@ impl MemoryStore {
             )
         };
         Ok((refs, text))
+    }
+
+    fn l3_source_chunks(&self) -> Result<Vec<(Vec<String>, String)>> {
+        let mut chunks = Vec::new();
+        for (surface, path) in [
+            ("chat", "L2/chat.md"),
+            ("quiz", "L2/quiz.md"),
+            ("notebook", "L2/notebook.md"),
+            ("knowledge", "L2/knowledge.md"),
+            ("research", "L2/research.md"),
+        ] {
+            let markdown = self.read(path)?.markdown;
+            if !has_memory_content(&markdown) {
+                continue;
+            }
+            let text = format!(
+                "# Chunk-local citeable refs\n- {surface}\n\n@entity {surface}\ntitle: {path}\ncontent:\n{}",
+                markdown.trim()
+            );
+            chunks.push((vec![surface.to_string()], text));
+        }
+        Ok(chunks)
     }
 
     fn audit_source_chunk(
@@ -1287,6 +1389,21 @@ fn render_event_chunk(events: &[MemoryEvent]) -> String {
     format!("# Chunk-local citeable refs\n{refs}\n\n{entities}")
 }
 
+fn event_source_chunks(events: &[MemoryEvent], chunk_size: usize) -> Vec<(Vec<String>, String)> {
+    if events.is_empty() || chunk_size == 0 {
+        return Vec::new();
+    }
+    events
+        .chunks(chunk_size)
+        .map(|chunk| {
+            (
+                chunk.iter().map(event_citeable_ref).collect::<Vec<_>>(),
+                render_event_chunk(chunk),
+            )
+        })
+        .collect()
+}
+
 fn line_numbered_markdown(markdown: &str) -> String {
     markdown
         .lines()
@@ -1879,6 +1996,70 @@ mod tests {
         assert!(input.chunk.text.contains("@entity chat"));
         assert!(input.chunk.text.contains("@entity quiz"));
         assert!(!input.chunk.text.contains("chat:"));
+    }
+
+    #[test]
+    fn consolidation_inputs_chunk_l2_update_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        for index in 0..12 {
+            store
+                .record_event(
+                    MemoryEventCategory::Chat,
+                    "answered",
+                    format!("Chat learning event {index}"),
+                    Some(format!("session-{index}")),
+                    json!({ "index": index }),
+                )
+                .unwrap();
+        }
+
+        let inputs = store
+            .consolidation_inputs("L2/chat.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].chunk.index, 1);
+        assert_eq!(inputs[0].chunk.total, 2);
+        assert_eq!(inputs[0].chunk.citeable_refs.len(), 10);
+        assert_eq!(inputs[1].chunk.index, 2);
+        assert_eq!(inputs[1].chunk.total, 2);
+        assert_eq!(inputs[1].chunk.citeable_refs.len(), 2);
+        assert!(
+            inputs
+                .iter()
+                .all(|input| input.chunk.text.contains("# Chunk-local citeable refs"))
+        );
+    }
+
+    #[test]
+    fn consolidation_inputs_chunk_l3_update_by_surface() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n- Learner often asks for visual explanations. <!--m_chat-->"
+                    .into(),
+            )
+            .unwrap();
+        store
+            .write(
+                "L2/quiz.md",
+                "# Quiz memory\n\n- Learner missed OPC distractors. <!--m_quiz-->".into(),
+            )
+            .unwrap();
+
+        let inputs = store
+            .consolidation_inputs("L3/profile.md", MemoryAssistAction::Update, None)
+            .unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].chunk.total, 2);
+        assert_eq!(inputs[0].chunk.citeable_refs, vec!["chat"]);
+        assert_eq!(inputs[1].chunk.citeable_refs, vec!["quiz"]);
+        assert!(inputs[0].chunk.text.contains("@entity chat"));
+        assert!(inputs[1].chunk.text.contains("@entity quiz"));
     }
 
     #[test]

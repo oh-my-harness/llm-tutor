@@ -11,8 +11,8 @@ use serde::Deserialize;
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
 use crate::memory_store::{
-    MemoryAssistAction, MemoryAssistTrace, MemoryFact, MemoryStore, MemoryTextEdit,
-    MemoryTextEditOp,
+    MemoryAssistAction, MemoryAssistTrace, MemoryAssistTraceChunk, MemoryFact, MemoryStore,
+    MemoryTextEdit, MemoryTextEditOp,
 };
 
 #[derive(Deserialize)]
@@ -198,6 +198,9 @@ async fn assist_memory_with_llm(
                 .markdown
         }
     };
+    if action == MemoryAssistAction::Update {
+        return assist_memory_update_with_llm(store, target_path, current, &llm).await;
+    }
     let input = store
         .consolidation_input(&target_path, action, Some(current.clone()))
         .map_err(|err| err.to_string())?;
@@ -219,8 +222,144 @@ async fn assist_memory_with_llm(
     .await
     .map_err(|err| err.to_string())?;
     let output_json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
-    let edits = output
-        .edits
+    let edits = workflow_edits_to_memory_edits(&output.edits);
+    store
+        .validate_text_edits(
+            &input.target.existing_markdown,
+            &edits,
+            &input.chunk.citeable_refs,
+        )
+        .map_err(|err| err.to_string())?;
+    let proposed_markdown = if action == MemoryAssistAction::Dedupe && output.changed {
+        Some(
+            store
+                .apply_text_edits(&input.target.existing_markdown, &edits)
+                .map_err(|err| err.to_string())?,
+        )
+    } else {
+        output.proposed_markdown.clone()
+    };
+    Ok(crate::memory_store::MemoryAssistResult {
+        target_path,
+        action,
+        report_markdown: output.report_markdown,
+        proposed_markdown,
+        edits,
+        trace: Some(MemoryAssistTrace {
+            input_json: serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?,
+            output_json,
+            chunks: vec![MemoryAssistTraceChunk {
+                index: input.chunk.index,
+                total: input.chunk.total,
+                citeable_refs: input.chunk.citeable_refs.clone(),
+                status: "done".into(),
+            }],
+        }),
+        changed: output.changed,
+    })
+}
+
+async fn assist_memory_update_with_llm(
+    store: &MemoryStore,
+    target_path: String,
+    current: String,
+    llm: &LlmConfig,
+) -> Result<crate::memory_store::MemoryAssistResult, String> {
+    let inputs = store
+        .consolidation_inputs(
+            &target_path,
+            MemoryAssistAction::Update,
+            Some(current.clone()),
+        )
+        .map_err(|err| err.to_string())?;
+    let mut outputs = Vec::new();
+    let mut facts = Vec::new();
+    let mut citeable_refs = Vec::<String>::new();
+    let mut trace_chunks = Vec::new();
+
+    for input in &inputs {
+        for reference in &input.chunk.citeable_refs {
+            if !citeable_refs.iter().any(|item| item == reference) {
+                citeable_refs.push(reference.clone());
+            }
+        }
+        let consolidation_input_json =
+            serde_json::to_string_pretty(input).map_err(|err| err.to_string())?;
+        let output = tutor_agent::memory::run_memory_workflow(
+            llm,
+            &tutor_agent::memory::MemoryWorkflowInput {
+                target_path: target_path.clone(),
+                action: tutor_agent::memory::MemoryWorkflowAction::Update,
+                current_markdown: current.clone(),
+                consolidation_input_json,
+            },
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+        for fact in &output.facts {
+            facts.push(MemoryFact {
+                text: fact.text.clone(),
+                section: fact.section.clone(),
+                refs: fact.refs.clone(),
+            });
+        }
+        trace_chunks.push(MemoryAssistTraceChunk {
+            index: input.chunk.index,
+            total: input.chunk.total,
+            citeable_refs: input.chunk.citeable_refs.clone(),
+            status: "done".into(),
+        });
+        outputs.push(output);
+    }
+
+    let first_input = inputs
+        .first()
+        .ok_or_else(|| "memory workflow did not build any input chunks".to_string())?;
+    let changed = outputs.iter().any(|output| output.changed) && !facts.is_empty();
+    let proposed_markdown = if changed {
+        Some(
+            store
+                .append_memory_facts(
+                    &target_path,
+                    &first_input.target.existing_markdown,
+                    &facts,
+                    &citeable_refs,
+                    &first_input.target.allowed_sections,
+                )
+                .map_err(|err| err.to_string())?,
+        )
+    } else {
+        None
+    };
+    let report_markdown = outputs
+        .iter()
+        .map(|output| output.report_markdown.trim())
+        .filter(|report| !report.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n");
+    Ok(crate::memory_store::MemoryAssistResult {
+        target_path,
+        action: MemoryAssistAction::Update,
+        report_markdown: if report_markdown.is_empty() {
+            "No update facts were returned.".into()
+        } else {
+            report_markdown
+        },
+        proposed_markdown,
+        edits: Vec::new(),
+        trace: Some(MemoryAssistTrace {
+            input_json: serde_json::to_string_pretty(&inputs).map_err(|err| err.to_string())?,
+            output_json: serde_json::to_string_pretty(&outputs).map_err(|err| err.to_string())?,
+            chunks: trace_chunks,
+        }),
+        changed,
+    })
+}
+
+fn workflow_edits_to_memory_edits(
+    edits: &[tutor_agent::memory::MemoryWorkflowEdit],
+) -> Vec<MemoryTextEdit> {
+    edits
         .iter()
         .map(|edit| MemoryTextEdit {
             op: match edit.op {
@@ -234,56 +373,7 @@ async fn assist_memory_with_llm(
             refs: edit.refs.clone(),
             reason: edit.reason.clone(),
         })
-        .collect::<Vec<_>>();
-    store
-        .validate_text_edits(
-            &input.target.existing_markdown,
-            &edits,
-            &input.chunk.citeable_refs,
-        )
-        .map_err(|err| err.to_string())?;
-    let proposed_markdown = match action {
-        MemoryAssistAction::Update if output.changed => {
-            let facts = output
-                .facts
-                .into_iter()
-                .map(|fact| MemoryFact {
-                    text: fact.text,
-                    section: fact.section,
-                    refs: fact.refs,
-                })
-                .collect::<Vec<_>>();
-            Some(
-                store
-                    .append_memory_facts(
-                        &target_path,
-                        &input.target.existing_markdown,
-                        &facts,
-                        &input.chunk.citeable_refs,
-                        &input.target.allowed_sections,
-                    )
-                    .map_err(|err| err.to_string())?,
-            )
-        }
-        MemoryAssistAction::Dedupe if output.changed => Some(
-            store
-                .apply_text_edits(&input.target.existing_markdown, &edits)
-                .map_err(|err| err.to_string())?,
-        ),
-        _ => output.proposed_markdown,
-    };
-    Ok(crate::memory_store::MemoryAssistResult {
-        target_path,
-        action,
-        report_markdown: output.report_markdown,
-        proposed_markdown,
-        edits,
-        trace: Some(MemoryAssistTrace {
-            input_json: serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?,
-            output_json,
-        }),
-        changed: output.changed,
-    })
+        .collect()
 }
 
 fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {

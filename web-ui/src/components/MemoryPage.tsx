@@ -29,6 +29,12 @@ type MemoryEdit = {
   refs?: string[]
   reason?: string | null
 }
+type TraceChunk = {
+  index: number
+  total: number
+  citeableRefs?: string[]
+  status: string
+}
 
 interface MemoryFile {
   path: string
@@ -46,6 +52,7 @@ interface AssistResult {
   trace?: {
     input_json: string
     output_json: string
+    chunks?: TraceChunk[]
   } | null
   changed: boolean
 }
@@ -576,6 +583,26 @@ function TracePreview({ trace }: { trace: NonNullable<AssistResult['trace']> }) 
         LLM trace
       </summary>
       <div className="mt-3 space-y-3">
+        {trace.chunks && trace.chunks.length > 0 && (
+          <div className="rounded-md border border-blue-100 bg-blue-50/60 p-2">
+            <div className="mb-2 text-xs font-medium text-blue-700">Chunks</div>
+            <div className="space-y-1">
+              {trace.chunks.map((chunk) => (
+                <div key={`${chunk.index}-${chunk.total}`} className="text-xs text-gray-600">
+                  <span className="font-medium text-gray-800">
+                    {chunk.index}/{chunk.total}
+                  </span>
+                  <span className="ml-2">{chunk.status}</span>
+                  {chunk.citeableRefs && chunk.citeableRefs.length > 0 && (
+                    <span className="ml-2 font-mono text-[11px] text-blue-700">
+                      {chunk.citeableRefs.join(', ')}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <TraceBlock title="Input" value={trace.input_json} />
         <TraceBlock title="Output" value={trace.output_json} />
       </div>
