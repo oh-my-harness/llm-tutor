@@ -415,14 +415,19 @@ impl MemoryStore {
                 .map(|file| file.markdown)
                 .unwrap_or_default()
         });
-        let (citeable_refs, text) = if target_path.starts_with("L3/") {
-            self.l3_source_chunk()?
-        } else {
-            let events = recent_events_for_target(self.recent_events(60)?, &target_path);
-            (
-                events.iter().map(event_citeable_ref).collect::<Vec<_>>(),
-                render_event_chunk(&events),
-            )
+        let (citeable_refs, text) = match action {
+            MemoryAssistAction::Check => self.audit_source_chunk(&target_path, &current)?,
+            MemoryAssistAction::Dedupe => (Vec::new(), String::new()),
+            MemoryAssistAction::Update if target_path.starts_with("L3/") => {
+                self.l3_source_chunk()?
+            }
+            MemoryAssistAction::Update => {
+                let events = recent_events_for_target(self.recent_events(60)?, &target_path);
+                (
+                    events.iter().map(event_citeable_ref).collect::<Vec<_>>(),
+                    render_event_chunk(&events),
+                )
+            }
         };
         Ok(ConsolidationInput {
             job: ConsolidationJob {
@@ -489,6 +494,49 @@ impl MemoryStore {
             )
         };
         Ok((refs, text))
+    }
+
+    fn audit_source_chunk(
+        &self,
+        target_path: &str,
+        markdown: &str,
+    ) -> Result<(Vec<String>, String)> {
+        let definitions = parse_source_refs(markdown)
+            .into_iter()
+            .map(|reference| (reference.index, reference.target))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut citeable_refs = std::collections::BTreeSet::new();
+        let mut evidence_blocks = Vec::new();
+        for (line_number, line) in markdown.lines().enumerate() {
+            let source_targets = footnote_indices_in_line(line)
+                .into_iter()
+                .filter_map(|index| definitions.get(&index).cloned())
+                .collect::<Vec<_>>();
+            if source_targets.is_empty() {
+                continue;
+            }
+            for target in source_targets {
+                citeable_refs.insert(target.clone());
+                evidence_blocks.push(render_audit_evidence(
+                    self,
+                    target_path,
+                    line_number + 1,
+                    line,
+                    &target,
+                ));
+            }
+        }
+        let citeable_refs = citeable_refs.into_iter().collect::<Vec<_>>();
+        let text = if evidence_blocks.is_empty() {
+            format!("# Line-numbered view\n{}", line_numbered_markdown(markdown))
+        } else {
+            format!(
+                "# Line-numbered view\n{}\n\n# Evidence\n{}",
+                line_numbered_markdown(markdown),
+                evidence_blocks.join("\n\n")
+            )
+        };
+        Ok((citeable_refs, text))
     }
 
     pub fn append_memory_facts(
@@ -1032,6 +1080,66 @@ fn render_event_chunk(events: &[MemoryEvent]) -> String {
     format!("# Chunk-local citeable refs\n{refs}\n\n{entities}")
 }
 
+fn line_numbered_markdown(markdown: &str) -> String {
+    markdown
+        .lines()
+        .enumerate()
+        .map(|(index, line)| format!("{:>4}: {}", index + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_audit_evidence(
+    store: &MemoryStore,
+    target_path: &str,
+    line_number: usize,
+    line: &str,
+    reference: &str,
+) -> String {
+    let source = if reference.contains(':') {
+        match store.resolve_source_ref(reference) {
+            Ok(source) => format!(
+                "source_status: found\nsource_kind: L1 event\ntitle: {}\nts: {}\ncontent:\n{}\nmetadata:\n{}",
+                event_kind_label(source.event.category, &source.event.action),
+                source.event.created_at.to_rfc3339(),
+                source.event.summary.trim(),
+                source.event.payload
+            ),
+            Err(err) => format!("source_status: missing\nerror: {err}"),
+        }
+    } else if target_path.starts_with("L3/") {
+        match l2_path_for_surface(reference).and_then(|path| store.read(path).ok()) {
+            Some(file) if has_memory_content(&file.markdown) => format!(
+                "source_status: found\nsource_kind: L2 surface memory\nsource_path: {}\ncontent:\n{}",
+                file.path,
+                file.markdown.trim()
+            ),
+            Some(file) => format!(
+                "source_status: empty\nsource_kind: L2 surface memory\nsource_path: {}",
+                file.path
+            ),
+            None => format!("source_status: missing\nerror: unsupported surface `{reference}`"),
+        }
+    } else {
+        "source_status: unsupported\nerror: L2 memory refs must point to L1 events".into()
+    };
+    format!(
+        "## Evidence for line {line_number}\nline: {}\nref: {reference}\n{source}",
+        line.trim()
+    )
+}
+
+fn l2_path_for_surface(surface: &str) -> Option<&'static str> {
+    match surface {
+        "chat" => Some("L2/chat.md"),
+        "quiz" => Some("L2/quiz.md"),
+        "notebook" => Some("L2/notebook.md"),
+        "knowledge" => Some("L2/knowledge.md"),
+        "research" => Some("L2/research.md"),
+        _ => None,
+    }
+}
+
 fn facts_from_input_chunk(input: &ConsolidationInput) -> Vec<MemoryFact> {
     if input.chunk.citeable_refs.is_empty() {
         return Vec::new();
@@ -1441,6 +1549,69 @@ mod tests {
                 .allowed_sections
                 .contains(&"Weak topics".into())
         );
+    }
+
+    #[test]
+    fn check_consolidation_input_annotates_l2_memory_with_l1_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "answered",
+                "User asked for visual explanations of OPC.",
+                Some("session-1".into()),
+                json!({ "session": "session-1" }),
+            )
+            .unwrap();
+        let markdown = "# Chat memory\n\n- Learner asks for visual OPC explanations. [^1] <!--m_1-->\n\n---\n\n[^1]: chat:session-1";
+
+        let input = store
+            .consolidation_input(
+                "L2/chat.md",
+                MemoryAssistAction::Check,
+                Some(markdown.into()),
+            )
+            .unwrap();
+
+        assert_eq!(input.job.mode, ConsolidationMode::Audit);
+        assert_eq!(input.chunk.citeable_refs, vec!["chat:session-1"]);
+        assert!(input.chunk.text.contains("# Line-numbered view"));
+        assert!(input.chunk.text.contains("## Evidence for line 3"));
+        assert!(input.chunk.text.contains("source_kind: L1 event"));
+        assert!(
+            input
+                .chunk
+                .text
+                .contains("User asked for visual explanations")
+        );
+    }
+
+    #[test]
+    fn check_consolidation_input_annotates_l3_memory_with_l2_surface_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n- Learner asks for more diagrams. <!--m_chat-->".into(),
+            )
+            .unwrap();
+        let markdown = "# Student profile\n\n- Learner may benefit from visual explanations. [^1] <!--m_1-->\n\n---\n\n[^1]: chat";
+
+        let input = store
+            .consolidation_input(
+                "L3/profile.md",
+                MemoryAssistAction::Check,
+                Some(markdown.into()),
+            )
+            .unwrap();
+
+        assert_eq!(input.job.mode, ConsolidationMode::Audit);
+        assert_eq!(input.chunk.citeable_refs, vec!["chat"]);
+        assert!(input.chunk.text.contains("source_kind: L2 surface memory"));
+        assert!(input.chunk.text.contains("source_path: L2/chat.md"));
+        assert!(input.chunk.text.contains("Learner asks for more diagrams"));
     }
 
     #[test]
