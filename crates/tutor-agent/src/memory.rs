@@ -56,6 +56,9 @@ pub struct MemoryWorkflowEdit {
     pub start_line: usize,
     pub end_line: Option<usize>,
     pub text: Option<String>,
+    #[serde(default)]
+    pub refs: Vec<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -216,10 +219,10 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
             "- Return memory facts in facts; proposed_markdown must be null.\n- Extract durable observations from the normalized consolidation input, not a raw event log.\n- Prefer learning-relevant facts over one-off chatter.\n- Each fact must cite only refs listed in chunk.citeableRefs.\n- Use only sections listed in target.allowedSections."
         }
         MemoryWorkflowAction::Check => {
-            "- Do not return proposed_markdown.\n- Report contradictions, stale facts, missing evidence markers, duplicate points, unclear wording, and risky overgeneralizations.\n- If useful, include suggested line edits in edits, but the product may show them as recommendations instead of applying them."
+            "- Do not return proposed_markdown.\n- Report contradictions, stale facts, missing evidence markers, duplicate points, unclear wording, and risky overgeneralizations.\n- If useful, include suggested line edits in edits, but the product may show them as recommendations instead of applying them.\n- Each replace or insert edit should include refs from chunk.citeableRefs when evidence exists and a short reason."
         }
         MemoryWorkflowAction::Dedupe => {
-            "- Return line edits in edits; proposed_markdown must be null.\n- Merge duplicate or overlapping bullets.\n- Preserve source markers and references when still useful.\n- Do not delete unique useful memory.\n- Use replace/delete/insert edits against the current Markdown line numbers."
+            "- Return line edits in edits; proposed_markdown must be null.\n- Merge duplicate or overlapping bullets.\n- Preserve source markers and references when still useful.\n- Do not delete unique useful memory.\n- Use replace/delete/insert edits against the current Markdown line numbers.\n- Include a short reason for each edit; include refs when they remain relevant."
         }
     };
     let source = if input.consolidation_input_json.trim().is_empty() {
@@ -228,7 +231,7 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
         input.consolidation_input_json.clone()
     };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers:\n```text\n{numbered_current}\n```\n\nNormalized consolidation input:\n```json\n{source}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":null,\"facts\":[{{\"text\":\"concise learner fact\",\"section\":\"one allowed section\",\"refs\":[\"chat:source-id\"]}}],\"edits\":[{{\"op\":\"delete\",\"start_line\":7,\"end_line\":7,\"text\":null}}],\"changed\":true}}\n\nFor update, edits must be [] and proposed_markdown must be null. For check and dedupe, facts must be [] and proposed_markdown must be null.",
+        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers:\n```text\n{numbered_current}\n```\n\nNormalized consolidation input:\n```json\n{source}\n```\n\nReturn JSON exactly like:\n{{\"report_markdown\":\"# Memory report\\n...\",\"proposed_markdown\":null,\"facts\":[{{\"text\":\"concise learner fact\",\"section\":\"one allowed section\",\"refs\":[\"chat:source-id\"]}}],\"edits\":[{{\"op\":\"delete\",\"start_line\":7,\"end_line\":7,\"text\":null,\"refs\":[\"chat:source-id\"],\"reason\":\"duplicate of line 5\"}}],\"changed\":true}}\n\nFor update, edits must be [] and proposed_markdown must be null. For check and dedupe, facts must be [] and proposed_markdown must be null.",
         target_path = input.target_path,
         action = input.action,
         numbered_current = line_numbered_markdown(&input.current_markdown),
@@ -308,9 +311,19 @@ fn memory_schema() -> serde_json::Value {
                                 { "type": "string" },
                                 { "type": "null" }
                             ]
+                        },
+                        "refs": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        },
+                        "reason": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ]
                         }
                     },
-                    "required": ["op", "start_line", "end_line", "text"]
+                    "required": ["op", "start_line", "end_line", "text", "refs", "reason"]
                 }
             },
             "changed": { "type": "boolean" }
@@ -410,12 +423,17 @@ mod tests {
     #[test]
     fn parses_dedupe_edits() {
         let output = parse_memory_workflow_output(
-            r##"{"report_markdown":"# Report\n\nRemoved duplicate.","proposed_markdown":null,"facts":[],"edits":[{"op":"delete","start_line":4,"end_line":4,"text":null}],"changed":true}"##,
+            r##"{"report_markdown":"# Report\n\nRemoved duplicate.","proposed_markdown":null,"facts":[],"edits":[{"op":"delete","start_line":4,"end_line":4,"text":null,"refs":["quiz:q1"],"reason":"duplicate of line 3"}],"changed":true}"##,
             MemoryWorkflowAction::Dedupe,
         )
         .unwrap();
 
         assert_eq!(output.edits.len(), 1);
         assert_eq!(output.edits[0].op, MemoryWorkflowEditOp::Delete);
+        assert_eq!(output.edits[0].refs, vec!["quiz:q1"]);
+        assert_eq!(
+            output.edits[0].reason.as_deref(),
+            Some("duplicate of line 3")
+        );
     }
 }

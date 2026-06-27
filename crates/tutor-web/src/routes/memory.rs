@@ -231,6 +231,8 @@ async fn assist_memory_with_llm(
             start_line: edit.start_line,
             end_line: edit.end_line,
             text: edit.text.clone(),
+            refs: edit.refs.clone(),
+            reason: edit.reason.clone(),
         })
         .collect::<Vec<_>>();
     let proposed_markdown = match action {

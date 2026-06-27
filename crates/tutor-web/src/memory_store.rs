@@ -179,6 +179,9 @@ pub struct MemoryTextEdit {
     pub start_line: usize,
     pub end_line: Option<usize>,
     pub text: Option<String>,
+    #[serde(default)]
+    pub refs: Vec<String>,
+    pub reason: Option<String>,
 }
 
 impl MemoryStore {
@@ -1765,12 +1768,16 @@ mod tests {
                         start_line: 5,
                         end_line: Some(5),
                         text: Some("- Keep this useful fact.".into()),
+                        refs: vec!["quiz:q1".into()],
+                        reason: Some("clearer wording".into()),
                     },
                     MemoryTextEdit {
                         op: MemoryTextEditOp::Delete,
                         start_line: 4,
                         end_line: Some(4),
                         text: None,
+                        refs: vec![],
+                        reason: None,
                     },
                 ],
             )
@@ -1793,6 +1800,8 @@ mod tests {
                     start_line: 5,
                     end_line: Some(5),
                     text: None,
+                    refs: vec![],
+                    reason: None,
                 }],
             )
             .unwrap_err();

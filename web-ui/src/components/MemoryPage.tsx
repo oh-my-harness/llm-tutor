@@ -26,6 +26,8 @@ type MemoryEdit = {
   start_line: number
   end_line?: number | null
   text?: string | null
+  refs?: string[]
+  reason?: string | null
 }
 
 interface MemoryFile {
@@ -545,6 +547,16 @@ function EditPreview({ edits }: { edits: MemoryEdit[] }) {
               <span className={`rounded px-1.5 py-0.5 font-medium ${editBadgeClassName(edit.op)}`}>{edit.op}</span>
               <span>{formatEditRange(edit)}</span>
             </div>
+            {edit.reason && (
+              <div className="mt-2 text-gray-500">{edit.reason}</div>
+            )}
+            {edit.refs && edit.refs.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {edit.refs.map((ref) => (
+                  <span key={ref} className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-700">{ref}</span>
+                ))}
+              </div>
+            )}
             {edit.text && (
               <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-[11px] leading-5 text-gray-700">
                 {edit.text}
