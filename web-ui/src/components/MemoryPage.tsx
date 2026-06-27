@@ -29,6 +29,11 @@ type MemoryEdit = {
   refs?: string[]
   reason?: string | null
 }
+type MemoryFact = {
+  text: string
+  section: string
+  refs: string[]
+}
 type TraceChunk = {
   index: number
   total: number
@@ -48,6 +53,7 @@ interface AssistResult {
   action: AssistAction
   report_markdown: string
   proposed_markdown?: string | null
+  facts?: MemoryFact[]
   edits?: MemoryEdit[]
   trace?: {
     input_json: string
@@ -508,6 +514,9 @@ function AgentWorkspace({
         {assistResult ? (
           <article className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
             <MarkdownMessage text={assistResult.report_markdown} />
+            {assistResult.facts && assistResult.facts.length > 0 && (
+              <FactPreview facts={assistResult.facts} />
+            )}
             {assistResult.edits && assistResult.edits.length > 0 && (
               <EditPreview edits={assistResult.edits} />
             )}
@@ -540,6 +549,29 @@ function AgentWorkspace({
         </button>
       </div>
     </aside>
+  )
+}
+
+function FactPreview({ facts }: { facts: MemoryFact[] }) {
+  return (
+    <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Proposed facts</div>
+      <div className="space-y-2">
+        {facts.map((fact, index) => (
+          <div key={`${fact.section}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-700">
+            <div className="mb-1 font-medium text-gray-900">{fact.section}</div>
+            <div className="leading-5">{fact.text}</div>
+            {fact.refs.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {fact.refs.map((ref) => (
+                  <span key={ref} className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-700">{ref}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

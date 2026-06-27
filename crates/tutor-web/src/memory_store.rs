@@ -87,6 +87,8 @@ pub struct MemoryAssistResult {
     pub action: MemoryAssistAction,
     pub report_markdown: String,
     pub proposed_markdown: Option<String>,
+    #[serde(default)]
+    pub facts: Vec<MemoryFact>,
     pub edits: Vec<MemoryTextEdit>,
     pub trace: Option<MemoryAssistTrace>,
     pub changed: bool,
@@ -721,6 +723,7 @@ impl MemoryStore {
                 action: MemoryAssistAction::Update,
                 report_markdown: "No recent workspace events match this memory file.".into(),
                 proposed_markdown: Some(current.to_string()),
+                facts: Vec::new(),
                 edits: Vec::new(),
                 trace: None,
                 changed: false,
@@ -743,6 +746,7 @@ impl MemoryStore {
                 input.chunk.citeable_refs.len()
             ),
             proposed_markdown: Some(proposed),
+            facts,
             edits: Vec::new(),
             trace: None,
             changed: true,
@@ -1633,6 +1637,7 @@ fn assist_check(target_path: &str, markdown: &str) -> MemoryAssistResult {
         action: MemoryAssistAction::Check,
         report_markdown: report.join("\n"),
         proposed_markdown: None,
+        facts: Vec::new(),
         edits: Vec::new(),
         trace: None,
         changed: false,
@@ -1663,6 +1668,7 @@ fn assist_dedupe(target_path: &str, markdown: &str) -> MemoryAssistResult {
             format!("Removed {removed} duplicate bullet/source-ref lines.")
         },
         proposed_markdown: Some(proposed),
+        facts: Vec::new(),
         edits: Vec::new(),
         trace: None,
         changed: removed > 0,

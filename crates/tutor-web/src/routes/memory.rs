@@ -245,6 +245,7 @@ async fn assist_memory_with_llm(
         action,
         report_markdown: output.report_markdown,
         proposed_markdown,
+        facts: Vec::new(),
         edits,
         trace: Some(MemoryAssistTrace {
             input_json: serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?,
@@ -347,6 +348,7 @@ async fn assist_memory_update_with_llm(
             report_markdown
         },
         proposed_markdown,
+        facts,
         edits: Vec::new(),
         trace: Some(MemoryAssistTrace {
             input_json: serde_json::to_string_pretty(&inputs).map_err(|err| err.to_string())?,
