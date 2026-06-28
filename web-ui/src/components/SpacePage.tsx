@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import type { QuizQuestion, QuizSession } from '../quizTypes'
 import { MarkdownMessage } from './MarkdownMessage'
+import type { SourceTarget } from './MarkdownMessage'
 
 type SpaceTab = 'notebook' | 'quiz_bank' | 'student_profile'
 
@@ -55,7 +56,9 @@ const tabs: Array<{ key: SpaceTab; label: string; icon: typeof NotebookPen }> = 
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
 
-export function SpacePage() {
+type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }>
+
+export function SpacePage({ focusTarget }: { focusTarget?: SpaceFocusTarget | null }) {
   const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
@@ -134,8 +137,40 @@ export function SpacePage() {
   }, [refreshNotebook, refreshQuizzes, refreshMemory])
 
   useEffect(() => {
+    if (focusTarget?.type === 'quiz' && focusTarget.quizId === activeQuizId) return
     setQuestionIndex(0)
-  }, [activeQuizId])
+  }, [activeQuizId, focusTarget])
+
+  useEffect(() => {
+    if (!focusTarget) return
+    if (focusTarget.type === 'notebook' || focusTarget.type === 'research') {
+      const entryId = focusTarget.type === 'notebook' ? focusTarget.entryId : focusTarget.notebookEntryId
+      setActiveTab('notebook')
+      if (notebookEntries.some((entry) => entry.id === entryId)) {
+        setActiveNotebookId(entryId)
+        setStatus(`Opened notebook source: ${entryId}`)
+      } else if (notebookEntries.length > 0) {
+        setStatus(`Notebook source not found: ${entryId}`)
+      }
+      return
+    }
+
+    setActiveTab('quiz_bank')
+    if (quizzes.some((quiz) => quiz.id === focusTarget.quizId)) {
+      setActiveQuizId(focusTarget.quizId)
+      const quiz = quizzes.find((item) => item.id === focusTarget.quizId)
+      const nextQuestionIndex = quiz?.questions.findIndex((question) => question.id === focusTarget.questionId) ?? -1
+      if (nextQuestionIndex >= 0) {
+        setQuestionIndex(nextQuestionIndex)
+        setStatus(`Opened quiz source: ${focusTarget.quizId} / ${focusTarget.questionId}`)
+      } else {
+        setQuestionIndex(0)
+        setStatus(`Opened quiz source: ${focusTarget.quizId}`)
+      }
+    } else if (quizzes.length > 0) {
+      setStatus(`Quiz source not found: ${focusTarget.quizId}`)
+    }
+  }, [focusTarget, notebookEntries, quizzes])
 
   const refreshActiveTab = () => {
     if (activeTab === 'notebook') void refreshNotebook()

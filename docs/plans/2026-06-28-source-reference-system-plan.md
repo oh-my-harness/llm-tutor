@@ -128,18 +128,17 @@ Acceptance:
 
 ### Phase 2: Navigation Targets
 
-Status: in progress. Page-level navigation from Memory references was added on
-2026-06-28; exact source focusing still needs follow-up work.
+Status: completed for first exact-focus slice on 2026-06-28.
 
 Tasks:
 
 - [x] Add source target parsing for `chat`, `notebook`, `quiz`, `research`, `book`, `kb`, and `web`.
 - [x] Add a shared navigation callback or router helper.
 - [x] Implement chat session navigation first.
-- [ ] Implement Notebook entry navigation with exact entry focus.
-- [ ] Implement Quiz Bank item/question navigation with exact question focus.
-- [ ] Implement Knowledge Base document/chunk navigation with exact document or chunk focus where current UI supports it.
-- [ ] Add graceful fallback for unsupported or stale references.
+- [x] Implement Notebook entry navigation with exact entry focus.
+- [x] Implement Quiz Bank item/question navigation with exact question focus.
+- [x] Implement Knowledge Base document/chunk navigation with exact document or chunk focus where current UI supports it.
+- [x] Add graceful fallback for unsupported or stale references.
 
 Acceptance:
 

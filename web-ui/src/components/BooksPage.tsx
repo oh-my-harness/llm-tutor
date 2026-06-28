@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BookOpen, FileText, RefreshCw } from 'lucide-react'
 import { MarkdownMessage } from './MarkdownMessage'
+import type { SourceTarget } from './MarkdownMessage'
 
 interface Book {
   id: string
@@ -18,7 +19,9 @@ interface BookChapter {
   updated_at: string
 }
 
-export function BooksPage() {
+type BookFocusTarget = Extract<SourceTarget, { type: 'book' }>
+
+export function BooksPage({ focusTarget }: { focusTarget?: BookFocusTarget | null }) {
   const [books, setBooks] = useState<Book[]>([])
   const [activeBookId, setActiveBookId] = useState<string | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<string | null>(null)
@@ -61,6 +64,26 @@ export function BooksPage() {
         : activeBook.chapters[0]?.id ?? null,
     )
   }, [activeBook?.id, activeBook?.chapters.length])
+
+  useEffect(() => {
+    if (!focusTarget || books.length === 0) return
+    const book = books.find((item) => item.id === focusTarget.bookId)
+    if (!book) {
+      setStatus(`Book source not found: ${focusTarget.bookId}`)
+      return
+    }
+    setActiveBookId(book.id)
+    if (focusTarget.chapterId && book.chapters.some((chapter) => chapter.id === focusTarget.chapterId)) {
+      setActiveChapterId(focusTarget.chapterId)
+      setStatus(`Opened chapter source: ${focusTarget.chapterId}`)
+    } else if (focusTarget.chapterId) {
+      setActiveChapterId(book.chapters[0]?.id ?? null)
+      setStatus(`Chapter source not found: ${focusTarget.chapterId}`)
+    } else {
+      setActiveChapterId(book.chapters[0]?.id ?? null)
+      setStatus(`Opened book source: ${focusTarget.bookId}`)
+    }
+  }, [focusTarget, books])
 
   return (
     <div className="flex h-full min-h-0 bg-gray-50">

@@ -16,10 +16,12 @@ import {
 } from 'lucide-react'
 import { activeEmbeddingConfig, embeddingForSession } from '../settings'
 import type { EmbeddingModelConfig, LlmSettings } from '../settings'
+import type { SourceTarget } from './MarkdownMessage'
 
 interface Props {
   settings: LlmSettings
   onChanged?: () => void
+  focusTarget?: Extract<SourceTarget, { type: 'kb' }> | null
 }
 
 interface KnowledgeBaseItem {
@@ -87,10 +89,11 @@ interface UploadProgressItem {
   error?: string
 }
 
-export function KnowledgePage({ settings, onChanged }: Props) {
+export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([])
   const [activeKbId, setActiveKbId] = useState<string | null>(null)
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  const [focusedChunkId, setFocusedChunkId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>('files')
   const [kbSearch, setKbSearch] = useState('')
   const [source, setSource] = useState('pasted-text')
@@ -416,6 +419,35 @@ export function KnowledgePage({ settings, onChanged }: Props) {
     }
   }
 
+  useEffect(() => {
+    if (!focusTarget || knowledgeBases.length === 0) return
+    const kb = knowledgeBases.find((item) => item.id === focusTarget.knowledgeBaseId)
+    if (!kb) {
+      setStatus(`Knowledge base source not found: ${focusTarget.knowledgeBaseId}`)
+      return
+    }
+
+    setActiveKbId(kb.id)
+    setTab('files')
+    setCreating(false)
+    setFileListCollapsed(false)
+
+    const doc = kb.documents.find((item) => item.id === focusTarget.documentId)
+    if (!doc) {
+      setSelectedDocId(kb.documents[0]?.id ?? null)
+      setFocusedChunkId(null)
+      setStatus(`Knowledge document source not found: ${focusTarget.documentId}`)
+      return
+    }
+
+    setSelectedDocId(doc.id)
+    setFocusedChunkId(focusTarget.chunkId ?? null)
+    setStatus(focusTarget.chunkId ? `Opened knowledge source: ${doc.name} / ${focusTarget.chunkId}` : `Opened knowledge source: ${doc.name}`)
+    if (focusTarget.chunkId && !chunksByDocId[doc.id]) {
+      void loadDocumentChunks(doc.id)
+    }
+  }, [focusTarget, knowledgeBases, chunksByDocId])
+
   return (
     <main className="flex min-h-0 flex-1 bg-white">
       <KnowledgeListPanel
@@ -640,6 +672,7 @@ export function KnowledgePage({ settings, onChanged }: Props) {
                   selectedDoc={selectedDoc}
                   previewText={selectedPreviewText}
                   chunks={selectedDoc ? chunksByDocId[selectedDoc.id] : undefined}
+                  focusedChunkId={focusedChunkId}
                   chunksLoading={selectedDoc ? chunkLoadingDocId === selectedDoc.id : false}
                   onLoadChunks={selectedDoc ? () => loadDocumentChunks(selectedDoc.id) : undefined}
                 />
@@ -947,6 +980,7 @@ function FilePreview({
   selectedDoc,
   previewText,
   chunks,
+  focusedChunkId,
   chunksLoading,
   onLoadChunks,
 }: {
@@ -954,9 +988,17 @@ function FilePreview({
   selectedDoc: KnowledgeDocument | null
   previewText?: string
   chunks?: SourceChunk[]
+  focusedChunkId?: string | null
   chunksLoading?: boolean
   onLoadChunks?: () => void
 }) {
+  useEffect(() => {
+    if (!focusedChunkId || !chunks) return
+    window.setTimeout(() => {
+      document.getElementById(`kb-chunk-${focusedChunkId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+  }, [chunks, focusedChunkId])
+
   if (!selectedDoc) {
     return (
       <div className="flex h-full min-h-[460px] items-center justify-center px-8 text-center">
@@ -999,7 +1041,15 @@ function FilePreview({
             <div className="mb-2 text-xs font-medium text-blue-800">索引片段 · {chunks.length}</div>
             <div className="max-h-72 space-y-2 overflow-y-auto">
               {chunks.map((chunk, index) => (
-                <article key={chunk.id} className="rounded-md border border-blue-100 bg-white p-3">
+                <article
+                  key={chunk.id}
+                  id={`kb-chunk-${chunk.id}`}
+                  className={`scroll-mt-4 rounded-md border p-3 ${
+                    focusedChunkId === chunk.id
+                      ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100'
+                      : 'border-blue-100 bg-white'
+                  }`}
+                >
                   <div className="mb-1 text-xs font-medium text-gray-500">Chunk {index + 1}</div>
                   <p className="text-sm leading-6 text-gray-700">{chunk.text}</p>
                 </article>

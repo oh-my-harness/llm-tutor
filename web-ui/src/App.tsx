@@ -112,6 +112,9 @@ export default function App() {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(true)
+  const [spaceFocusTarget, setSpaceFocusTarget] = useState<Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }> | null>(null)
+  const [bookFocusTarget, setBookFocusTarget] = useState<Extract<SourceTarget, { type: 'book' }> | null>(null)
+  const [knowledgeFocusTarget, setKnowledgeFocusTarget] = useState<Extract<SourceTarget, { type: 'kb' }> | null>(null)
   const [latestUsage, setLatestUsage] = useState<TokenUsagePayload | null>(null)
   const contextStats = useMemo<ContextStats>(() => {
     const config = activeLlmConfig(llmSettings)
@@ -647,6 +650,7 @@ export default function App() {
     }
 
     if (target.type === 'notebook' || target.type === 'quiz' || target.type === 'research') {
+      setSpaceFocusTarget(target)
       setView('space')
       pushStatus({
         kind: 'done',
@@ -657,6 +661,7 @@ export default function App() {
     }
 
     if (target.type === 'book') {
+      setBookFocusTarget(target)
       setView('books')
       pushStatus({
         kind: 'done',
@@ -667,6 +672,7 @@ export default function App() {
     }
 
     if (target.type === 'kb') {
+      setKnowledgeFocusTarget(target)
       setView('knowledge')
       pushStatus({
         kind: 'done',
@@ -757,15 +763,15 @@ export default function App() {
         )}
 
         {view === 'books' && (
-          <BooksPage />
+          <BooksPage focusTarget={bookFocusTarget} />
         )}
 
         {view === 'knowledge' && (
-          <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} />
+          <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} focusTarget={knowledgeFocusTarget} />
         )}
 
         {view === 'space' && (
-          <SpacePage />
+          <SpacePage focusTarget={spaceFocusTarget} />
         )}
 
         {view === 'memory' && (
