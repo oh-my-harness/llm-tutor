@@ -344,6 +344,10 @@
 - REQ-717: Memory shall not be injected wholesale into every prompt by default. Status: planned.
 - REQ-718: `write_memory` shall be limited to explicit user preferences or user-approved facts. Status: planned.
 - REQ-719: Memory content shall guide teaching behavior and personalization, not act as factual source material for external facts. Status: planned.
+- REQ-720: Memory Markdown footnote refs shall render as clickable inline source chips. Status: planned.
+- REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: planned.
+- REQ-722: Clicking a bottom memory reference item shall navigate to the related Chat, Notebook, Quiz, Research, Book, or Knowledge Base surface when possible. Status: planned.
+- REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: planned.
 
 ## 21. Markdown Rendering
 
@@ -356,6 +360,7 @@
 - REQ-376: Markdown rendering shall support external links safely.
 - REQ-377: The system shall not attempt to fix invalid LLM Markdown that is semantically malformed.
 - REQ-378: The system prompt should encourage valid Markdown for tables and math.
+- REQ-379: Product source references shall use dedicated UI behavior rather than relying only on raw Markdown footnote rendering. Status: planned.
 
 ## 22. Trace, Status, and UX
 

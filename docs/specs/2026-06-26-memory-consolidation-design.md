@@ -471,7 +471,43 @@ Required invariants:
 - Parser and serializer should round-trip idempotently.
 - Deleting one entry should remove unused footnotes on the next serialize.
 
-## 10. Validation Rules
+## 10. Source Reference Rendering
+
+Markdown footnotes are the durable storage format, not the final interaction
+model. The UI should parse memory footnotes and render them as a product-level
+source reference system.
+
+Display behavior:
+
+- Inline footnote references such as `[^1]` should render as compact clickable
+  source chips, for example `[1]`.
+- Clicking an inline source chip should scroll to the matching item in the
+  source reference list at the bottom of the rendered content.
+- The bottom reference list should show human-readable labels such as
+  `Chat`, `Notebook`, `Quiz`, `Research`, `Book`, or `Knowledge Base`.
+- Clicking a bottom reference item should navigate to the corresponding product
+  surface and, when possible, focus the exact source record.
+- Stable entry markers such as `<!--m_xxx-->` are internal metadata and must
+  never be displayed in rendered Markdown.
+- The renderer should not enable arbitrary raw HTML just to hide markers. It
+  should either skip HTML safely or remove only the internal marker pattern
+  before rendering.
+
+Reference routing rules:
+
+```text
+chat:<session_id>[:message_id]              -> Chat session, optional message focus
+notebook:<entry_id>                         -> Space / Notebook entry
+quiz:<quiz_id>[:question_id]                -> Space / Quiz Bank item, optional question focus
+research:<notebook_entry_id>                -> Space / Notebook research report
+book:<book_id>[:chapter_id]                 -> Books page, optional chapter focus
+kb:<knowledge_base_id>:<doc_id>[:chunk_id]  -> Knowledge Base document/chunk view
+```
+
+The same source reference component should be reused by Memory, Student Profile,
+Research reports, Quiz review, and RAG answer citations where practical.
+
+## 11. Validation Rules
 
 Before writing memory:
 
@@ -488,7 +524,7 @@ Before writing memory:
 Audit/dedup operations should also validate line numbers and operation type.
 Apply edits in reverse line order so line numbers remain stable.
 
-## 11. Workbench Behavior
+## 12. Workbench Behavior
 
 The Memory workbench should expose three actions for L2 and L3:
 
@@ -505,7 +541,7 @@ Recommended UX:
 - Keep L1 hidden from the primary memory overview, but allow source refs to
   resolve back to source records.
 
-## 12. Agent Tool Boundaries
+## 13. Agent Tool Boundaries
 
 `read_memory`:
 
@@ -525,7 +561,7 @@ Recommended UX:
 Memory content should guide explanation style and planning. It should not be
 presented as factual proof about external domains.
 
-## 13. Implementation Notes for `llm-tutor`
+## 14. Implementation Notes for `llm-tutor`
 
 Current `llm-tutor` already has Markdown memory files, L1 event recording, a
 Memory UI, and `read_memory`. The next quality improvements should be:
@@ -539,7 +575,7 @@ Memory UI, and `read_memory`. The next quality improvements should be:
 - Add tests for malformed JSON, invalid refs, duplicate refs, unknown sections,
   and idempotent parse/serialize.
 
-## 14. Why This Shape Is Better
+## 15. Why This Shape Is Better
 
 This design gives us:
 
