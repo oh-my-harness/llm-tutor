@@ -11,9 +11,10 @@ import remarkMath from 'remark-math'
 
 interface Props {
   text: string
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }
 
-export function MarkdownMessage({ text }: Props) {
+export function MarkdownMessage({ text, onSourceNavigate }: Props) {
   const rawId = useId()
   const sourceListId = `source-refs-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const prepared = prepareMarkdownWithSourceReferences(text, sourceListId)
@@ -59,7 +60,7 @@ export function MarkdownMessage({ text }: Props) {
         {prepared.markdown}
       </ReactMarkdown>
       {prepared.references.length > 0 && (
-        <SourceReferences id={sourceListId} references={prepared.references} />
+        <SourceReferences id={sourceListId} references={prepared.references} onNavigate={onSourceNavigate} />
       )}
     </div>
   )
@@ -67,14 +68,32 @@ export function MarkdownMessage({ text }: Props) {
 
 type SourceSurface = 'chat' | 'notebook' | 'quiz' | 'research' | 'book' | 'kb' | 'web' | 'unknown'
 
-interface SourceReference {
+export type SourceTarget =
+  | { type: 'chat'; sessionId: string; messageId?: string }
+  | { type: 'notebook'; entryId: string }
+  | { type: 'quiz'; quizId: string; questionId?: string }
+  | { type: 'research'; notebookEntryId: string }
+  | { type: 'book'; bookId: string; chapterId?: string }
+  | { type: 'kb'; knowledgeBaseId: string; documentId: string; chunkId?: string }
+  | { type: 'web'; url: string }
+
+export interface SourceReference {
   id: string
   label: string
   raw: string
   surface: SourceSurface
+  target?: SourceTarget
 }
 
-function SourceReferences({ id, references }: { id: string; references: SourceReference[] }) {
+function SourceReferences({
+  id,
+  references,
+  onNavigate,
+}: {
+  id: string
+  references: SourceReference[]
+  onNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
   return (
     <section id={id} className="mt-5 border-t border-gray-200 pt-4">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Sources</div>
@@ -94,6 +113,17 @@ function SourceReferences({ id, references }: { id: string; references: SourceRe
                 <span className="mx-1 text-gray-300">·</span>
                 <code className="break-all rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{reference.raw}</code>
               </span>
+              {reference.target && (
+                <button
+                  className="shrink-0 rounded-md border border-blue-100 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                  type="button"
+                  onClick={() => {
+                    if (reference.target) onNavigate?.(reference.target, reference)
+                  }}
+                >
+                  Open
+                </button>
+              )}
             </div>
           </li>
         ))}
@@ -133,6 +163,7 @@ function extractFootnoteReferences(text: string) {
           label,
           raw,
           surface: sourceSurfaceFromRaw(raw),
+          target: sourceTargetFromRaw(raw),
         })
       }
       continue
@@ -167,6 +198,47 @@ function sourceSurfaceFromRaw(raw: string): SourceSurface {
   if (prefix === 'kb') return 'kb'
   if (prefix === 'web' || raw.startsWith('http://') || raw.startsWith('https://')) return 'web'
   return 'unknown'
+}
+
+function sourceTargetFromRaw(raw: string): SourceTarget | undefined {
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return { type: 'web', url: raw }
+  }
+
+  const [prefix, ...parts] = raw.split(':')
+  if (!prefix) return undefined
+  const type = prefix.toLowerCase()
+
+  if (type === 'web') {
+    const url = parts.join(':')
+    return url ? { type: 'web', url } : undefined
+  }
+  if (type === 'chat') {
+    const [sessionId, messageId] = parts
+    return sessionId ? { type: 'chat', sessionId, messageId } : undefined
+  }
+  if (type === 'notebook') {
+    const [entryId] = parts
+    return entryId ? { type: 'notebook', entryId } : undefined
+  }
+  if (type === 'quiz') {
+    const [quizId, questionId] = parts
+    return quizId ? { type: 'quiz', quizId, questionId } : undefined
+  }
+  if (type === 'research') {
+    const [notebookEntryId] = parts
+    return notebookEntryId ? { type: 'research', notebookEntryId } : undefined
+  }
+  if (type === 'book') {
+    const [bookId, chapterId] = parts
+    return bookId ? { type: 'book', bookId, chapterId } : undefined
+  }
+  if (type === 'kb') {
+    const [knowledgeBaseId, documentId, chunkId] = parts
+    return knowledgeBaseId && documentId ? { type: 'kb', knowledgeBaseId, documentId, chunkId } : undefined
+  }
+
+  return undefined
 }
 
 function sourceSurfaceLabel(surface: SourceSurface) {

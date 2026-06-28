@@ -13,6 +13,7 @@ import { MemoryPage } from './components/MemoryPage'
 import { PlaceholderPage } from './components/PlaceholderPage'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
+import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, activeLlmConfig, loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
@@ -629,6 +630,52 @@ export default function App() {
     }
   }
 
+  const handleSourceNavigate = useCallback((target: SourceTarget, reference: SourceReference) => {
+    if (target.type === 'chat') {
+      void handleSelectSession(target.sessionId)
+      pushStatus({
+        kind: 'done',
+        label: 'Opened source',
+        detail: target.messageId ? `Chat message ${target.messageId}` : 'Chat session',
+      })
+      return
+    }
+
+    if (target.type === 'web') {
+      window.open(target.url, '_blank', 'noopener,noreferrer')
+      return
+    }
+
+    if (target.type === 'notebook' || target.type === 'quiz' || target.type === 'research') {
+      setView('space')
+      pushStatus({
+        kind: 'done',
+        label: 'Opened source area',
+        detail: sourceTargetDetail(target, reference),
+      })
+      return
+    }
+
+    if (target.type === 'book') {
+      setView('books')
+      pushStatus({
+        kind: 'done',
+        label: 'Opened source area',
+        detail: sourceTargetDetail(target, reference),
+      })
+      return
+    }
+
+    if (target.type === 'kb') {
+      setView('knowledge')
+      pushStatus({
+        kind: 'done',
+        label: 'Opened source area',
+        detail: sourceTargetDetail(target, reference),
+      })
+    }
+  }, [handleSelectSession, pushStatus])
+
   const chatIsEmpty = view === 'chat' && messages.length === 0 && !streamingText && !sessionId
 
   return (
@@ -722,7 +769,7 @@ export default function App() {
         )}
 
         {view === 'memory' && (
-          <MemoryPage settings={llmSettings} />
+          <MemoryPage settings={llmSettings} onSourceNavigate={handleSourceNavigate} />
         )}
 
         {view === 'settings' && (
@@ -1121,6 +1168,15 @@ function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
 
 function isCapability(value: string): value is Capability {
   return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz' || value === 'research'
+}
+
+function sourceTargetDetail(target: SourceTarget, reference: SourceReference) {
+  if (target.type === 'notebook') return `Notebook ${target.entryId}`
+  if (target.type === 'quiz') return target.questionId ? `Quiz ${target.quizId}, question ${target.questionId}` : `Quiz ${target.quizId}`
+  if (target.type === 'research') return `Research report ${target.notebookEntryId}`
+  if (target.type === 'book') return target.chapterId ? `Book ${target.bookId}, chapter ${target.chapterId}` : `Book ${target.bookId}`
+  if (target.type === 'kb') return target.chunkId ? `Knowledge ${target.documentId}, chunk ${target.chunkId}` : `Knowledge ${target.documentId}`
+  return reference.raw
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {

@@ -16,6 +16,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { MarkdownMessage } from './MarkdownMessage'
+import type { SourceReference, SourceTarget } from './MarkdownMessage'
 import { settingsForSession, type LlmSettings } from '../settings'
 
 type Layer = 'overview' | 'L2' | 'L3'
@@ -66,7 +67,13 @@ interface AssistResult {
 const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/knowledge.md', 'L2/research.md']
 const l3Paths = ['L3/recent.md', 'L3/profile.md', 'L3/scope.md', 'L3/preferences.md', 'L3/teaching_strategy.md']
 
-export function MemoryPage({ settings }: { settings: LlmSettings }) {
+export function MemoryPage({
+  settings,
+  onSourceNavigate,
+}: {
+  settings: LlmSettings
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
   const [files, setFiles] = useState<MemoryFile[]>([])
   const [layer, setLayer] = useState<Layer>('overview')
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -225,6 +232,7 @@ export function MemoryPage({ settings }: { settings: LlmSettings }) {
             onSave={() => void saveActiveFile()}
             onUndo={() => void undoActiveFile()}
             onRunAssist={(action) => void runAssist(action)}
+            onSourceNavigate={onSourceNavigate}
             onApplyProposal={(markdown) => {
               setDraft(markdown)
               setStatus('Memory draft updated from agent proposal')
@@ -368,6 +376,7 @@ function LayerWorkspace({
   onSave,
   onUndo,
   onRunAssist,
+  onSourceNavigate,
   onApplyProposal,
   onReset,
 }: {
@@ -386,6 +395,7 @@ function LayerWorkspace({
   onSave: () => void
   onUndo: () => void
   onRunAssist: (action: AssistAction) => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
   onApplyProposal: (markdown: string) => void
   onReset: () => void
 }) {
@@ -463,7 +473,7 @@ function LayerWorkspace({
               />
             ) : (
               <article className="min-h-full rounded-lg border border-gray-100 bg-gray-50 p-5">
-                <MarkdownMessage text={draft || ' '} />
+                <MarkdownMessage text={draft || ' '} onSourceNavigate={onSourceNavigate} />
               </article>
             )}
           </div>
