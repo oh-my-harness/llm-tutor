@@ -109,15 +109,15 @@ Do not move runtime/session concerns into this feature. Session opening and hist
 
 ### Phase 1: Markdown Memory References
 
-Status: planned.
+Status: completed for the first reusable renderer slice on 2026-06-28.
 
 Tasks:
 
-- [ ] Add a source reference parser for Markdown footnote definitions.
-- [ ] Remove or hide internal memory markers before rendering.
-- [ ] Render inline `[^n]` references as source chips.
-- [ ] Render a bottom `SourceReferences` list.
-- [ ] Clicking inline source chips scrolls to the bottom item.
+- [x] Add a source reference parser for Markdown footnote definitions.
+- [x] Remove or hide internal memory markers before rendering.
+- [x] Render inline `[^n]` references as source chips.
+- [x] Render a bottom `SourceReferences` list.
+- [x] Clicking inline source chips scrolls to the bottom item.
 - [ ] Add tests for parser behavior and marker hiding.
 
 Acceptance:
