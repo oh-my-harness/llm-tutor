@@ -26,7 +26,7 @@ export function MarkdownMessage({ text, onSourceNavigate }: Props) {
           <a
             {...props}
             href={href}
-            className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-1.5 align-baseline text-[0.72em] font-semibold leading-none text-blue-700 no-underline hover:border-blue-300 hover:bg-blue-100"
+            className="mx-0.5 align-baseline text-[0.82em] font-semibold text-blue-700 no-underline hover:text-blue-800 hover:underline"
             onClick={(event) => {
               event.preventDefault()
               document.getElementById(href.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -102,29 +102,27 @@ function SourceReferences({
           <li
             key={reference.id}
             id={`${id}-item-${safeReferenceId(reference.label)}`}
-            className="scroll-mt-6 rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm text-gray-700"
+            className="scroll-mt-6"
           >
-            <div className="flex items-start gap-2">
+            <button
+              className={`flex w-full items-start gap-2 rounded-lg border border-blue-100 bg-white px-3 py-2 text-left text-sm text-gray-700 ${
+                reference.target ? 'hover:border-blue-200 hover:bg-blue-50/50' : 'cursor-default'
+              }`}
+              type="button"
+              disabled={!reference.target}
+              onClick={() => {
+                if (reference.target) onNavigate?.(reference.target, reference)
+              }}
+            >
               <span className="mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-xs font-semibold text-white">
-                {reference.label}
+                [{reference.label}]
               </span>
               <span className="min-w-0 flex-1">
                 <span className="font-medium text-gray-900">{sourceSurfaceLabel(reference.surface)}</span>
                 <span className="mx-1 text-gray-300">·</span>
                 <code className="break-all rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{reference.raw}</code>
               </span>
-              {reference.target && (
-                <button
-                  className="shrink-0 rounded-md border border-blue-100 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
-                  type="button"
-                  onClick={() => {
-                    if (reference.target) onNavigate?.(reference.target, reference)
-                  }}
-                >
-                  Open
-                </button>
-              )}
-            </div>
+            </button>
           </li>
         ))}
       </ol>
