@@ -457,7 +457,20 @@
 - REQ-535: Multi-user auth and permissions shall be out of MVP scope.
 - REQ-536: Stronger sandboxing shall be required before hosted/multi-user deployments. Status: planned.
 
-## 29. Acceptance Baseline
+## 29. Desktop Release
+
+- REQ-560: The product shall be packaged as a Tauri desktop application. Status: planned.
+- REQ-561: The desktop app shall bundle the React UI production build. Status: planned.
+- REQ-562: The desktop app shall start the local Rust backend automatically. Status: planned.
+- REQ-563: The desktop app shall not require users to run `npm run dev` or `cargo run` manually. Status: planned.
+- REQ-564: The desktop app shall use an OS-appropriate application data directory by default. Status: planned.
+- REQ-565: The desktop app shall keep API keys user-configured and shall not bundle provider credentials. Status: planned.
+- REQ-566: The first desktop release shall prioritize Windows packaging. Status: planned.
+- REQ-567: The release process shall support reproducible builds through scripts or CI. Status: planned.
+- REQ-568: The app shall preserve the local-first storage model in the desktop release. Status: planned.
+- REQ-569: Desktop packaging details shall be tracked in `docs/plans/2026-06-28-tauri-desktop-release-plan.md`. Status: planned.
+
+## 30. Acceptance Baseline
 
 - REQ-550: A clean clone shall be able to start backend and frontend using README commands.
 - REQ-551: A user shall be able to create a knowledge base and upload a document.
