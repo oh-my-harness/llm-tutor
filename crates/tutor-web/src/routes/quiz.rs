@@ -380,6 +380,8 @@ fn source_hits_from_text(
             id: format!("conversation-{index}"),
             kb: quiz.kb_id.clone(),
             source: source_label.to_string(),
+            raw_source: source_label.to_string(),
+            document_id: None,
             text,
             score: None,
         })
@@ -482,6 +484,10 @@ fn questions_from_generated(
                     source: hit.source.clone(),
                     text: citation_excerpt(&hit.text, &question.supporting_quote),
                     score: hit.score,
+                    kb: Some(hit.kb.clone()),
+                    document_id: hit.document_id.clone(),
+                    chunk_id: Some(hit.id.clone()),
+                    title: Some(hit.source.clone()),
                 })
                 .collect::<Vec<_>>();
             let option_ids = ["A", "B", "C", "D", "E", "F"];
@@ -589,6 +595,10 @@ fn questions_from_hits(config: &QuizConfig, hits: &[tutor_rag::SearchHit]) -> Ve
                     source: hit.source.clone(),
                     text: hit.text.clone(),
                     score: hit.score,
+                    kb: Some(hit.kb.clone()),
+                    document_id: hit.document_id.clone(),
+                    chunk_id: Some(hit.id.clone()),
+                    title: Some(hit.source.clone()),
                 }],
                 tags: vec![topic.to_string(), hit.source.clone()],
                 difficulty: config.difficulty.clone(),

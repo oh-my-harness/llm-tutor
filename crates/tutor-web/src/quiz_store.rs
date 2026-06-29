@@ -49,6 +49,14 @@ pub struct QuizCitation {
     pub source: String,
     pub text: String,
     pub score: Option<f32>,
+    #[serde(default)]
+    pub kb: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
+    #[serde(default)]
+    pub chunk_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

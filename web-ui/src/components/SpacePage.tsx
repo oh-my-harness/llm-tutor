@@ -914,18 +914,31 @@ function QuizSourceReferences({
 }
 
 function quizCitationToSourceReference(citation: QuizQuestion['citations'][number], index: number): SourceReference {
-  const raw = citation.source
+  const raw = quizCitationRawTarget(citation)
   const target = sourceTargetFromRaw(raw)
   return {
     id: `${index + 1}:${raw}`,
     label: String(index + 1),
     raw,
     surface: target?.type === 'web' ? 'web' : target?.type === 'kb' ? 'kb' : 'unknown',
-    title: citation.source,
+    title: citation.title || citation.source,
     description: citation.text,
     score: citation.score,
+    metadata: {
+      documentName: citation.title || citation.source,
+      documentId: citation.document_id ?? undefined,
+      chunkId: citation.chunk_id ?? undefined,
+      missingReason: target ? undefined : 'This quiz citation was generated before source navigation metadata was available.',
+    },
     target,
   }
+}
+
+function quizCitationRawTarget(citation: QuizQuestion['citations'][number]) {
+  if (citation.kb && citation.document_id) {
+    return ['kb', citation.kb, citation.document_id, citation.chunk_id].filter(Boolean).join(':')
+  }
+  return citation.source
 }
 
 function StudentProfileTab({

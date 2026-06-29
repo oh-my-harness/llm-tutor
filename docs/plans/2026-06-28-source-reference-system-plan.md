@@ -171,15 +171,23 @@ Acceptance:
 
 ### Phase 4: Metadata Enrichment
 
-Status: planned.
+Status: implemented.
 
 Tasks:
 
-- [ ] Add source titles where available.
-- [ ] Add document names, chunk numbers, page numbers, or message snippets where available.
-- [ ] Add web page title and URL display.
-- [ ] Add stale/missing-source indicators.
-- [ ] Add hover previews only after the basic click flow is reliable.
+- [x] Add source titles where available.
+- [x] Add document names, chunk numbers, page numbers, or message snippets where available.
+- [x] Add web page title and URL display.
+- [x] Add stale/missing-source indicators.
+- [x] Defer hover previews until the basic click flow has more usage feedback.
+
+Notes:
+
+- RAG search results now expose `raw_source`, `document_id`, and `chunk_id`, while keeping the friendly document title.
+- Chat RAG citations map to navigable `kb:<kb>:<document_id>:<chunk_id>` references when tool metadata is present.
+- Quiz citations persist optional KB/document/chunk/title metadata so quiz history can link back to source chunks.
+- Source reference cards show title, URL or document name, score, document/chunk badges, and a fallback warning when a source target is not navigable.
+- Hover previews remain intentionally deferred; the basic click flow is now reliable enough to add richer previews later.
 
 Acceptance:
 

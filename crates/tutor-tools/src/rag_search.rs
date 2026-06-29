@@ -137,6 +137,10 @@ impl Tool for RagSearchTool {
                         "id": hit.id,
                         "kb": hit.kb,
                         "source": hit.source,
+                        "raw_source": hit.raw_source,
+                        "document_id": hit.document_id,
+                        "chunk_id": hit.id,
+                        "title": hit.source,
                         "text": hit.text,
                         "score": hit.score,
                     })

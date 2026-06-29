@@ -85,7 +85,19 @@ export interface SourceReference {
   title?: string
   description?: string
   score?: number | null
+  metadata?: SourceReferenceMetadata
   target?: SourceTarget
+}
+
+export interface SourceReferenceMetadata {
+  documentName?: string
+  documentId?: string
+  chunkId?: string
+  page?: string | number
+  url?: string
+  messageSnippet?: string
+  stale?: boolean
+  missingReason?: string
 }
 
 export function SourceReferences({
@@ -121,12 +133,26 @@ export function SourceReferences({
                 [{reference.label}]
               </span>
               <span className="min-w-0 flex-1">
-                <span className="font-medium text-gray-900">{reference.title || sourceSurfaceLabel(reference.surface)}</span>
+                <span className="font-medium text-gray-900">{reference.title || sourceReferenceTitle(reference)}</span>
                 {typeof reference.score === 'number' && (
                   <span className="ml-1 text-xs text-gray-400">{reference.score.toFixed(4)}</span>
                 )}
                 <span className="mx-1 text-gray-300">·</span>
-                <code className="break-all rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{reference.raw}</code>
+                <span className="text-xs text-gray-500">{sourceReferenceSubtitle(reference)}</span>
+                {sourceReferenceBadges(reference).length > 0 && (
+                  <span className="mt-1 flex flex-wrap gap-1.5">
+                    {sourceReferenceBadges(reference).map((badge) => (
+                      <span key={badge} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                        {badge}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                {!reference.target && (
+                  <span className="mt-1 block text-xs text-amber-700">
+                    {reference.metadata?.missingReason || 'Source target unavailable'}
+                  </span>
+                )}
                 {reference.description && (
                   <span className="mt-1 block text-xs leading-5 text-gray-600">{reference.description}</span>
                 )}
@@ -137,6 +163,29 @@ export function SourceReferences({
       </ol>
     </section>
   )
+}
+
+function sourceReferenceTitle(reference: SourceReference) {
+  return reference.metadata?.documentName || sourceSurfaceLabel(reference.surface)
+}
+
+function sourceReferenceSubtitle(reference: SourceReference) {
+  if (reference.metadata?.url) return reference.metadata.url
+  if (reference.metadata?.documentName) return reference.metadata.documentName
+  return reference.raw
+}
+
+function sourceReferenceBadges(reference: SourceReference) {
+  const badges: string[] = [sourceSurfaceLabel(reference.surface)]
+  if (reference.metadata?.page != null) badges.push(`page ${reference.metadata.page}`)
+  if (reference.metadata?.chunkId) badges.push(`chunk ${shortId(reference.metadata.chunkId)}`)
+  if (reference.metadata?.documentId) badges.push(`doc ${shortId(reference.metadata.documentId)}`)
+  if (reference.metadata?.stale) badges.push('stale')
+  return badges
+}
+
+function shortId(value: string) {
+  return value.length > 10 ? `${value.slice(0, 8)}...` : value
 }
 
 function prepareMarkdownWithSourceReferences(text: string, sourceListId: string) {

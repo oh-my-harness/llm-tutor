@@ -26,7 +26,15 @@ export interface QuizQuestion {
   options: Array<{ id: string; text: string }>
   correct_option_id: string
   explanation: string
-  citations: Array<{ source: string; text: string; score?: number | null }>
+  citations: Array<{
+    source: string
+    text: string
+    score?: number | null
+    kb?: string | null
+    document_id?: string | null
+    chunk_id?: string | null
+    title?: string | null
+  }>
   tags: string[]
   difficulty: 'easy' | 'medium' | 'hard'
 }

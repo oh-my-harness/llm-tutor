@@ -55,6 +55,11 @@ interface Citation {
   title?: string
   url?: string
   score?: number | null
+  kb?: string
+  documentId?: string
+  chunkId?: string
+  rawSource?: string
+  page?: string | number
 }
 
 interface Props {
@@ -353,7 +358,7 @@ function CitationList({
 }
 
 function citationToSourceReference(citation: Citation, index: number): SourceReference {
-  const raw = citation.url || citation.source
+  const raw = citation.url || citationRawTarget(citation)
   const target = sourceTargetFromRaw(raw)
   return {
     id: `${citation.index || index + 1}:${raw}`,
@@ -363,8 +368,23 @@ function citationToSourceReference(citation: Citation, index: number): SourceRef
     title: citation.title || citation.source,
     description: citation.text,
     score: citation.score,
+    metadata: {
+      documentName: citation.kind === 'rag' ? citation.title || citation.source : undefined,
+      documentId: citation.documentId,
+      chunkId: citation.chunkId,
+      page: citation.page,
+      url: citation.url,
+      missingReason: target ? undefined : 'No navigable source id was provided by the tool result.',
+    },
     target,
   }
+}
+
+function citationRawTarget(citation: Citation) {
+  if (citation.kb && citation.documentId) {
+    return ['kb', citation.kb, citation.documentId, citation.chunkId].filter(Boolean).join(':')
+  }
+  return citation.rawSource || citation.source
 }
 
 function ChatQuizCard({
@@ -555,18 +575,31 @@ function quizCitationToSourceReference(
   citation: QuizSession['questions'][number]['citations'][number],
   index: number,
 ): SourceReference {
-  const raw = citation.source
+  const raw = quizCitationRawTarget(citation)
   const target = sourceTargetFromRaw(raw)
   return {
     id: `${index + 1}:${raw}`,
     label: String(index + 1),
     raw,
     surface: target?.type === 'web' ? 'web' : target?.type === 'kb' ? 'kb' : 'unknown',
-    title: citation.source,
+    title: citation.title || citation.source,
     description: citation.text,
     score: citation.score,
+    metadata: {
+      documentName: citation.title || citation.source,
+      documentId: citation.document_id ?? undefined,
+      chunkId: citation.chunk_id ?? undefined,
+      missingReason: target ? undefined : 'This quiz citation was generated before source navigation metadata was available.',
+    },
     target,
   }
+}
+
+function quizCitationRawTarget(citation: QuizSession['questions'][number]['citations'][number]) {
+  if (citation.kb && citation.document_id) {
+    return ['kb', citation.kb, citation.document_id, citation.chunk_id].filter(Boolean).join(':')
+  }
+  return citation.source
 }
 
 function Composer({

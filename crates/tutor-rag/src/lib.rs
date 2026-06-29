@@ -33,6 +33,8 @@ pub struct SearchHit {
     pub id: String,
     pub kb: String,
     pub source: String,
+    pub raw_source: String,
+    pub document_id: Option<String>,
     pub text: String,
     pub score: Option<f32>,
 }
@@ -387,6 +389,8 @@ fn search_hits_from_batches(batches: &[RecordBatch]) -> Vec<SearchHit> {
                 id: ids.value(row).to_string(),
                 kb: kbs.value(row).to_string(),
                 source: display_source(sources.value(row)),
+                raw_source: sources.value(row).to_string(),
+                document_id: source_document_id(sources.value(row)),
                 text: texts.value(row).to_string(),
                 score: scores.map(|array| array.value(row)),
             });
@@ -461,6 +465,13 @@ fn display_source(value: &str) -> String {
         .split_once("::")
         .map(|(_, source)| source.to_string())
         .unwrap_or_else(|| value.to_string())
+}
+
+fn source_document_id(value: &str) -> Option<String> {
+    value
+        .split_once("::")
+        .map(|(document_id, _)| document_id.trim().to_string())
+        .filter(|document_id| !document_id.is_empty())
 }
 
 fn hash_embedding(text: &str, dimensions: usize) -> Vec<f32> {

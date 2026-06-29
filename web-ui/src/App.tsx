@@ -40,6 +40,11 @@ interface Citation {
   title?: string
   url?: string
   score?: number | null
+  kb?: string
+  documentId?: string
+  chunkId?: string
+  rawSource?: string
+  page?: string | number
 }
 
 interface RecentSession {
@@ -916,6 +921,11 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
         title: typeof item.title === 'string' ? item.title : undefined,
         url: typeof item.url === 'string' ? item.url : undefined,
         score: typeof item.score === 'number' ? item.score : null,
+        kb: typeof item.kb === 'string' ? item.kb : undefined,
+        documentId: typeof item.document_id === 'string' ? item.document_id : undefined,
+        chunkId: typeof item.chunk_id === 'string' ? item.chunk_id : typeof item.id === 'string' ? item.id : undefined,
+        rawSource: typeof item.raw_source === 'string' ? item.raw_source : undefined,
+        page: typeof item.page === 'string' || typeof item.page === 'number' ? item.page : undefined,
       }
     })
     .filter((source): source is Citation => Boolean(source && source.text))
