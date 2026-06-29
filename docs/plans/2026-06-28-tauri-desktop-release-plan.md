@@ -1,121 +1,365 @@
 # Tauri Desktop Release Plan
 
-> Status: proposed | Date: 2026-06-28 | Scope: package `llm-tutor` as a local-first Tauri desktop application.
+> Status: active planning | Date: 2026-06-28 | Scope: build the first usable
+> desktop release of `llm-tutor` with Tauri, bundled React UI, and a managed
+> `tutor-web` backend sidecar.
 
-## 1. Decision
+## 1. Goal
 
-`llm-tutor` 的正式发布形态采用 Tauri 桌面应用。
+The first desktop release should let a user install and start `llm-tutor` like
+a normal local application.
 
-桌面应用应保留当前 Web UI + Rust 后端的产品架构，但把启动、数据目录、配置、更新和分发体验收敛成一个普通用户可以安装和启动的软件。
+The user should not need to:
 
-## 2. Release Goal
+- run `cargo run -p tutor-web` manually,
+- run `npm run dev` manually,
+- open a browser,
+- understand which port the backend uses,
+- keep project checkout paths as the data directory.
 
-- 用户下载安装包后，可以像普通桌面软件一样启动 `llm-tutor`。
-- 用户不需要手动启动 `tutor-web` 和 `web-ui` 两个开发进程。
-- 数据默认保存在本机应用数据目录，符合本地优先原则。
-- LLM、Embedding、Search 等 API Key 仍由用户在设置页自行配置。
-- 不内置模型密钥，不绑定单一模型服务商。
+The desktop app should provide:
 
-## 3. Target Shape
+- a native window,
+- the existing React UI,
+- a locally managed Rust backend,
+- persistent local data,
+- usable LLM / embedding / search settings,
+- a repeatable release build path.
+
+## 2. Architecture Decision
+
+Use **Tauri + sidecar backend** for the first release.
 
 ```text
 llm-tutor desktop app
   -> Tauri shell
-      -> bundled React UI
-      -> managed Rust backend sidecar or embedded backend runtime
-      -> local app data directory
-      -> OS integration: window, tray/update later
+      -> loads web-ui/dist
+      -> starts tutor-web sidecar
+      -> passes host, port, and data directory to tutor-web
+      -> provides backend URL to the frontend
+  -> tutor-web sidecar
+      -> serves REST API on 127.0.0.1:<port>
+      -> serves WebSocket on 127.0.0.1:<port>
+      -> reads/writes local app data
+      -> runs agent, tools, RAG, quiz, memory, notebook, books
 ```
 
-第一版优先采用保守方案：
+Do not rewrite `tutor-web` as Tauri commands for v0.1. The existing Axum
+backend already owns streaming, sessions, uploads, RAG, tools, and product
+storage. Rewriting those as Tauri commands would add risk without improving the
+first release.
 
-- Tauri 负责窗口、打包、应用数据目录和启动流程。
-- React 前端继续由 `web-ui` 构建产物提供。
-- Rust 后端优先作为 sidecar 进程随应用启动。
-- 前端通过本地 HTTP/WebSocket 访问后端。
+## 3. Release Scope
 
-后续可以评估是否把 `tutor-web` 的 Axum 服务更深地嵌入 Tauri command/runtime，但第一版不强行重构。
+### In Scope
 
-## 4. Packaging Requirements
+- Windows desktop release first.
+- Tauri project added to the repository.
+- Existing `web-ui` bundled into the desktop app.
+- `tutor-web` built as a sidecar binary.
+- Tauri starts and stops the sidecar.
+- Backend listens only on `127.0.0.1`.
+- Frontend can discover the backend base URL in desktop mode.
+- Desktop data directory is separate from development `.llm-tutor/`.
+- A release script builds frontend, backend, and Tauri bundle.
+- README documents desktop usage.
 
-- Windows 是第一优先发布平台。
-- 后续支持 macOS 和 Linux。
-- 安装包应包含：
-  - Tauri 应用壳。
-  - 前端静态资源。
-  - `tutor-web` release 构建产物或等价后端运行时。
-  - 默认配置模板。
-  - README / 使用说明。
-  - License。
-- 应用启动时自动启动本地后端。
-- 应用退出时应关闭托管的后端进程。
-- 后端端口应避免与用户环境冲突。
-- 前端不应依赖 `npm run dev`。
-- release 构建应可由脚本或 CI 重复执行。
+### Out of Scope
 
-## 5. Data and Config
+- Cloud sync.
+- Multi-user accounts.
+- Built-in model service.
+- Auto update.
+- System keychain storage for API keys.
+- Rewriting all backend routes as Tauri commands.
+- macOS / Linux release packaging.
 
-- 桌面版默认数据目录应使用系统应用数据目录，而不是项目根目录 `.llm-tutor/`。
-- 开发模式仍可继续使用项目根目录 `.llm-tutor/`。
-- 设置页应展示当前数据目录。
-- 后续应支持数据导入/导出。
-- API Key 应避免写入日志和 trace。
-- 后续应评估使用系统 keychain / credential store 保存敏感配置。
+## 4. Data Directory
 
-## 6. Implementation Phases
+Development mode can keep using the repository-local `.llm-tutor/` directory.
+
+Desktop release should use the OS app data directory, for example on Windows:
+
+```text
+%APPDATA%\llm-tutor
+```
+
+The sidecar should receive this directory through either:
+
+- environment variable: `LLM_TUTOR_HOME`,
+- or CLI argument: `--data-dir <path>`.
+
+Preferred v0.1 implementation:
+
+```text
+Tauri app starts
+  -> resolve app_data_dir()
+  -> create llm-tutor data directory if missing
+  -> spawn tutor-web with LLM_TUTOR_HOME=<app data dir>
+```
+
+## 5. Port Strategy
+
+The backend must not listen on `0.0.0.0`.
+
+Use:
+
+```text
+127.0.0.1:<dynamic port>
+```
+
+Recommended v0.1 implementation:
+
+1. Tauri finds a free TCP port.
+2. Tauri starts `tutor-web` with `--host 127.0.0.1 --port <port>`.
+3. Tauri stores the backend URL in app state.
+4. Frontend asks Tauri for the backend URL.
+5. Frontend builds REST and WebSocket URLs from that base URL.
+
+Fallback if dynamic port is too slow to implement:
+
+- use fixed `127.0.0.1:8080`,
+- detect conflict,
+- show a clear startup error.
+
+Dynamic port is preferred for the first real release.
+
+## 6. Frontend API Adaptation
+
+The current web UI relies on Vite proxy in development:
+
+```text
+/api -> http://localhost:8080
+/ws  -> ws://localhost:8080
+```
+
+Desktop mode has no Vite proxy, so frontend code should use a small API client:
+
+```text
+apiFetch("/api/sessions")
+apiUrl("/api/knowledge-bases")
+wsUrl("/ws/session/<id>")
+```
+
+Behavior:
+
+- Browser/dev mode: keep relative URLs.
+- Tauri/desktop mode: use backend URL returned by Tauri command.
+
+Do not scatter `http://127.0.0.1:<port>` construction across components.
+
+## 7. Backend Changes
+
+`tutor-web` should support runtime configuration:
+
+```text
+tutor-web --host 127.0.0.1 --port 43127 --data-dir <path>
+```
+
+If CLI arguments are not provided:
+
+- host defaults to `127.0.0.1`,
+- port defaults to `8080`,
+- data dir defaults to current existing behavior.
+
+Required backend tasks:
+
+- add host/port/data-dir config parsing,
+- route all product stores through the configured data root,
+- ensure LanceDB/RAG root also lives under the configured data root,
+- ensure logs never print API keys,
+- return clear startup errors.
+
+## 8. Tauri App Structure
+
+Add:
+
+```text
+src-tauri/
+  Cargo.toml
+  tauri.conf.json
+  src/main.rs
+  icons/
+```
+
+Tauri responsibilities:
+
+- create native window,
+- load `web-ui/dist`,
+- spawn `tutor-web` sidecar,
+- stop sidecar on app exit,
+- expose `get_backend_url` command,
+- expose `open_data_dir` command later,
+- expose backend health state later.
+
+## 9. Build and Packaging
+
+Recommended commands:
+
+```powershell
+# build frontend
+cd web-ui
+npm run build
+cd ..
+
+# build backend sidecar
+cargo build --release -p tutor-web
+
+# build desktop bundle
+cargo tauri build
+```
+
+Add a single release script:
+
+```text
+scripts/build-desktop.ps1
+```
+
+The script should:
+
+1. run frontend build,
+2. run backend release build,
+3. copy or let Tauri bundle the sidecar,
+4. run Tauri bundle,
+5. print output artifact paths.
+
+First Windows artifacts:
+
+- portable `.exe` or zipped app folder for quick testing,
+- installer if Tauri bundler setup is stable.
+
+## 10. Implementation Phases
 
 ### Phase 1: Desktop Skeleton
 
-- [ ] 添加 Tauri app 工程。
-- [ ] 复用现有 `web-ui` 构建产物。
-- [ ] 能打开桌面窗口并展示现有 UI。
-- [ ] 开发模式下仍支持现有前后端分离启动。
+Status: planned.
 
-### Phase 2: Backend Management
+Tasks:
 
-- [ ] 将 `tutor-web` 作为 release sidecar 构建。
-- [ ] Tauri 启动时拉起 sidecar。
-- [ ] Tauri 退出时关闭 sidecar。
-- [ ] 支持动态选择本地端口并传给前端。
-- [ ] 后端使用桌面应用数据目录。
+- [ ] Add Tauri project.
+- [ ] Configure dev URL to existing Vite dev server.
+- [ ] Configure production dist path to `web-ui/dist`.
+- [ ] Add basic app window title, icon placeholder, and app metadata.
+- [ ] Verify desktop window can load existing UI.
 
-### Phase 3: User-Ready Packaging
+Acceptance:
 
-- [ ] 生成 Windows 安装包。
-- [ ] 生成 Windows portable 包，作为调试和轻量分发选项。
-- [ ] 补充桌面版 README。
-- [ ] 增加 release 构建脚本。
-- [ ] 在 CI 中增加桌面包构建检查。
+- `cargo tauri dev` opens the current UI.
+- No backend sidecar is required yet in this phase.
 
-### Phase 4: Desktop Polish
+### Phase 2: Backend Sidecar
 
-- [ ] 首次启动引导用户配置 LLM。
-- [ ] 设置页展示版本、数据目录、后端状态。
-- [ ] 支持打开数据目录。
-- [ ] 支持检查更新。
-- [ ] 评估自动更新。
+Status: planned.
 
-## 7. Open Questions
+Tasks:
 
-- 后端采用 sidecar 还是嵌入式 Axum runtime。
-- 本地端口分配和前端发现机制如何设计。
-- 是否需要托盘常驻。
-- API Key 是否第一版就接入系统 keychain。
-- Windows 安装器优先 NSIS、MSI，还是先只做 portable。
+- [ ] Add `tutor-web` host/port/data-dir runtime config.
+- [ ] Add sidecar declaration to Tauri config.
+- [ ] Spawn `tutor-web` on app startup.
+- [ ] Kill `tutor-web` on app exit.
+- [ ] Implement dynamic local port selection.
+- [ ] Implement Tauri command: `get_backend_url`.
+- [ ] Add frontend API URL resolver.
+- [ ] Update REST fetches and WebSocket creation to use resolver.
 
-## 8. Non-Goals for First Release
+Acceptance:
 
-- 不做云端 SaaS。
-- 不做多用户权限系统。
-- 不内置模型服务或代理服务。
-- 不强制所有数据同步到云端。
-- 不在第一版重构全部后端为 Tauri command。
+- Desktop app starts backend automatically.
+- Chat session list can load from sidecar.
+- WebSocket chat can connect from the desktop app.
+- Closing the desktop app stops the sidecar.
 
-## 9. Acceptance
+### Phase 3: Local Data Directory
 
-- 用户下载安装包后可以启动桌面应用。
-- 用户可以在桌面应用中完成 LLM 配置。
-- 用户可以创建会话、发送消息并看到流式回复。
-- 用户可以创建知识库并上传文档。
-- 用户重启应用后，本地数据仍可恢复。
-- 开发者可以用一条明确命令构建桌面 release 包。
+Status: planned.
+
+Tasks:
+
+- [ ] Resolve Tauri app data directory.
+- [ ] Pass app data directory to sidecar.
+- [ ] Move sessions, settings, knowledge bases, quizzes, memory, notebooks,
+      books, uploaded documents, and LanceDB under the configured data root.
+- [ ] Add settings/status UI display for current data directory.
+- [ ] Add "open data directory" desktop command if practical.
+
+Acceptance:
+
+- Desktop data survives app restart.
+- Desktop data does not require running inside the repository.
+- Knowledge base upload and RAG search work after restart.
+
+### Phase 4: Release Build Script
+
+Status: planned.
+
+Tasks:
+
+- [ ] Add `scripts/build-desktop.ps1`.
+- [ ] Add root-level documentation for desktop build prerequisites.
+- [ ] Build `web-ui`.
+- [ ] Build `tutor-web --release`.
+- [ ] Build Tauri bundle.
+- [ ] Restore or ignore generated build cache files.
+
+Acceptance:
+
+- A developer can produce a desktop artifact with one documented command.
+- Build output path is printed clearly.
+
+### Phase 5: First Release QA
+
+Status: planned.
+
+Tasks:
+
+- [ ] Install or unpack app on a clean Windows machine/profile.
+- [ ] Start app with no existing data.
+- [ ] Configure one LLM provider.
+- [ ] Send a chat message and receive streaming response.
+- [ ] Configure embedding provider.
+- [ ] Create knowledge base and upload text/PDF.
+- [ ] Ask a RAG question and verify citation links.
+- [ ] Generate a Quiz from conversation or knowledge base.
+- [ ] Save a Research report to Notebook.
+- [ ] Restart app and verify data persistence.
+
+Acceptance:
+
+- App can be used end to end without terminal commands.
+- Startup failures show understandable messages.
+- No API keys appear in logs or trace.
+
+## 11. Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Sidecar does not stop | Leaves background process running | Track child process and kill on exit |
+| Port conflict | App cannot connect to backend | Use dynamic port |
+| Frontend URL assumptions | API/WS fail in desktop mode | Centralize URL construction |
+| Data directory mismatch | User data appears lost | Explicit data root and settings display |
+| API keys in local files | Security concern | Keep first version local-only; avoid logs; plan keychain later |
+| Tauri bundling sidecar complexity | Release build blocked | Start with portable/debug bundle if installer takes longer |
+| Windows code signing absent | Installer trust warnings | Accept for internal v0.1; plan signing before public release |
+
+## 12. Done Criteria for v0.1 Desktop Release
+
+- A Windows desktop artifact exists.
+- User can launch the app without terminal commands.
+- Backend sidecar starts automatically.
+- Frontend talks to the sidecar over local REST/WebSocket.
+- LLM settings can be configured in the app.
+- Chat works with streaming output.
+- Knowledge base upload and RAG search work.
+- Local data persists across restart.
+- Build instructions are documented.
+
+## 13. Suggested First Implementation Order
+
+1. Add Tauri skeleton and load existing `web-ui`.
+2. Add backend host/port/data-dir args.
+3. Add sidecar spawn with fixed port.
+4. Replace fixed port with dynamic port.
+5. Add frontend API URL resolver.
+6. Move desktop data root to app data dir.
+7. Add build script.
+8. Run QA checklist.
