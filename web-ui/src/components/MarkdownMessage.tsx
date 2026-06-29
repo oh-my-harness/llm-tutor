@@ -82,10 +82,13 @@ export interface SourceReference {
   label: string
   raw: string
   surface: SourceSurface
+  title?: string
+  description?: string
+  score?: number | null
   target?: SourceTarget
 }
 
-function SourceReferences({
+export function SourceReferences({
   id,
   references,
   onNavigate,
@@ -118,9 +121,15 @@ function SourceReferences({
                 [{reference.label}]
               </span>
               <span className="min-w-0 flex-1">
-                <span className="font-medium text-gray-900">{sourceSurfaceLabel(reference.surface)}</span>
+                <span className="font-medium text-gray-900">{reference.title || sourceSurfaceLabel(reference.surface)}</span>
+                {typeof reference.score === 'number' && (
+                  <span className="ml-1 text-xs text-gray-400">{reference.score.toFixed(4)}</span>
+                )}
                 <span className="mx-1 text-gray-300">·</span>
                 <code className="break-all rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{reference.raw}</code>
+                {reference.description && (
+                  <span className="mt-1 block text-xs leading-5 text-gray-600">{reference.description}</span>
+                )}
               </span>
             </button>
           </li>
@@ -198,7 +207,7 @@ function sourceSurfaceFromRaw(raw: string): SourceSurface {
   return 'unknown'
 }
 
-function sourceTargetFromRaw(raw: string): SourceTarget | undefined {
+export function sourceTargetFromRaw(raw: string): SourceTarget | undefined {
   if (raw.startsWith('http://') || raw.startsWith('https://')) {
     return { type: 'web', url: raw }
   }
@@ -239,7 +248,7 @@ function sourceTargetFromRaw(raw: string): SourceTarget | undefined {
   return undefined
 }
 
-function sourceSurfaceLabel(surface: SourceSurface) {
+export function sourceSurfaceLabel(surface: SourceSurface) {
   if (surface === 'chat') return 'Chat'
   if (surface === 'notebook') return 'Notebook'
   if (surface === 'quiz') return 'Quiz'

@@ -18,8 +18,8 @@ import {
   X,
 } from 'lucide-react'
 import type { QuizQuestion, QuizSession } from '../quizTypes'
-import { MarkdownMessage } from './MarkdownMessage'
-import type { SourceTarget } from './MarkdownMessage'
+import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
+import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type SpaceTab = 'notebook' | 'quiz_bank' | 'student_profile'
 
@@ -58,7 +58,13 @@ const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strate
 
 type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }>
 
-export function SpacePage({ focusTarget }: { focusTarget?: SpaceFocusTarget | null }) {
+export function SpacePage({
+  focusTarget,
+  onSourceNavigate,
+}: {
+  focusTarget?: SpaceFocusTarget | null
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
   const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
@@ -470,6 +476,7 @@ export function SpacePage({ focusTarget }: { focusTarget?: SpaceFocusTarget | nu
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
             onGenerateQuiz={(entry) => void generateQuizFromNotebookEntry(entry)}
+            onSourceNavigate={onSourceNavigate}
           />
         )}
         {activeTab === 'quiz_bank' && (
@@ -482,6 +489,7 @@ export function SpacePage({ focusTarget }: { focusTarget?: SpaceFocusTarget | nu
             onSelectQuiz={setActiveQuizId}
             onDeleteQuiz={(quiz) => void deleteQuiz(quiz)}
             onQuestionIndexChange={setQuestionIndex}
+            onSourceNavigate={onSourceNavigate}
           />
         )}
         {activeTab === 'student_profile' && (
@@ -495,6 +503,7 @@ export function SpacePage({ focusTarget }: { focusTarget?: SpaceFocusTarget | nu
             onCancelEditMemory={cancelEditMemory}
             onMemoryDraftChange={setMemoryDraft}
             onSaveMemoryFile={(path) => void saveMemoryFile(path)}
+            onSourceNavigate={onSourceNavigate}
           />
         )}
       </section>
@@ -524,6 +533,7 @@ function NotebookTab({
   onSaveEntry,
   onSendToBook,
   onGenerateQuiz,
+  onSourceNavigate,
 }: {
   entries: NotebookEntry[]
   activeEntry: NotebookEntry | null
@@ -546,6 +556,7 @@ function NotebookTab({
   onSaveEntry: (entry: NotebookEntry) => void
   onSendToBook: (entry: NotebookEntry) => void
   onGenerateQuiz: (entry: NotebookEntry) => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
 
@@ -677,9 +688,9 @@ function NotebookTab({
                   onChange={(event) => onEditMarkdownChange(event.target.value)}
                 />
               ) : (
-                <pre className="max-w-4xl whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-5 font-sans text-sm leading-6 text-gray-700">
-                  {activeEntry.markdown}
-                </pre>
+                <div className="max-w-4xl rounded-lg border border-gray-200 bg-gray-50 p-5">
+                  <MarkdownMessage text={activeEntry.markdown || ' '} onSourceNavigate={onSourceNavigate} />
+                </div>
               )}
             </div>
           </>
@@ -698,6 +709,7 @@ function QuizBankTab({
   onSelectQuiz,
   onDeleteQuiz,
   onQuestionIndexChange,
+  onSourceNavigate,
 }: {
   quizzes: QuizSession[]
   activeQuiz: QuizSession | null
@@ -707,6 +719,7 @@ function QuizBankTab({
   onSelectQuiz: (id: string) => void
   onDeleteQuiz: (quiz: QuizSession) => void
   onQuestionIndexChange: (index: number) => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const activeAnswer = activeQuiz && activeQuestion
     ? activeQuiz.answers.find((answer) => answer.question_id === activeQuestion.id) ?? null
@@ -829,14 +842,12 @@ function QuizBankTab({
                   <div className="text-sm font-semibold text-gray-950">Explanation</div>
                   <p className="mt-2 text-sm leading-6 text-gray-600">{activeQuestion.explanation}</p>
                   {activeQuestion.citations.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      {activeQuestion.citations.map((citation, index) => (
-                        <div key={`${citation.source}-${index}`} className="rounded-md bg-white p-3 text-xs ring-1 ring-gray-100">
-                          <div className="font-medium text-gray-900">{citation.source}</div>
-                          <div className="mt-1 leading-5 text-gray-600">{citation.text}</div>
-                        </div>
-                      ))}
-                    </div>
+                    <QuizSourceReferences
+                      quizId={activeQuiz.id}
+                      questionId={activeQuestion.id}
+                      citations={activeQuestion.citations}
+                      onSourceNavigate={onSourceNavigate}
+                    />
                   )}
                 </section>
 
@@ -882,6 +893,41 @@ function QuizBankTab({
   )
 }
 
+function QuizSourceReferences({
+  quizId,
+  questionId,
+  citations,
+  onSourceNavigate,
+}: {
+  quizId: string
+  questionId: string
+  citations: QuizQuestion['citations']
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
+  return (
+    <SourceReferences
+      id={`space-quiz-citations-${quizId}-${questionId}`}
+      references={citations.map((citation, index) => quizCitationToSourceReference(citation, index))}
+      onNavigate={onSourceNavigate}
+    />
+  )
+}
+
+function quizCitationToSourceReference(citation: QuizQuestion['citations'][number], index: number): SourceReference {
+  const raw = citation.source
+  const target = sourceTargetFromRaw(raw)
+  return {
+    id: `${index + 1}:${raw}`,
+    label: String(index + 1),
+    raw,
+    surface: target?.type === 'web' ? 'web' : target?.type === 'kb' ? 'kb' : 'unknown',
+    title: citation.source,
+    description: citation.text,
+    score: citation.score,
+    target,
+  }
+}
+
 function StudentProfileTab({
   profile,
   memoryFiles,
@@ -892,6 +938,7 @@ function StudentProfileTab({
   onCancelEditMemory,
   onMemoryDraftChange,
   onSaveMemoryFile,
+  onSourceNavigate,
 }: {
   profile: ReturnType<typeof buildProfile>
   memoryFiles: MemoryFile[]
@@ -902,6 +949,7 @@ function StudentProfileTab({
   onCancelEditMemory: () => void
   onMemoryDraftChange: (value: string) => void
   onSaveMemoryFile: (path: string) => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const filesByPath = new Map(memoryFiles.map((file) => [file.path, file]))
 
@@ -955,6 +1003,7 @@ function StudentProfileTab({
               onCancel={onCancelEditMemory}
               onDraftChange={onMemoryDraftChange}
               onSave={onSaveMemoryFile}
+              onSourceNavigate={onSourceNavigate}
             />
           )
         })}
@@ -973,6 +1022,7 @@ function MemoryProfileCard({
   onCancel,
   onDraftChange,
   onSave,
+  onSourceNavigate,
 }: {
   path: string
   file?: MemoryFile
@@ -983,9 +1033,9 @@ function MemoryProfileCard({
   onCancel: () => void
   onDraftChange: (value: string) => void
   onSave: (path: string) => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const title = memoryFileLabel(path)
-  const references = file ? parseMemorySourceRefs(file.markdown) : []
   return (
     <section className="flex min-h-[360px] flex-col rounded-lg border border-gray-200 bg-white">
       <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
@@ -1024,33 +1074,10 @@ function MemoryProfileCard({
         ) : (
           <div className="space-y-4">
             <div className="prose-sm max-w-none">
-              <MarkdownMessage text={file.markdown || ' '} />
+              <MarkdownMessage text={file.markdown || ' '} onSourceNavigate={onSourceNavigate} />
             </div>
-            {references.length > 0 && (
-              <MemorySourceRefs references={references} />
-            )}
           </div>
         )}
-      </div>
-    </section>
-  )
-}
-
-function MemorySourceRefs({ references }: { references: MemorySourceReference[] }) {
-  return (
-    <section className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Memory references</div>
-      <div className="mt-2 space-y-2">
-        {references.map((reference) => (
-          <div key={`${reference.index}-${reference.target}`} className="rounded-md bg-white px-3 py-2 text-xs ring-1 ring-blue-100">
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-700">[{reference.index}]</span>
-              <span className="font-medium text-gray-900">{reference.kind}</span>
-            </div>
-            <div className="mt-1 break-all font-mono text-[11px] leading-5 text-gray-500">{reference.target}</div>
-            {reference.label && <div className="mt-1 text-gray-600">{reference.label}</div>}
-          </div>
-        ))}
       </div>
     </section>
   )
@@ -1120,46 +1147,6 @@ function memoryFileLabel(path: string) {
     'L3/teaching_strategy.md': 'Teaching strategy',
   }
   return labels[path] ?? path
-}
-
-interface MemorySourceReference {
-  index: number
-  target: string
-  kind: string
-  label: string
-}
-
-function parseMemorySourceRefs(markdown: string): MemorySourceReference[] {
-  return markdown
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .map((line) => line.match(/^\[\^(\d+)\]:\s*(.+)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => {
-      const target = match[2]?.trim() ?? ''
-      return {
-        index: Number(match[1]),
-        target,
-        ...describeMemorySourceTarget(target),
-      }
-    })
-    .filter((reference) => Number.isFinite(reference.index) && reference.index > 0 && reference.target)
-}
-
-function describeMemorySourceTarget(target: string): Pick<MemorySourceReference, 'kind' | 'label'> {
-  const [kind = 'source', ...rest] = target.split(':')
-  const normalizedKind = kind.trim() || 'source'
-  const label = rest.join(':').trim()
-  const labels: Record<string, string> = {
-    chat: 'Chat evidence',
-    quiz: 'Quiz evidence',
-    notebook: 'Notebook evidence',
-    research: 'Research evidence',
-  }
-  return {
-    kind: labels[normalizedKind] ?? `${normalizedKind.charAt(0).toUpperCase()}${normalizedKind.slice(1)} evidence`,
-    label,
-  }
 }
 
 function subtitleFor(tab: SpaceTab) {

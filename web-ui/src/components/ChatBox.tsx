@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   AlertCircle,
@@ -21,7 +21,8 @@ import {
 import type { LlmModelConfig } from '../settings'
 import type { QuizSession } from '../quizTypes'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
-import { MarkdownMessage } from './MarkdownMessage'
+import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
+import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
 type OpenMenu = 'mode' | 'knowledge' | 'model' | null
@@ -73,6 +74,7 @@ interface Props {
   onSaveToNotebook?: (markdown: string) => Promise<void>
   onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onQuizFinish?: (quizId: string) => Promise<void>
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
   disabled: boolean
 }
 
@@ -132,6 +134,7 @@ export function ChatBox({
   onSaveToNotebook,
   onQuizAnswer,
   onQuizFinish,
+  onSourceNavigate,
   disabled,
 }: Props) {
   const [input, setInput] = useState('')
@@ -219,18 +222,19 @@ export function ChatBox({
                       quiz={msg.quiz}
                       onAnswer={onQuizAnswer}
                       onFinish={onQuizFinish}
+                      onSourceNavigate={onSourceNavigate}
                     />
                   ) : msg.deepSolve && msg.deepSolve.length > 0 ? (
                     <DeepSolveMessage
                       text={msg.text}
                       events={msg.deepSolve}
                       citations={msg.citations}
-                      citationList={(citations) => <CitationList citations={citations} />}
+                      citationList={(citations) => <CitationList citations={citations} onSourceNavigate={onSourceNavigate} />}
                       onAskStep={onAskDeepSolveStep}
                     />
                   ) : (
                     <>
-                      <MarkdownMessage text={msg.text} />
+                      <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
                       {capability === 'research' && msg.text.trim() && onSaveToNotebook && (
                         <div className="mt-3 flex justify-end">
                           <button
@@ -246,7 +250,7 @@ export function ChatBox({
                         </div>
                       )}
                       {msg.citations && msg.citations.length > 0 && (
-                        <CitationList citations={msg.citations} />
+                        <CitationList citations={msg.citations} onSourceNavigate={onSourceNavigate} />
                       )}
                     </>
                   )
@@ -262,7 +266,7 @@ export function ChatBox({
             ))}
             {streamingText && (
               <div className="max-w-3xl rounded-lg bg-gray-100 p-3">
-                <MarkdownMessage text={streamingText} />
+                <MarkdownMessage text={streamingText} onSourceNavigate={onSourceNavigate} />
                 <span className="animate-pulse">|</span>
               </div>
             )}
@@ -326,44 +330,53 @@ function formatTokenCount(value: number) {
   return String(value)
 }
 
-function CitationList({ citations }: { citations: Citation[] }) {
+function CitationList({
+  citations,
+  onSourceNavigate,
+}: {
+  citations: Citation[]
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
+  const rawId = useId()
   const hasWeb = citations.some((citation) => citation.kind === 'web' || citation.url)
+  const references = citations.map(citationToSourceReference)
   return (
     <div className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
       <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '网页来源' : '引用来源'}</div>
-      <div className="space-y-2">
-        {citations.map((citation, index) => (
-          <details key={`${citation.source}-${index}`} className="rounded-md border border-blue-100 bg-white/70 p-2">
-            <summary className="cursor-pointer text-xs font-medium text-blue-700">
-              [{citation.index || index + 1}] {citation.title || citation.source}
-              {typeof citation.score === 'number' ? ` · ${citation.score.toFixed(4)}` : ''}
-            </summary>
-            {citation.url && (
-              <a
-                className="mt-2 block truncate text-xs text-blue-600 hover:text-blue-700"
-                href={citation.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {citation.url}
-              </a>
-            )}
-            <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
-          </details>
-        ))}
-      </div>
+      <SourceReferences
+        id={`chat-citations-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`}
+        references={references}
+        onNavigate={onSourceNavigate}
+      />
     </div>
   )
+}
+
+function citationToSourceReference(citation: Citation, index: number): SourceReference {
+  const raw = citation.url || citation.source
+  const target = sourceTargetFromRaw(raw)
+  return {
+    id: `${citation.index || index + 1}:${raw}`,
+    label: String(citation.index || index + 1),
+    raw,
+    surface: citation.kind === 'web' || citation.url || target?.type === 'web' ? 'web' : target?.type === 'kb' ? 'kb' : 'unknown',
+    title: citation.title || citation.source,
+    description: citation.text,
+    score: citation.score,
+    target,
+  }
 }
 
 function ChatQuizCard({
   quiz,
   onAnswer,
   onFinish,
+  onSourceNavigate,
 }: {
   quiz: QuizSession
   onAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onFinish?: (quizId: string) => Promise<void>
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [selectedOptionId, setSelectedOptionId] = useState('')
@@ -469,14 +482,12 @@ function ChatQuizCard({
           <div className="font-medium">{answer.correct ? '回答正确' : '回答错误'}</div>
           <p className="mt-2 leading-6">{question.explanation}</p>
           {question.citations.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {question.citations.map((citation, index) => (
-                <details key={`${citation.source}-${index}`} className="rounded-md bg-white/70 p-2">
-                  <summary className="cursor-pointer text-xs font-medium">{citation.source}</summary>
-                  <p className="mt-2 max-h-20 overflow-hidden text-xs leading-5 text-gray-600">{citation.text}</p>
-                </details>
-              ))}
-            </div>
+            <QuizCitationReferences
+              quizId={quiz.id}
+              questionId={question.id}
+              citations={question.citations}
+              onSourceNavigate={onSourceNavigate}
+            />
           )}
         </div>
       )}
@@ -517,6 +528,45 @@ function ChatQuizCard({
       </div>
     </div>
   )
+}
+
+function QuizCitationReferences({
+  quizId,
+  questionId,
+  citations,
+  onSourceNavigate,
+}: {
+  quizId: string
+  questionId: string
+  citations: QuizSession['questions'][number]['citations']
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
+  const references = citations.map((citation, index) => quizCitationToSourceReference(citation, index))
+  return (
+    <SourceReferences
+      id={`quiz-citations-${quizId}-${questionId}`}
+      references={references}
+      onNavigate={onSourceNavigate}
+    />
+  )
+}
+
+function quizCitationToSourceReference(
+  citation: QuizSession['questions'][number]['citations'][number],
+  index: number,
+): SourceReference {
+  const raw = citation.source
+  const target = sourceTargetFromRaw(raw)
+  return {
+    id: `${index + 1}:${raw}`,
+    label: String(index + 1),
+    raw,
+    surface: target?.type === 'web' ? 'web' : target?.type === 'kb' ? 'kb' : 'unknown',
+    title: citation.source,
+    description: citation.text,
+    score: citation.score,
+    target,
+  }
 }
 
 function Composer({

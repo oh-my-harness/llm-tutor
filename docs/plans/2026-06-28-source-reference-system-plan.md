@@ -147,15 +147,22 @@ Acceptance:
 
 ### Phase 3: Reuse Beyond Memory
 
-Status: planned.
+Status: implemented.
 
 Tasks:
 
-- [ ] Use `SourceReferences` for RAG answer citations.
-- [ ] Use `SourceReferences` for Quiz question citations.
-- [ ] Use `SourceReferences` for Research report source lists.
-- [ ] Use the same visual language in Student Profile references.
-- [ ] Keep source display compact in chat and richer in detail/review pages.
+- [x] Use `SourceReferences` for RAG answer citations.
+- [x] Use `SourceReferences` for Quiz question citations.
+- [x] Use `SourceReferences` for Research report source lists.
+- [x] Use the same visual language in Student Profile references.
+- [x] Keep source display compact in chat and richer in detail/review pages.
+
+Notes:
+
+- Chat RAG/web citations now map into `SourceReferences` instead of bespoke citation cards.
+- Quiz citations in chat and Space quiz review use the same source reference pattern.
+- Notebook entries, including saved research reports, render through `MarkdownMessage` so source footnotes can scroll and navigate.
+- Student profile memory cards rely on `MarkdownMessage` source references instead of a separate memory-only reference parser.
 
 Acceptance:
 

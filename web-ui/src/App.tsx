@@ -728,6 +728,7 @@ export default function App() {
                   onSaveToNotebook={handleSaveToNotebook}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
+                  onSourceNavigate={handleSourceNavigate}
                   disabled={running}
                 />
               </main>
@@ -771,7 +772,7 @@ export default function App() {
         )}
 
         {view === 'space' && (
-          <SpacePage focusTarget={spaceFocusTarget} />
+          <SpacePage focusTarget={spaceFocusTarget} onSourceNavigate={handleSourceNavigate} />
         )}
 
         {view === 'memory' && (
