@@ -249,18 +249,19 @@ Acceptance:
 
 ### Phase 2: Backend Sidecar
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
-- [ ] Add `tutor-web` host/port/data-dir runtime config.
+- [x] Add `tutor-web` host/port runtime config.
+- [ ] Add `tutor-web` data-dir runtime config.
 - [ ] Add sidecar declaration to Tauri config.
-- [ ] Spawn `tutor-web` on app startup.
-- [ ] Kill `tutor-web` on app exit.
-- [ ] Implement dynamic local port selection.
-- [ ] Implement Tauri command: `get_backend_url`.
-- [ ] Add frontend API URL resolver.
-- [ ] Update REST fetches and WebSocket creation to use resolver.
+- [x] Spawn `tutor-web` on app startup.
+- [x] Kill `tutor-web` on app exit.
+- [x] Implement dynamic local port selection.
+- [x] Implement Tauri command: `get_backend_url`.
+- [x] Add frontend API URL resolver.
+- [x] Update REST fetches and WebSocket creation to use resolver.
 
 Acceptance:
 

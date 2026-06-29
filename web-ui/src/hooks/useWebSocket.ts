@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { wsUrl } from '../api'
 
 export type StreamEvent =
   | { type: 'content'; payload: { text: string; chunk: boolean } }
@@ -20,8 +21,7 @@ export function useWebSocket(sessionId: string | null, opts: UseWebSocketOptions
   useEffect(() => {
     if (!sessionId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/sessions/${sessionId}`)
+    const ws = new WebSocket(wsUrl(`/ws/sessions/${sessionId}`))
     wsRef.current = ws
 
     ws.onopen = () => {

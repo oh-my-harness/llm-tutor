@@ -14,6 +14,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
+import { apiUrl } from '../api'
 import { activeEmbeddingConfig, embeddingForSession } from '../settings'
 import type { EmbeddingModelConfig, LlmSettings } from '../settings'
 import type { SourceTarget } from './MarkdownMessage'
@@ -1061,7 +1062,7 @@ function FilePreview({
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
             <iframe
               className="h-[72vh] w-full bg-white"
-              src={`/api/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(selectedDoc.id)}/file`}
+              src={apiUrl(`/api/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(selectedDoc.id)}/file`)}
               title={selectedDoc.name}
             />
           </div>
