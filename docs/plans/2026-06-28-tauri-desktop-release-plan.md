@@ -249,7 +249,7 @@ Acceptance:
 
 ### Phase 2: Backend Sidecar
 
-Status: in progress.
+Status: implementation complete; pending manual desktop QA.
 
 Tasks:
 
@@ -271,16 +271,19 @@ Acceptance:
 
 ### Phase 3: Local Data Directory
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
-- [ ] Resolve Tauri app data directory.
-- [ ] Pass app data directory to sidecar.
-- [ ] Move sessions, settings, knowledge bases, quizzes, memory, notebooks,
-      books, uploaded documents, and LanceDB under the configured data root.
-- [ ] Add settings/status UI display for current data directory.
-- [ ] Add "open data directory" desktop command if practical.
+- [x] Resolve Tauri app data directory.
+- [x] Pass app data directory to sidecar with `--data-dir <path>`.
+- [x] Move backend product stores under the configured data root: sessions,
+      knowledge bases, quizzes, memory, notebooks, books, uploaded documents,
+      and LanceDB/RAG data.
+- [x] Add settings/status UI display for current data directory.
+- [x] Add "open data directory" desktop command.
+- [ ] Decide whether frontend localStorage settings should remain in WebView
+      storage for v0.1 or move into a backend settings store.
 
 Acceptance:
 

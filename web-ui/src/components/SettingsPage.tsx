@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Activity,
   Brain,
   Database,
+  FolderOpen,
   Globe2,
   Palette,
   Plus,
@@ -25,6 +26,7 @@ import type {
   SearchConfig,
   SearchProvider,
 } from '../settings'
+import { getDesktopDataDir, openDesktopDataDir } from '../api'
 
 interface Props {
   settings: LlmSettings
@@ -61,6 +63,22 @@ const settingsTabs: Array<{ key: SettingsTab; label: string; icon: LucideIcon }>
 export function SettingsPage({ settings, onChange }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
+  const [dataDir, setDataDir] = useState<string | null>(null)
+  const [dataDirError, setDataDirError] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    getDesktopDataDir()
+      .then((value) => {
+        if (mounted) setDataDir(value)
+      })
+      .catch((error) => {
+        if (mounted) setDataDirError(error instanceof Error ? error.message : 'Failed to load data directory')
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const update = <K extends keyof LlmSettings>(key: K, value: LlmSettings[K]) => {
     onChange({ ...settings, [key]: value })
@@ -294,6 +312,15 @@ export function SettingsPage({ settings, onChange }: Props) {
         status: 'error',
         message: error instanceof Error ? error.message : 'Embedding test failed',
       })
+    }
+  }
+
+  const handleOpenDataDir = async () => {
+    setDataDirError('')
+    try {
+      await openDesktopDataDir()
+    } catch (error) {
+      setDataDirError(error instanceof Error ? error.message : 'Failed to open data directory')
     }
   }
 
@@ -759,6 +786,30 @@ export function SettingsPage({ settings, onChange }: Props) {
                 />
                 Require approval before tool execution
               </label>
+
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-4">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                    <FolderOpen size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900">本地数据目录</div>
+                    <div className="mt-1 break-all font-mono text-xs text-gray-500">
+                      {dataDir ?? '仅桌面应用可用；浏览器开发模式使用仓库内 .llm-tutor。'}
+                    </div>
+                    {dataDirError && <div className="mt-2 text-xs text-red-600">{dataDirError}</div>}
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!dataDir}
+                    onClick={handleOpenDataDir}
+                  >
+                    <FolderOpen size={15} />
+                    打开
+                  </button>
+                </div>
+              </div>
             </SettingsPanel>
           )}
         </div>

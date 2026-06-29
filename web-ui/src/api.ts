@@ -32,6 +32,18 @@ export function wsUrl(path: string): string {
   return `${backendBaseUrl.replace(/^http/, 'ws')}${path}`
 }
 
+export async function getDesktopDataDir(): Promise<string | null> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return null
+  return invoke<string>('get_data_dir')
+}
+
+export async function openDesktopDataDir(): Promise<void> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return
+  await invoke('open_data_dir')
+}
+
 async function initialize() {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::{
@@ -22,6 +23,7 @@ struct KnowledgeState {
     store: Arc<KnowledgeStore>,
     jobs: Arc<IngestionJobs>,
     memory: Arc<MemoryStore>,
+    rag_root: PathBuf,
 }
 
 #[derive(Default)]
@@ -125,7 +127,7 @@ async fn delete_knowledge_base(
     Path(kb): Path<String>,
 ) -> impl IntoResponse {
     if let Some(item) = state.store.get(&kb) {
-        let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+        let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
         if let Err(err) = rag.delete_kb(&kb).await {
             return error_response(err);
         }
@@ -372,7 +374,7 @@ async fn ingest_text_document(
 
     let document_id = uuid::Uuid::new_v4().to_string();
     let index_source = document_index_source(&document_id, source);
-    let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+    let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
     let jobs = state.jobs.clone();
     let job_id_for_progress = job_id.to_string();
     let chunks = rag
@@ -576,7 +578,7 @@ async fn search_knowledge(
             .into_response();
     };
 
-    let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+    let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
     match tutor_rag::KnowledgeRetriever::search(&rag, Some(&kb), &req.query, req.top_k.unwrap_or(5))
         .await
     {
@@ -650,7 +652,7 @@ async fn delete_document(
             .into_response();
     };
 
-    let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+    let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
     if let Err(err) = rag.delete_source(&kb, document.index_source()).await {
         return error_response(err);
     }
@@ -727,8 +729,7 @@ async fn reindex_document(
     let task_state = state.clone();
     tokio::spawn(async move {
         let result = async {
-            let rag =
-                tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+            let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
             update_job(
                 &task_state.jobs,
                 &job_id,
@@ -811,7 +812,7 @@ async fn get_document_chunks(
             .into_response();
     };
 
-    let rag = tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), item.embedding);
+    let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
     match rag
         .chunks_for_source(&kb, document.index_source(), 200)
         .await
@@ -918,11 +919,16 @@ fn record_knowledge_event(
     );
 }
 
-pub fn knowledge_router(store: Arc<KnowledgeStore>, memory: Arc<MemoryStore>) -> Router {
+pub fn knowledge_router(
+    store: Arc<KnowledgeStore>,
+    memory: Arc<MemoryStore>,
+    rag_root: impl Into<PathBuf>,
+) -> Router {
     let state = KnowledgeState {
         store,
         jobs: Arc::new(IngestionJobs::default()),
         memory,
+        rag_root: rag_root.into(),
     };
     Router::new()
         .route("/api/attachments/parse", post(parse_chat_attachment))
@@ -995,7 +1001,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
         let memory = Arc::new(MemoryStore::new_with_root(root.path().join("memory")));
-        let app = knowledge_router(store, memory.clone());
+        let app = knowledge_router(store, memory.clone(), root.path().join("rag"));
 
         let boundary = "X-LLM-TUTOR-ATTACHMENT";
         let upload_body = format!(
@@ -1030,7 +1036,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = KnowledgeStore::new_with_path(root.path().join("knowledge-bases.json"));
         let memory = Arc::new(MemoryStore::new_with_root(root.path().join("memory")));
-        let app = knowledge_router(store, memory.clone());
+        let app = knowledge_router(store, memory.clone(), root.path().join("rag"));
 
         let create_body = serde_json::json!({
             "name": "Physics",

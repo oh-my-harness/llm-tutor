@@ -1,21 +1,23 @@
+#[cfg(debug_assertions)]
+use std::process::{Child, Stdio};
 use std::{
     net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::Command,
     sync::Mutex,
     thread,
     time::{Duration, Instant},
 };
-#[cfg(debug_assertions)]
-use std::{
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-};
 
 use tauri::Manager;
 #[cfg(not(debug_assertions))]
-use tauri_plugin_shell::{ShellExt, process::CommandChild};
+use tauri_plugin_shell::ShellExt;
+#[cfg(not(debug_assertions))]
+use tauri_plugin_shell::process::CommandChild;
 
 struct BackendState {
     url: String,
+    data_dir: PathBuf,
     child: Mutex<Option<BackendProcess>>,
 }
 
@@ -66,18 +68,36 @@ fn get_backend_url(state: tauri::State<'_, BackendState>) -> String {
     state.url.clone()
 }
 
+#[tauri::command]
+fn get_data_dir(state: tauri::State<'_, BackendState>) -> String {
+    state.data_dir.to_string_lossy().to_string()
+}
+
+#[tauri::command]
+fn open_data_dir(state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    std::fs::create_dir_all(&state.data_dir).map_err(|error| error.to_string())?;
+    open_directory(&state.data_dir).map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_backend_url])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_url,
+            get_data_dir,
+            open_data_dir
+        ])
         .setup(|app| {
             let port = find_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
-            let child = spawn_backend(app, port)?;
+            let data_dir = app_data_dir(app)?;
+            std::fs::create_dir_all(&data_dir)?;
+            let child = spawn_backend(app, port, &data_dir)?;
             let child = wait_for_backend(port, child)?;
             app.manage(BackendState {
                 url,
+                data_dir,
                 child: Mutex::new(Some(child)),
             });
             Ok(())
@@ -92,11 +112,23 @@ fn find_free_port() -> std::io::Result<u16> {
 }
 
 #[cfg(debug_assertions)]
-fn spawn_backend(_app: &tauri::App, port: u16) -> std::io::Result<BackendProcess> {
+fn spawn_backend(
+    _app: &tauri::App,
+    port: u16,
+    data_dir: &std::path::Path,
+) -> std::io::Result<BackendProcess> {
     let port = port.to_string();
+    let data_dir = data_dir.to_string_lossy().to_string();
     let mut command = debug_backend_command();
     command
-        .args(["--host", "127.0.0.1", "--port", &port])
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port,
+            "--data-dir",
+            &data_dir,
+        ])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
@@ -104,13 +136,25 @@ fn spawn_backend(_app: &tauri::App, port: u16) -> std::io::Result<BackendProcess
 }
 
 #[cfg(not(debug_assertions))]
-fn spawn_backend(app: &tauri::App, port: u16) -> std::io::Result<BackendProcess> {
+fn spawn_backend(
+    app: &tauri::App,
+    port: u16,
+    data_dir: &std::path::Path,
+) -> std::io::Result<BackendProcess> {
     let port = port.to_string();
+    let data_dir = data_dir.to_string_lossy().to_string();
     let (_events, child) = app
         .shell()
         .sidecar("tutor-web")
         .map_err(io_error)?
-        .args(["--host", "127.0.0.1", "--port", &port])
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port,
+            "--data-dir",
+            &data_dir,
+        ])
         .spawn()
         .map_err(io_error)?;
 
@@ -143,6 +187,29 @@ fn wait_for_backend(port: u16, mut child: BackendProcess) -> std::io::Result<Bac
     }
 }
 
+fn app_data_dir(app: &tauri::App) -> std::io::Result<PathBuf> {
+    app.path().app_data_dir().map_err(io_error)
+}
+
+fn open_directory(path: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(path).spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
+    }
+
+    Ok(())
+}
+
 #[cfg(debug_assertions)]
 fn debug_backend_command() -> Command {
     if let Ok(path) = std::env::var("LLM_TUTOR_BACKEND_BIN") {
@@ -164,7 +231,6 @@ fn workspace_root() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-#[cfg(not(debug_assertions))]
 fn io_error(error: impl std::error::Error + Send + Sync + 'static) -> std::io::Error {
     std::io::Error::other(error)
 }

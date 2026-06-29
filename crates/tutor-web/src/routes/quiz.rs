@@ -268,14 +268,9 @@ pub fn quiz_router(
     knowledge: Arc<KnowledgeStore>,
     notebook: Arc<NotebookStore>,
     memory: Arc<MemoryStore>,
+    rag_root: impl Into<PathBuf>,
 ) -> Router {
-    quiz_router_with_rag_root(
-        store,
-        knowledge,
-        notebook,
-        memory,
-        tutor_rag::LanceDbRag::default_root(),
-    )
+    quiz_router_with_rag_root(store, knowledge, notebook, memory, rag_root)
 }
 
 fn quiz_router_with_rag_root(

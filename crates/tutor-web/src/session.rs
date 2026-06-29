@@ -90,6 +90,7 @@ struct ProductSessionMetadata {
 }
 
 impl SessionPool {
+    #[allow(dead_code)]
     pub fn new() -> Arc<Self> {
         let root = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))

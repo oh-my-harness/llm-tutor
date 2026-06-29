@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -27,6 +28,7 @@ use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, Sessio
 struct WsState {
     pool: Arc<SessionPool>,
     memory: Arc<MemoryStore>,
+    rag_root: PathBuf,
 }
 
 #[derive(Clone)]
@@ -126,6 +128,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                         run_tutor_message(
                             pool.clone(),
                             state.memory.clone(),
+                            state.rag_root.clone(),
                             active_entry,
                             content,
                         )
@@ -167,8 +170,16 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
     send_task.abort();
 }
 
-pub fn ws_router(pool: Arc<SessionPool>, memory: Arc<MemoryStore>) -> Router {
-    let state = WsState { pool, memory };
+pub fn ws_router(
+    pool: Arc<SessionPool>,
+    memory: Arc<MemoryStore>,
+    rag_root: impl Into<PathBuf>,
+) -> Router {
+    let state = WsState {
+        pool,
+        memory,
+        rag_root: rag_root.into(),
+    };
     Router::new()
         .route("/ws/sessions/{session_id}", get(ws_handler))
         .with_state(state)
@@ -177,6 +188,7 @@ pub fn ws_router(pool: Arc<SessionPool>, memory: Arc<MemoryStore>) -> Router {
 async fn run_tutor_message(
     pool: Arc<SessionPool>,
     memory: Arc<MemoryStore>,
+    rag_root: PathBuf,
     entry: SessionEntry,
     content: String,
 ) {
@@ -232,8 +244,7 @@ async fn run_tutor_message(
             router = router.with_web_search(search);
         }
         if let Some(embedding) = entry.embedding.clone() {
-            let retriever =
-                tutor_rag::LanceDbRag::new(tutor_rag::LanceDbRag::default_root(), embedding);
+            let retriever = tutor_rag::LanceDbRag::new(rag_root, embedding);
             router = router.with_retriever(Arc::new(retriever));
         }
         if let Some(kb) = entry.kb.clone() {
