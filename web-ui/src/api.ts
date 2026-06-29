@@ -13,8 +13,15 @@ export function initializeApiBridge(): Promise<void> {
 }
 
 export function apiUrl(path: string): string {
-  if (!backendBaseUrl || !path.startsWith('/api')) return path
-  return `${backendBaseUrl}${path}`
+  if (!backendBaseUrl) return path
+
+  try {
+    const url = new URL(path, window.location.origin)
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api')) return path
+    return `${backendBaseUrl}${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return path.startsWith('/api') ? `${backendBaseUrl}${path}` : path
+  }
 }
 
 export function wsUrl(path: string): string {
@@ -26,16 +33,12 @@ export function wsUrl(path: string): string {
 }
 
 async function initialize() {
-  if (!isTauriApp()) return
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return
 
-  const { invoke } = await import('@tauri-apps/api/core')
   backendBaseUrl = await invoke<string>('get_backend_url')
   patchFetch()
   patchXhr()
-}
-
-function isTauriApp() {
-  return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)
 }
 
 function patchFetch() {

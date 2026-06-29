@@ -1,8 +1,10 @@
 use std::{
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
+    thread,
+    time::{Duration, Instant},
 };
 
 use tauri::Manager;
@@ -35,7 +37,8 @@ pub fn run() {
         .setup(|app| {
             let port = find_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
-            let child = spawn_backend(port)?;
+            let mut child = spawn_backend(port)?;
+            wait_for_backend(port, &mut child)?;
             app.manage(BackendState {
                 url,
                 child: Mutex::new(Some(child)),
@@ -60,6 +63,33 @@ fn spawn_backend(port: u16) -> std::io::Result<Child> {
         .stderr(Stdio::inherit());
 
     command.spawn()
+}
+
+fn wait_for_backend(port: u16, child: &mut Child) -> std::io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+
+    loop {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+
+        if let Some(status) = child.try_wait()? {
+            return Err(std::io::Error::other(format!(
+                "tutor-web exited before it became ready: {status}"
+            )));
+        }
+
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out waiting for tutor-web to start",
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn backend_command() -> Command {
