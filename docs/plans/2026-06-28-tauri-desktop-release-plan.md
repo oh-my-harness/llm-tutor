@@ -232,7 +232,7 @@ First Windows artifacts:
 
 ### Phase 1: Desktop Skeleton
 
-Status: in progress.
+Status: implementation complete; pending manual desktop QA.
 
 Tasks:
 
@@ -254,8 +254,7 @@ Status: in progress.
 Tasks:
 
 - [x] Add `tutor-web` host/port runtime config.
-- [ ] Add `tutor-web` data-dir runtime config.
-- [ ] Add sidecar declaration to Tauri config.
+- [x] Add sidecar declaration to release Tauri config.
 - [x] Spawn `tutor-web` on app startup.
 - [x] Kill `tutor-web` on app exit.
 - [x] Implement dynamic local port selection.

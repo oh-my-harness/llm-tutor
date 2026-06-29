@@ -3,3 +3,5 @@
 web-ui/dist
 .llm-tutor/
 src-tauri/gen/
+src-tauri/binaries/*
+!src-tauri/binaries/README.md
