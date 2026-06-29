@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
@@ -109,6 +109,59 @@ export function SourceReferences({
   references: SourceReference[]
   onNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <section id={id} className="mt-4 border-t border-gray-200 pt-3 text-xs text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <button
+          className="font-semibold text-gray-600 hover:text-blue-700"
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          Sources{expanded ? ' ▾' : ' ▸'}
+        </button>
+        <span className="text-gray-300">·</span>
+        {references.map((reference) => (
+          <SourceReferenceLink
+            key={reference.id}
+            id={`${id}-item-${safeReferenceId(reference.label)}`}
+            reference={reference}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </div>
+
+      {expanded && (
+        <ol className="m-0 mt-3 list-none space-y-2 p-0">
+          {references.map((reference) => (
+            <li key={`${reference.id}:detail`} className="scroll-mt-6">
+              <div className="leading-5 text-gray-600">
+                <SourceReferenceLink reference={reference} onNavigate={onNavigate} />
+                {typeof reference.score === 'number' && (
+                  <span className="ml-1 text-gray-400">score {reference.score.toFixed(4)}</span>
+                )}
+                <span className="mx-1 text-gray-300">·</span>
+                <span>{sourceReferenceSubtitle(reference)}</span>
+                {sourceReferenceBadges(reference).length > 0 && (
+                  <span className="ml-1 text-gray-400">({sourceReferenceBadges(reference).join(', ')})</span>
+                )}
+                {!reference.target && (
+                  <span className="ml-1 text-amber-700">
+                    {reference.metadata?.missingReason || 'Source target unavailable'}
+                  </span>
+                )}
+                {reference.description && (
+                  <span className="mt-1 block max-w-4xl text-gray-500">{reference.description}</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+
   return (
     <section id={id} className="mt-5 border-t border-gray-200 pt-4">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Sources</div>
@@ -162,6 +215,35 @@ export function SourceReferences({
         ))}
       </ol>
     </section>
+  )
+}
+
+function SourceReferenceLink({
+  id,
+  reference,
+  onNavigate,
+}: {
+  id?: string
+  reference: SourceReference
+  onNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
+  const label = `[${reference.label}] ${reference.title || sourceReferenceTitle(reference)}`
+  if (!reference.target) {
+    return (
+      <span id={id} className="text-gray-500">
+        {label}
+      </span>
+    )
+  }
+  return (
+    <button
+      id={id}
+      className="inline p-0 text-left font-medium text-blue-700 underline-offset-2 hover:text-blue-800 hover:underline"
+      type="button"
+      onClick={() => onNavigate?.(reference.target!, reference)}
+    >
+      {label}
+    </button>
   )
 }
 
