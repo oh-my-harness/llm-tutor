@@ -1,0 +1,15 @@
+[package]
+name = "llm-tutor-desktop"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+name = "llm_tutor_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

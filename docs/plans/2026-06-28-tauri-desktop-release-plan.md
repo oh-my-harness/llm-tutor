@@ -232,14 +232,14 @@ First Windows artifacts:
 
 ### Phase 1: Desktop Skeleton
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
-- [ ] Add Tauri project.
-- [ ] Configure dev URL to existing Vite dev server.
-- [ ] Configure production dist path to `web-ui/dist`.
-- [ ] Add basic app window title, icon placeholder, and app metadata.
+- [x] Add Tauri project.
+- [x] Configure dev URL to existing Vite dev server.
+- [x] Configure production dist path to `web-ui/dist`.
+- [x] Add basic app window title, icon placeholder, and app metadata.
 - [ ] Verify desktop window can load existing UI.
 
 Acceptance:

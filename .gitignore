@@ -2,3 +2,4 @@
 **/node_modules
 web-ui/dist
 .llm-tutor/
+src-tauri/gen/

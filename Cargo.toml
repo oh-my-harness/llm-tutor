@@ -4,6 +4,7 @@ members = [
     "crates/tutor-tools",
     "crates/tutor-agent",
     "crates/tutor-web",
+    "src-tauri",
 ]
 resolver = "2"
 
