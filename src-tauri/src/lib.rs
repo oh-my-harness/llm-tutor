@@ -224,12 +224,28 @@ fn debug_backend_command() -> Command {
         return Command::new(path);
     }
 
+    if let Some(path) = debug_backend_binary() {
+        if path.exists() {
+            return Command::new(path);
+        }
+    }
+
     let mut command = Command::new("cargo");
     command.args(["run", "-p", "tutor-web", "--"]);
     if let Some(root) = workspace_root() {
         command.current_dir(root);
     }
     command
+}
+
+#[cfg(debug_assertions)]
+fn debug_backend_binary() -> Option<PathBuf> {
+    let binary_name = if cfg!(windows) {
+        "tutor-web.exe"
+    } else {
+        "tutor-web"
+    };
+    workspace_root().map(|root| root.join("target").join("debug").join(binary_name))
 }
 
 #[cfg(debug_assertions)]

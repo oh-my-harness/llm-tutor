@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.gkxtwork.llmtutor",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ../web-ui -- --host 127.0.0.1",
+    "beforeDevCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/dev-desktop.ps1",
     "devUrl": "http://127.0.0.1:5173",
     "beforeBuildCommand": "npm run build --prefix ../web-ui",
     "frontendDist": "../web-ui/dist"
