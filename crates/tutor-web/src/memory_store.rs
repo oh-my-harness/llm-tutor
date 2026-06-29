@@ -697,6 +697,7 @@ impl MemoryStore {
         apply_text_edits(current, edits)
     }
 
+    #[cfg(test)]
     pub fn validate_text_edits(
         &self,
         current: &str,
