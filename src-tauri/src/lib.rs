@@ -162,7 +162,12 @@ fn spawn_backend(
 }
 
 fn wait_for_backend(port: u16, mut child: BackendProcess) -> std::io::Result<BackendProcess> {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let timeout = std::env::var("LLM_TUTOR_BACKEND_STARTUP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(300));
+    let deadline = Instant::now() + timeout;
 
     loop {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -179,7 +184,10 @@ fn wait_for_backend(port: u16, mut child: BackendProcess) -> std::io::Result<Bac
             child.kill();
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "timed out waiting for tutor-web to start",
+                format!(
+                    "timed out waiting for tutor-web to start after {} seconds",
+                    timeout.as_secs()
+                ),
             ));
         }
 
