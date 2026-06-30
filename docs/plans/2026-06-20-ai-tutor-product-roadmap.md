@@ -68,7 +68,6 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 
 - TutorBot channel integrations.
 - Multi-user auth and admin dashboard.
-- Three-layer memory.
 - Rich Book Engine / living books.
 - Math Animator.
 - Deep Research with parallel sub-agents.
@@ -143,7 +142,7 @@ These items come from the earlier Phase 1-5 plans. They should be closed before 
 - [x] Confirm WebSocket output semantics: final-only response, chunked text stream, or mixed content/trace/status stream.
 - [x] Replace Deep Solve `run_pre_retrieve` stub with either real RAG retrieval or an explicit no-KB branch.
 - [x] Update README with accurate backend port, provider setup, dependency strategy, and known v0.1 limitations.
-- [ ] Add or remove the planned `docs/quickstart-deep-solve.md`; avoid stale file references in plans.
+- [x] Add or remove the planned `docs/quickstart-deep-solve.md`; avoid stale file references in plans.
 - [ ] Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and either fix warnings or document accepted warnings.
 - [ ] Document how to run ignored real-provider tests and what API keys are required.
 
@@ -225,16 +224,16 @@ Acceptance:
 
 Goal: make learning outputs reusable.
 
-- [ ] Add default Space.
-- [ ] Add Notebook entries.
-- [ ] Save research reports to Notebook as `type = research_report`.
-- [ ] Move Quiz history/review into Space / Quiz Bank.
-- [ ] Add Student Profile module.
-- [ ] Add Markdown-based Memory module with L1 events, L2 summaries, and L3 learner memory.
-- [ ] Add manual memory consolidation from the Memory module.
-- [ ] Add `read_memory` tool so Quiz, Research, Chat, and Deep Solve can actively inspect learner memory.
+- [x] Add default Space.
+- [x] Add Notebook entries.
+- [x] Save research reports to Notebook as `type = research_report`.
+- [x] Move Quiz history/review into Space / Quiz Bank.
+- [x] Add Student Profile module.
+- [x] Add Markdown-based Memory module with L1 events, L2 summaries, and L3 learner memory.
+- [x] Add manual memory consolidation from the Memory module.
+- [x] Add `read_memory` tool so Quiz, Research, Chat, and Deep Solve can actively inspect learner memory.
 - [x] Add books and book chapters.
-- [ ] Send curated Notebook entries to Books.
+- [x] Send curated Notebook entries to Books.
 - [ ] Save chat answers to Notebook.
 - [ ] Save quiz summaries to Notebook.
 - [ ] Save source snippets.
@@ -251,7 +250,7 @@ Acceptance:
 Goal: make the app feel like a learning product, not only a developer demo.
 
 - [x] Redesign the UI around chat, knowledge, quiz, books, settings, and trace.
-- [ ] Redesign Space around Notebook, Quiz Bank, and Student Profile.
+- [x] Redesign Space around Notebook, Quiz Bank, and Student Profile.
 - [x] Add clear empty states for major views.
 - [x] Add upload progress and indexing status.
 - [ ] Add model/provider health checks.
@@ -280,17 +279,14 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 Recommended next implementation order:
 
-1. Add Space shell with Notebook, Quiz Bank, and Student Profile tabs.
-2. Add `NotebookEntry` store and save Research reports as `type = research_report`.
-3. Move historical Quiz review into Space / Quiz Bank and remove standalone Quiz navigation.
-4. Add Markdown Memory module and manual consolidation.
-5. Add `read_memory` tool and mount it for personalized Quiz, Research, Chat, and Deep Solve planning.
-6. Improve source/citation quality for Research and Quiz.
-7. Upgrade RAG chunking from basic character chunks to paragraph/token-aware chunks.
-8. Add model/provider health checks in Settings.
-9. Add export for chat, notebook entries, reports, and book chapters.
-10. Add a smoke test for `tutor-web` startup.
-11. Decide whether local JSON stores should move to SQLite.
+1. Improve source/citation quality for Research and Quiz.
+2. Add source references from Student Profile memory claims back to their evidence.
+3. Add chat-to-notebook and quiz-summary-to-notebook save flows.
+4. Upgrade RAG chunking from basic character chunks to paragraph/token-aware chunks.
+5. Add model/provider health checks in Settings.
+6. Add export for chat, notebook entries, reports, and book chapters.
+7. Add a smoke test for `tutor-web` startup.
+8. Decide whether local JSON stores should move to SQLite.
 
 ## 7. Risks
 

@@ -61,19 +61,19 @@ tool/session adapters.
 
 ## 3. Phase 1: Stabilize Space as the Home for Learning Artifacts
 
-Status: in progress.
+Status: mostly complete.
 
 Tasks:
 
-- [ ] Keep Space as a tabbed workspace with Notebook, Quiz Bank, and Student Profile.
-- [ ] Ensure Notebook list/detail/edit/delete flows are stable.
-- [ ] Ensure Research "save" action writes a Notebook entry by default.
-- [ ] Ensure Notebook entries can be sent to Books as chapters.
-- [ ] Ensure Quiz Bank lists completed quiz records from chat-generated quizzes.
-- [ ] Ensure Quiz Bank can show questions, selected answers, correct answers, explanations, and citations.
-- [ ] Ensure Notebook and Quiz Bank expose stable artifact IDs, titles, types, and metadata for Chat `@` references.
+- [x] Keep Space as a tabbed workspace with Notebook, Quiz Bank, and Student Profile.
+- [x] Ensure Notebook list/detail/edit/delete flows are stable.
+- [x] Ensure Research "save" action writes a Notebook entry by default.
+- [x] Ensure Notebook entries can be sent to Books as chapters.
+- [x] Ensure Quiz Bank lists completed quiz records from chat-generated quizzes.
+- [x] Ensure Quiz Bank can show questions, selected answers, correct answers, explanations, and citations.
+- [x] Ensure Notebook and Quiz Bank expose stable artifact IDs, titles, types, and metadata for Chat `@` references.
 - [ ] Add basic source/reference display for Student Profile memory claims.
-- [ ] Remove standalone Quiz navigation only after Quiz Bank review covers current needs.
+- [x] Remove standalone Quiz navigation only after Quiz Bank review covers current needs.
 
 Acceptance:
 
@@ -84,19 +84,19 @@ Acceptance:
 
 ## 3A. Phase 1A: Chat Mentions for Space Artifacts
 
-Status: planned.
+Status: complete.
 
 Tasks:
 
-- [ ] Add a structured `@` mention picker to the chat composer.
-- [ ] Support Notebook entry, Quiz session, and Quiz question mention targets first.
-- [ ] Persist selected mentions with the user message/session record.
-- [ ] Add a product tool such as `read_space_item` so the agent can read mentioned artifacts on demand.
-- [ ] Render selected mentions as removable chips before send and as compact references after send.
-- [ ] Make Chat answers cite or reference mentioned artifacts when their content was used.
-- [ ] Support `@notebook-entry` edit requests by returning a proposed Markdown replacement or diff.
-- [ ] Add an explicit apply step before writing an agent-produced Notebook edit.
-- [ ] Record applied Notebook edits into Notebook memory events.
+- [x] Add a structured `@` mention picker to the chat composer.
+- [x] Support Notebook entry, Quiz session, and Quiz question mention targets first.
+- [x] Persist selected mentions with the user message/session record.
+- [x] Add a product tool such as `read_space_item` so the agent can read mentioned artifacts on demand.
+- [x] Render selected mentions as removable chips before send and as compact references after send.
+- [x] Make Chat answers cite or reference mentioned artifacts when their content was used.
+- [x] Support `@notebook-entry` edit requests by returning a proposed Markdown replacement or diff.
+- [x] Add an explicit apply step before writing an agent-produced Notebook edit.
+- [x] Record applied Notebook edits into Notebook memory events.
 
 Acceptance:
 
@@ -106,19 +106,19 @@ Acceptance:
 
 ## 4. Phase 2: Make Quiz Work from Conversation, Notebook, and Knowledge Sources
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
-- [ ] Allow Quiz mode without requiring a selected knowledge base.
-- [ ] Generate quizzes from current conversation context.
-- [ ] Allow Chat Quiz mode to use saved Notebook entries, research reports, Quiz records, or other mentioned Space material when the user explicitly references it with `@`.
-- [ ] Use RAG only when a knowledge base is selected or the user asks about uploaded material.
-- [ ] Use web search only when the quiz source needs external/current facts.
+- [x] Allow Quiz mode without requiring a selected knowledge base.
+- [x] Generate quizzes from current conversation context.
+- [x] Allow Chat Quiz mode to use saved Notebook entries, research reports, Quiz records, or other mentioned Space material when the user explicitly references it with `@`.
+- [x] Use RAG only when a knowledge base is selected or the user asks about uploaded material.
+- [x] Use web search only when the quiz source needs external/current facts.
 - [ ] Validate answer/explanation consistency before rendering a quiz.
 - [ ] Improve citation mapping so each question cites the correct source chunk or web source.
-- [ ] Record quiz generation, answers, scores, and weak points into L1 memory.
-- [ ] Add tests that do not depend on a real LLM for quiz source handling and persistence.
+- [x] Record quiz generation, answers, scores, and weak points into L1 memory.
+- [x] Add tests that do not depend on a real LLM for quiz source handling and persistence.
 
 Acceptance:
 
@@ -132,14 +132,14 @@ Status: in progress.
 
 Tasks:
 
-- [ ] Keep L1 raw events for chat, quiz, notebook, and research.
-- [ ] Keep L3 Markdown files as the first agent-readable memory surface.
-- [ ] Add manual consolidation preview and apply flow.
-- [ ] Show recent events that will be used before consolidation.
-- [ ] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
+- [x] Keep L1 raw events for chat, quiz, notebook, and research.
+- [x] Keep L3 Markdown files as the first agent-readable memory surface.
+- [x] Add manual consolidation preview and apply flow.
+- [x] Show recent events that will be used before consolidation.
+- [x] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
 - [ ] Add source references from memory claims back to quiz, notebook, research, or chat evidence where possible.
-- [ ] Keep profile editing as Markdown editing.
-- [ ] Defer automatic consolidation until manual consolidation is reliable.
+- [x] Keep profile editing as Markdown editing.
+- [x] Defer automatic consolidation until manual consolidation is reliable.
 
 Acceptance:
 
@@ -157,10 +157,10 @@ Tasks:
 - [ ] Show search/fetch failures as clear reasons.
 - [ ] Render Research result as a structured report component.
 - [ ] Attach a dedicated source list to each report.
-- [ ] Save Research reports to Notebook as `type = research_report`.
-- [ ] Preserve query, sources, session id, and tool trace ids in Notebook metadata.
-- [ ] Support Chat follow-up flows where the user asks to generate a Quiz from a saved report.
-- [ ] Support "Send to Book" from the Notebook report detail.
+- [x] Save Research reports to Notebook as `type = research_report`.
+- [x] Preserve query, sources, session id, and tool trace ids in Notebook metadata.
+- [x] Support Chat follow-up flows where the user asks to generate a Quiz from a saved report.
+- [x] Support "Send to Book" from the Notebook report detail.
 
 Acceptance:
 
@@ -214,15 +214,15 @@ Status: planned.
 
 Tasks:
 
-- [ ] Add Notebook store/API tests.
-- [ ] Add Quiz Bank list/detail tests.
-- [ ] Add Memory parser/consolidation tests.
-- [ ] Add `read_memory` tool tests.
+- [x] Add Notebook store/API tests.
+- [x] Add Quiz Bank list/detail tests.
+- [x] Add Memory parser/consolidation tests.
+- [x] Add `read_memory` tool tests.
 - [ ] Add non-real-LLM RAG retrieval tests.
-- [ ] Add non-real-LLM Quiz source tests.
+- [x] Add non-real-LLM Quiz source tests.
 - [ ] Add Research mock tests for search/fetch/report metadata.
-- [ ] Keep `npm run build` passing.
-- [ ] Keep `cargo test -p tutor-web --lib`, `cargo test -p tutor-agent`, and `cargo test -p tutor-tools` passing.
+- [x] Keep `npm run build` passing.
+- [x] Keep `cargo test -p tutor-web --lib`, `cargo test -p tutor-agent`, and `cargo test -p tutor-tools` passing.
 
 Acceptance:
 
@@ -232,14 +232,12 @@ Acceptance:
 
 ## 10. Recommended Order
 
-1. Finish Space parity: Notebook, Quiz Bank, Student Profile references.
-2. Make Quiz work from conversation context without requiring a knowledge base.
-3. Harden Quiz answer/explanation/citation consistency.
-4. Finish manual memory consolidation and reference display.
-5. Make Research save reports into Notebook with structured metadata.
-6. Add Notebook-to-Book and Notebook-to-Quiz follow-up flows.
-7. Harden web search provider behavior and failure reporting.
-8. Improve persistence for trace/status/context summaries.
+1. Harden Quiz answer/explanation/citation consistency.
+2. Add Student Profile and memory claim source references.
+3. Improve Research report rendering and source metadata.
+4. Harden web search provider behavior and failure reporting.
+5. Improve persistence for trace/status/context summaries.
+6. Add more non-real-LLM workflow tests where coverage is still thin.
 
 ## 11. Deferred Work
 

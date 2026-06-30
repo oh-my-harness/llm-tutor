@@ -326,10 +326,10 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 4: Persistence
 
-- [ ] Add Notebook entry store.
-- [ ] Add create/read Notebook entry APIs.
-- [ ] Persist research report metadata in `NotebookEntry(type = research_report)`.
-- [ ] Restore research reports from Notebook entries and session links.
+- [x] Add Notebook entry store.
+- [x] Add create/read Notebook entry APIs.
+- [x] Persist research report metadata in `NotebookEntry(type = research_report)`.
+- [x] Restore research reports from Notebook entries and session links.
 
 ### Phase 5: Book Save
 
@@ -341,7 +341,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 6: Follow-up Work
 
-- [ ] Support Chat Quiz follow-up prompts that use a saved report as source material.
+- [x] Support Chat Quiz follow-up prompts that use a saved report as source material.
 - [ ] Improve source quality scoring.
 - [ ] Add report regeneration.
 - [ ] Add PDF/webpage source ingestion into knowledge base.

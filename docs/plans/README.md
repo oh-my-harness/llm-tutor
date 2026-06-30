@@ -25,7 +25,7 @@ checklists.
 
 ## Historical Plans
 
-The 2026-06-13 Phase 1-5 files are preserved for historical context only. They
-were implementation checklists for the original runtime demo and early web
-scaffold. Their unchecked boxes should not be treated as current project status.
-
+The `archive/2026-06-13-tutor-agent-phase*-*.md` files are preserved for
+historical context only. They were implementation checklists for the original
+runtime demo and early web scaffold. Their unchecked boxes should not be
+treated as current project status.
