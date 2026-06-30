@@ -106,6 +106,12 @@ Windows 桌面版使用 Tauri 打包，脚本会构建 `web-ui`、release 版
 .\scripts\build-desktop.ps1 -Bundles nsis
 ```
 
+构建完成后可以运行自动化 smoke QA：
+
+```powershell
+.\scripts\qa-desktop.ps1
+```
+
 打包后的桌面应用会自动启动本地 `tutor-web` sidecar，并把数据写入系统
 app data 目录；Web 开发模式仍默认使用项目根目录下的 `.llm-tutor/`。
 

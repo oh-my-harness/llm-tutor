@@ -329,10 +329,14 @@ Acceptance:
 
 ### Phase 5: First Release QA
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
+- [x] Add desktop release QA automation script.
+- [x] Add manual desktop QA checklist.
+- [ ] Run `scripts/build-desktop.ps1` on a local machine with enough build time.
+- [ ] Run `scripts/qa-desktop.ps1` against the built artifact.
 - [ ] Install or unpack app on a clean Windows machine/profile.
 - [ ] Start app with no existing data.
 - [ ] Configure one LLM provider.
@@ -349,6 +353,15 @@ Acceptance:
 - App can be used end to end without terminal commands.
 - Startup failures show understandable messages.
 - No API keys appear in logs or trace.
+
+Automation:
+
+- `scripts/qa-desktop.ps1` validates the release app binary, Tauri sidecar
+  filename, bundle directory when present, and starts the release `tutor-web`
+  binary with a temporary data directory to smoke-test `/api/sessions` and
+  `/api/knowledge-bases`.
+- `docs/qa/desktop-v0.1.md` tracks the manual UI checks that cannot be safely
+  completed by a shell script.
 
 ## 11. Risks and Mitigations
 
