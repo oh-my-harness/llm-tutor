@@ -75,6 +75,13 @@ pub struct PersistedMessageMentions {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedMessageCitations {
+    pub assistant_message_index: usize,
+    pub citations: Vec<serde_json::Value>,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 /// Thread-safe pool of active web session metadata plus runtime session repo.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
@@ -320,6 +327,69 @@ impl SessionPool {
                 })
             })
             .collect())
+    }
+
+    pub async fn append_message_citations(
+        &self,
+        id: &str,
+        assistant_message_index: usize,
+        citations: Vec<serde_json::Value>,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        if citations.is_empty() {
+            return Ok(());
+        }
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "message_citations".into(),
+                data: serde_json::json!({
+                    "assistant_message_index": assistant_message_index,
+                    "citations": citations,
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn message_citations(
+        &self,
+        id: &str,
+    ) -> Result<Vec<PersistedMessageCitations>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                    return None;
+                };
+                if custom_type != "message_citations" {
+                    return None;
+                }
+                let assistant_message_index =
+                    data.get("assistant_message_index")?.as_u64()? as usize;
+                let citations = data.get("citations")?.as_array()?.clone();
+                Some(PersistedMessageCitations {
+                    assistant_message_index,
+                    citations,
+                    timestamp: entry.timestamp,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn assistant_message_count(
+        &self,
+        id: &str,
+    ) -> Result<usize, llm_harness_types::SessionError> {
+        let messages = self.messages(id).await?;
+        Ok(messages
+            .iter()
+            .filter(|message| message_role(message) == Some("assistant"))
+            .count())
     }
 
     pub async fn traces(
@@ -722,6 +792,41 @@ mod tests {
         assert_eq!(mentions.len(), 1);
         assert_eq!(mentions[0].user_message_index, 1);
         assert_eq!(mentions[0].mentions[0]["title"], "Note 1");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn message_citations_survive_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::assistant_message("answer"))
+            .await
+            .unwrap();
+        let assistant_count = pool.assistant_message_count(&id).await.unwrap();
+
+        pool.append_message_citations(
+            &id,
+            assistant_count,
+            vec![serde_json::json!({
+                "index": 1,
+                "source": "doc.pdf",
+                "text": "quoted source",
+                "kind": "rag",
+            })],
+        )
+        .await
+        .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let citations = reopened.message_citations(&id).await.unwrap();
+
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].assistant_message_index, 1);
+        assert_eq!(citations[0].citations[0]["source"], "doc.pdf");
         let _ = std::fs::remove_dir_all(root);
     }
 

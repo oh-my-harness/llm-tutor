@@ -84,6 +84,7 @@ interface SessionDetailResponse {
     role: 'user' | 'assistant'
     text: string
     mentions?: SpaceMention[]
+    citations?: Citation[]
   }>
   trace?: Array<{
     kind: string
@@ -196,6 +197,11 @@ export default function App() {
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
+          if (sessionId && citations.length > 0) {
+            void persistMessageCitations(sessionId, citations).catch((err) => {
+              console.warn('failed to persist message citations', err)
+            })
+          }
           void refreshSessions()
         }
       } else if (event.type === 'trace') {
@@ -658,6 +664,7 @@ export default function App() {
             role: message.role,
             text: message.text,
             mentions: message.mentions,
+            citations: message.citations,
           })),
           restoredTrace,
         )
@@ -1109,6 +1116,7 @@ function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]
   let citationIndex = 0
   return messages.map((message) => {
     if (message.role !== 'assistant') return message
+    if (message.citations && message.citations.length > 0) return message
     const citations = citationGroups[citationIndex]
     citationIndex += 1
     return citations ? { ...message, citations } : message
@@ -1369,6 +1377,18 @@ async function persistQuizMessage(sessionId: string, user: string, assistant: st
       assistant,
       quiz_id: quizId,
     }),
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(errorMessage(data, res.status))
+  }
+}
+
+async function persistMessageCitations(sessionId: string, citations: Citation[]) {
+  const res = await fetch(`/api/sessions/${sessionId}/message-citations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ citations }),
   })
   const data = await safeJson(res)
   if (!res.ok) {

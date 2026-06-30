@@ -69,6 +69,12 @@ struct AppendMessageRequest {
     user: Option<String>,
     assistant: Option<String>,
     quiz_id: Option<String>,
+    assistant_citations: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+struct AppendMessageCitationsRequest {
+    citations: Vec<serde_json::Value>,
 }
 
 async fn create_session(
@@ -228,7 +234,22 @@ async fn get_session(
         .into_iter()
         .map(|item| (item.user_message_index, item.mentions))
         .collect::<HashMap<_, _>>();
+    let message_citations = match pool.message_citations(&id).await {
+        Ok(items) => items,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let citations_by_assistant_index = message_citations
+        .into_iter()
+        .map(|item| (item.assistant_message_index, item.citations))
+        .collect::<HashMap<_, _>>();
     let mut user_message_index = 0usize;
+    let mut assistant_message_index = 0usize;
 
     (
         StatusCode::OK,
@@ -254,6 +275,13 @@ async fn get_session(
                     if let Some(mentions) = mentions_by_user_index.get(&user_message_index) {
                         if let Some(map) = value.as_object_mut() {
                             map.insert("mentions".into(), serde_json::Value::Array(mentions.clone()));
+                        }
+                    }
+                } else if role == "assistant" {
+                    assistant_message_index += 1;
+                    if let Some(citations) = citations_by_assistant_index.get(&assistant_message_index) {
+                        if let Some(map) = value.as_object_mut() {
+                            map.insert("citations".into(), serde_json::Value::Array(citations.clone()));
                         }
                     }
                 }
@@ -485,11 +513,102 @@ async fn append_session_messages(
         }
     }
 
+    if let Some(citations) = req.assistant_citations.filter(|items| !items.is_empty()) {
+        let assistant_message_index = match state.pool.assistant_message_count(&id).await {
+            Ok(count) if count > 0 => count,
+            Ok(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "no assistant message to annotate" })),
+                )
+                    .into_response();
+            }
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": err.to_string() })),
+                )
+                    .into_response();
+            }
+        };
+        if let Err(err) = state
+            .pool
+            .append_message_citations(&id, assistant_message_index, citations)
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
     (
         StatusCode::OK,
         Json(serde_json::json!({ "id": id, "appended": true })),
     )
         .into_response()
+}
+
+async fn append_message_citations(
+    State(state): State<Arc<SessionsState>>,
+    Path(id): Path<String>,
+    Json(req): Json<AppendMessageCitationsRequest>,
+) -> impl IntoResponse {
+    if state.pool.ensure_entry(&id).await.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "session not found" })),
+        )
+            .into_response();
+    }
+    if req.citations.is_empty() {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({ "id": id, "appended": false })),
+        )
+            .into_response();
+    }
+
+    let assistant_message_index = match state.pool.assistant_message_count(&id).await {
+        Ok(count) if count > 0 => count,
+        Ok(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "no assistant message to annotate" })),
+            )
+                .into_response();
+        }
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    match state
+        .pool
+        .append_message_citations(&id, assistant_message_index, req.citations)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "id": id,
+                "appended": true,
+                "assistant_message_index": assistant_message_index,
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
@@ -547,6 +666,10 @@ pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -
                 .delete(delete_session),
         )
         .route("/api/sessions/{id}/messages", post(append_session_messages))
+        .route(
+            "/api/sessions/{id}/message-citations",
+            post(append_message_citations),
+        )
         .with_state(state)
 }
 
