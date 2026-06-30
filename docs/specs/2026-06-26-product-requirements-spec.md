@@ -64,14 +64,14 @@
 - REQ-076: Chat mode shall avoid inventing facts when web search or fetch fails.
 - REQ-077: Chat mode shall display citations only when the agent actually used a citation-producing tool.
 - REQ-078: Chat mode shall not add backend-invented RAG citations when `rag_search` was not actually called.
-- REQ-079: Chat mode shall support user-selected `@` references to Space artifacts.
-- REQ-080: `@` references shall be stored as structured artifact references, not only as plain text mentions.
-- REQ-081: The first supported `@` reference targets shall include Notebook entries, Quiz sessions, and Quiz questions.
-- REQ-082: The chat composer shall display selected `@` references as removable chips.
-- REQ-083: The `@` reference picker shall search Space artifacts by title, type, and useful metadata.
-- REQ-084: Mentioned Space artifact IDs shall be persisted with the user message and restored with the session.
-- REQ-085: Agents shall access mentioned Space artifacts through product tools such as `read_space_item` where possible, instead of blindly injecting long artifact content into every prompt.
-- REQ-086: When an agent uses mentioned Space artifact content in an answer, the response shall identify the relevant artifact or cite it through the product reference system.
+- REQ-079: Chat mode shall support user-selected `@` references to Space artifacts. Status: implemented.
+- REQ-080: `@` references shall be stored as structured artifact references, not only as plain text mentions. Status: implemented.
+- REQ-081: The first supported `@` reference targets shall include Notebook entries, Quiz sessions, and Quiz questions. Status: implemented.
+- REQ-082: The chat composer shall display selected `@` references as removable chips. Status: implemented.
+- REQ-083: The `@` reference picker shall search Space artifacts by title, type, and useful metadata. Status: implemented.
+- REQ-084: Mentioned Space artifact IDs shall be persisted with the user message and restored with the session. Status: implemented.
+- REQ-085: Agents shall access mentioned Space artifacts through product tools such as `read_space_item` where possible, instead of blindly injecting long artifact content into every prompt. Status: implemented for Chat and Research.
+- REQ-086: When an agent uses mentioned Space artifact content in an answer, the response shall identify the relevant artifact or cite it through the product reference system. Status: planned.
 
 ## 6. Attachments
 
@@ -191,7 +191,7 @@
 
 - REQ-270: Users shall be able to generate a Quiz from a selected knowledge base.
 - REQ-271: Users shall be able to generate a Quiz from conversation material.
-- REQ-272: Users shall generate Quiz content from Chat Quiz mode using conversation context, attachments, selected knowledge sources, or user-referenced saved material; Notebook and Research report pages shall not provide independent Quiz generation entry points.
+- REQ-272: Users shall generate Quiz content from Chat Quiz mode using conversation context, attachments, selected knowledge sources, or user-referenced saved material; Notebook and Research report pages shall not provide independent Quiz generation entry points. Status: implemented for conversation, attachments, knowledge bases, and `@` Space references.
 - REQ-273: Quiz generation shall retrieve source chunks when a knowledge base is selected.
 - REQ-274: Quiz generation shall produce strict structured JSON.
 - REQ-275: Quiz questions shall include answer options.
@@ -307,8 +307,8 @@
 - REQ-658: The standalone Quiz navigation page shall be removed after Quiz Bank exists in Space.
 - REQ-659: Quiz history shall move from the current Quiz page into Space / Quiz Bank.
 - REQ-660: Quiz Bank shall support filtering by source type later. Status: planned.
-- REQ-661: Users shall be able to `@` a Quiz session or Quiz question in Chat for explanation, follow-up practice, review, or related quiz generation. Status: planned.
-- REQ-662: Quiz-related `@` references shall preserve enough metadata for the agent to read the original prompt, question text, answer, explanation, citations, and user answer where available. Status: planned.
+- REQ-661: Users shall be able to `@` a Quiz session or Quiz question in Chat for explanation, follow-up practice, review, or related quiz generation. Status: implemented.
+- REQ-662: Quiz-related `@` references shall preserve enough metadata for the agent to read the original prompt, question text, answer, explanation, citations, and user answer where available. Status: implemented.
 
 ## 19. Student Profile
 
