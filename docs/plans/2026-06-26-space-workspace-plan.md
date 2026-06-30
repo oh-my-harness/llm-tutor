@@ -470,7 +470,7 @@ Do not rush this simplification until Space is useful enough.
 - [ ] Keep composer Quiz mode.
 - [ ] Move Quiz history/review UI into Space / Quiz Bank.
 - [ ] Keep Quiz generation in chat only.
-- [ ] Expose Quiz sessions and questions as Chat `@` mention targets.
+- [x] Expose Quiz sessions and questions as Chat `@` mention targets.
 - [ ] Add filters by source type later.
 
 ### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
@@ -482,7 +482,7 @@ Do not rush this simplification until Space is useful enough.
 - [x] Render selected mentions as compact chips in the chat composer.
 - [x] Render sent mentions as compact references in the message body or metadata area.
 - [x] Let Chat mode answer questions about mentioned Space artifacts.
-- [ ] Let Quiz mode generate questions from mentioned Space artifacts.
+- [x] Let Quiz mode generate questions from mentioned Space artifacts.
 - [ ] Let Chat propose Notebook edits for mentioned Notebook entries.
 - [ ] Require explicit user confirmation before applying an agent-produced Notebook edit.
 - [ ] Create Notebook memory events after confirmed agent edits.

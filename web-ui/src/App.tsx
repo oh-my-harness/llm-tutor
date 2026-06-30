@@ -360,23 +360,26 @@ export default function App() {
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       if (capability === 'quiz') {
         const attachmentSource = attachmentSourceText(attachments)
-        const conversationSource = [quizSourceFromMessages(messages), attachmentSource].filter(Boolean).join('\n\n')
-        if (!selectedKnowledgeBaseId && !conversationSource.trim()) {
+        const mentionSource = await spaceMentionSourceText(mentions)
+        const conversationSource = [quizSourceFromMessages(messages), attachmentSource, mentionSource].filter(Boolean).join('\n\n')
+        const hasExplicitLocalSource = attachments.some((attachment) => attachment.text?.trim()) || mentions.length > 0
+        const useKnowledgeBaseForQuiz = Boolean(selectedKnowledgeBaseId && !hasExplicitLocalSource)
+        if (!useKnowledgeBaseForQuiz && !conversationSource.trim()) {
           throw new Error('当前还没有可用于出题的对话内容。请先提供一段材料，或关联知识库。')
         }
         pushStatus({
           kind: 'tool',
           label: 'Generating quiz',
-          detail: selectedKnowledgeBaseId ? 'Knowledge base' : 'Conversation',
+          detail: useKnowledgeBaseForQuiz ? 'Knowledge base' : mentions.length > 0 ? 'Space references' : 'Conversation',
         })
         const res = await fetch('/api/quizzes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            kb_id: selectedKnowledgeBaseId || null,
-            source_text: selectedKnowledgeBaseId ? null : conversationSource,
-            source_label: selectedKnowledgeBaseId ? null : '当前对话',
-            topic: text.trim() || (attachments.length > 0 ? '附件内容' : null),
+            kb_id: useKnowledgeBaseForQuiz ? selectedKnowledgeBaseId : null,
+            source_text: useKnowledgeBaseForQuiz ? null : conversationSource,
+            source_label: useKnowledgeBaseForQuiz ? null : mentions.length > 0 ? 'Space references' : '当前对话',
+            topic: text.trim() || (mentions.length > 0 ? 'Space references' : attachments.length > 0 ? '附件内容' : null),
             difficulty: 'medium',
             question_count: 5,
             llm: settingsForSession(llmSettings),
@@ -1205,6 +1208,42 @@ function attachmentSourceText(attachments: ChatAttachment[]) {
       attachment.text?.trim() ?? '',
     ].filter(Boolean).join('\n')),
   ].join('\n\n')
+}
+
+async function spaceMentionSourceText(mentions: SpaceMention[]) {
+  if (mentions.length === 0) return ''
+  const sources = await Promise.all(mentions.slice(0, 8).map(async (mention, index) => {
+    const targetId = mention.target_id?.trim()
+    if (!targetId) return ''
+    const res = await fetch(spaceMentionItemUrl(mention, targetId))
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(`failed to read Space reference "${mention.title}": ${errorMessage(data, res.status)}`)
+    }
+    const item = data.item as { content_markdown?: unknown } | undefined
+    const markdown = typeof item?.content_markdown === 'string' ? item.content_markdown.trim() : ''
+    if (!markdown) return ''
+    return [
+      `## Space Reference ${index + 1}: ${mention.title}`,
+      `Type: ${mention.type}`,
+      '',
+      markdown,
+    ].join('\n')
+  }))
+  return [
+    '[Space reference context]',
+    ...sources.filter(Boolean),
+  ].join('\n\n').slice(0, 40000)
+}
+
+function spaceMentionItemUrl(mention: SpaceMention, targetId: string) {
+  const params = new URLSearchParams()
+  if (mention.type === 'quiz_question' && mention.question_id) {
+    params.set('question_id', mention.question_id)
+  }
+  const query = params.toString()
+  const path = `/api/space/items/${encodeURIComponent(mention.type)}/${encodeURIComponent(targetId)}`
+  return query ? `${path}?${query}` : path
 }
 
 function titleFromMarkdown(markdown: string) {
