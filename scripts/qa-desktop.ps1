@@ -38,10 +38,11 @@ function Get-FreePort {
 function Assert-Path {
     param(
         [string]$Path,
-        [string]$Label
+        [string]$Label,
+        [string]$Hint = "Run .\scripts\build-desktop.ps1 first."
     )
     if (-not (Test-Path -LiteralPath $Path)) {
-        throw "$Label not found: $Path. Run .\scripts\build-desktop.ps1 first."
+        throw "$Label not found: $Path. $Hint"
     }
     Write-Host "OK: $Label -> $Path"
 }
@@ -116,8 +117,35 @@ if (-not $SkipBackendSmoke) {
         }
 
         Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/api/knowledge-bases" -TimeoutSec 5 | Out-Null
+
+        $knowledgeBody = @{
+            name = "Desktop QA"
+            embedding = @{
+                provider = "hash"
+                model = "local-hash"
+                api_key = "test"
+                base_url = $null
+                embeddings_path = $null
+                dimensions = 32
+                send_dimensions = $false
+            }
+        } | ConvertTo-Json -Depth 5
+        $createKnowledgeResponse = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Method Post `
+            -Uri "$baseUrl/api/knowledge-bases" `
+            -ContentType "application/json" `
+            -Body $knowledgeBody `
+            -TimeoutSec 5
+        if ($createKnowledgeResponse.StatusCode -ne 201) {
+            throw "Expected creating a QA knowledge base to return 201, got $($createKnowledgeResponse.StatusCode)."
+        }
+
         Assert-Path (Join-Path $DataDir "sessions") "smoke session data directory"
-        Assert-Path (Join-Path $DataDir "knowledge-bases.json") "smoke knowledge store"
+        Assert-Path `
+            (Join-Path $DataDir "knowledge-bases.json") `
+            "smoke knowledge store" `
+            "The backend responded, but creating the QA knowledge base did not persist the store."
         Write-Host "OK: backend smoke test passed" -ForegroundColor Green
     }
     finally {
