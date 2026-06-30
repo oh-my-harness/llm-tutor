@@ -122,15 +122,14 @@ LLM、Embedding、Search、预算和审批等设置会写入数据目录里的
 发布前使用脚本同步 Cargo、Tauri 和前端包版本：
 
 ```powershell
-.\scripts\bump-version.ps1 0.1.0-alpha.1
+.\scripts\bump-version.ps1 0.1.0
 ```
 
 建议发布节奏：
 
-- `0.1.0-alpha.1`：第一版内部测试。
-- `0.1.0-alpha.N`：修复 QA 问题后的内部测试版。
-- `0.1.0-beta.1`：功能基本稳定后的外部试用版。
-- `0.1.0`：第一版正式发布。
+- 桌面安装包版本必须使用纯数字三段格式，例如 `0.1.0`。
+- 内部测试版、外部试用版和正式版用 Git tag、Release 标题或构建产物文件名区分，例如 `v0.1.0-alpha.1`。
+- Windows MSI 不接受 `0.1.0-alpha.1` 这样的预发布版本号。
 
 ## 当前功能
 

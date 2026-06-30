@@ -5,8 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
-    throw "Version must be a valid SemVer value, for example 0.1.0 or 0.1.0-alpha.1."
+if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+    throw "Version must use numeric MAJOR.MINOR.PATCH format, for example 0.1.0. MSI bundles do not accept alpha/beta SemVer identifiers."
 }
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -19,8 +19,12 @@ function Update-TextFile {
 
     $text = Get-Content -Raw -LiteralPath $Path
     $next = & $Updater $text
-    if ($null -eq $next -or $next -eq $text) {
+    if ($null -eq $next) {
         throw "No version change was made in $Path."
+    }
+    if ($next -eq $text) {
+        Write-Host "No change needed $Path"
+        return
     }
     Set-Content -LiteralPath $Path -Value $next -NoNewline
     Write-Host "Updated $Path"

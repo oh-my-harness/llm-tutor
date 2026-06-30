@@ -2,8 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-This project follows Semantic Versioning. Pre-release desktop builds should use
-versions such as `0.1.0-alpha.1`, `0.1.0-alpha.2`, and `0.1.0-beta.1`.
+This project follows Semantic Versioning for source releases. Desktop bundle
+versions must use numeric `MAJOR.MINOR.PATCH` values because Windows MSI does
+not accept SemVer pre-release identifiers. Mark alpha/beta builds with Git tags,
+release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
