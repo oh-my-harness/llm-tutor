@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   AlertCircle,
@@ -759,6 +759,10 @@ function Composer({
   const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
   const activeKnowledge = knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
   const activeModel = llmConfigs.find((item) => item.id === activeLlmConfigId) ?? llmConfigs[0] ?? null
+  const visibleSpaceMentions = useMemo(
+    () => filterSpaceMentions(spaceMentions, spaceMentionFilter),
+    [spaceMentions, spaceMentionFilter],
+  )
   const knowledgeOptions = [
     {
       id: '',
@@ -802,7 +806,7 @@ function Composer({
       const params = new URLSearchParams()
       if (spaceQuery.trim()) params.set('q', spaceQuery.trim())
       if (spaceMentionFilter !== 'all') params.set('type', spaceMentionFilter)
-      params.set('limit', '20')
+      params.set('limit', '50')
       fetch(`/api/space/mentions?${params.toString()}`, { signal: controller.signal })
         .then(async (res) => {
           const data = await res.json().catch(() => ({})) as { mentions?: SpaceMention[] }
@@ -965,16 +969,17 @@ function Composer({
                   placeholder="Search notebook and quiz..."
                   autoFocus
                 />
+                {loadingSpaceMentions && (
+                  <div className="px-1 text-xs text-blue-500">Updating...</div>
+                )}
               </div>
               <div className="min-h-0 overflow-y-auto py-2">
-                {loadingSpaceMentions ? (
-                  <div className="px-5 py-4 text-sm text-gray-500">Loading Space items...</div>
-                ) : spaceMentions.length === 0 ? (
+                {visibleSpaceMentions.length === 0 ? (
                   <div className="px-5 py-4 text-sm text-gray-500">
                     No matching {spaceMentionFilterLabel(spaceMentionFilter)}.
                   </div>
                 ) : (
-                  spaceMentions.map((mention) => (
+                  visibleSpaceMentions.map((mention) => (
                     <DropdownOption
                       key={mention.id}
                       selected={mentions.some((item) => item.id === mention.id)}
@@ -1250,6 +1255,11 @@ function spaceMentionFilterLabel(filter: SpaceMentionFilter) {
   if (filter === 'quiz_question') return 'questions'
   if (filter === 'quiz_session') return 'quizzes'
   return 'Space items'
+}
+
+function filterSpaceMentions(mentions: SpaceMention[], filter: SpaceMentionFilter) {
+  if (filter === 'all') return mentions
+  return mentions.filter((mention) => mention.type === filter)
 }
 
 function spaceMentionDescription(mention: SpaceMention) {
