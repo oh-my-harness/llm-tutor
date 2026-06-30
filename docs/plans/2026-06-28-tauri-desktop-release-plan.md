@@ -271,7 +271,7 @@ Acceptance:
 
 ### Phase 3: Local Data Directory
 
-Status: in progress.
+Status: implementation complete; pending manual desktop QA.
 
 Tasks:
 
@@ -282,8 +282,17 @@ Tasks:
       and LanceDB/RAG data.
 - [x] Add settings/status UI display for current data directory.
 - [x] Add "open data directory" desktop command.
-- [ ] Decide whether frontend localStorage settings should remain in WebView
+- [x] Decide whether frontend localStorage settings should remain in WebView
       storage for v0.1 or move into a backend settings store.
+
+Decision:
+
+- v0.1 keeps frontend settings in the current WebView localStorage. This
+  includes LLM, embedding, search, budget, and approval settings.
+- Backend product data uses the configured app data root.
+- A later Settings Store task should move frontend settings into a backend
+  JSON store such as `<app-data-dir>/settings.json` when we want one shared
+  durable settings path across browser dev, desktop dev, and release builds.
 
 Acceptance:
 
