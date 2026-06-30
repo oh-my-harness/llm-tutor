@@ -16,7 +16,17 @@ import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
 import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
-import { DEFAULT_CONTEXT_WINDOW_TOKENS, activeLlmConfig, loadLlmSettings, saveLlmSettings, searchForSession, settingsForSession } from './settings'
+import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  activeLlmConfig,
+  hasLocalLlmSettings,
+  loadLlmSettings,
+  loadStoredLlmSettings,
+  saveLlmSettings,
+  saveStoredLlmSettings,
+  searchForSession,
+  settingsForSession,
+} from './settings'
 import type { QuizSession } from './quizTypes'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
@@ -274,6 +284,37 @@ export default function App() {
     })
   }, [])
 
+  const persistSettings = useCallback((nextSettings: typeof llmSettings) => {
+    saveLlmSettings(nextSettings)
+    saveStoredLlmSettings(nextSettings).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Settings not saved', detail: message })
+    })
+  }, [pushStatus])
+
+  useEffect(() => {
+    let cancelled = false
+    loadStoredLlmSettings()
+      .then((storedSettings) => {
+        if (cancelled) return
+        if (storedSettings) {
+          setLlmSettings(storedSettings)
+          saveLlmSettings(storedSettings)
+        } else if (hasLocalLlmSettings()) {
+          const localSettings = loadLlmSettings()
+          void saveStoredLlmSettings(localSettings)
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        pushStatus({ kind: 'error', label: 'Settings load failed', detail: message })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pushStatus])
+
   useEffect(() => {
     refreshSessions().catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -444,7 +485,7 @@ export default function App() {
 
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
-    saveLlmSettings(nextSettings)
+    persistSettings(nextSettings)
     setSessionId(null)
   }
 
@@ -514,7 +555,7 @@ export default function App() {
     if (running) return
     const nextSettings = { ...llmSettings, activeLlmConfigId: id }
     setLlmSettings(nextSettings)
-    saveLlmSettings(nextSettings)
+    persistSettings(nextSettings)
     if (!sessionId) return
 
     try {
@@ -530,7 +571,7 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
     }
-  }, [llmSettings, running, sessionId])
+  }, [llmSettings, persistSettings, running, sessionId])
 
   const handleApproval = (requestId: string, approved: boolean) => {
     send({ type: 'approval_response', request_id: requestId, approved })

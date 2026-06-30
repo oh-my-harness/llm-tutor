@@ -146,6 +146,33 @@ if (-not $SkipBackendSmoke) {
             (Join-Path $DataDir "knowledge-bases.json") `
             "smoke knowledge store" `
             "The backend responded, but creating the QA knowledge base did not persist the store."
+
+        $settingsBody = @{
+            budgetLimitUsd = 2
+            requireApproval = $false
+            llmConfigs = @()
+            activeLlmConfigId = $null
+            embeddingConfigs = @()
+            activeEmbeddingConfigId = $null
+            searchConfigs = @()
+            activeSearchConfigId = $null
+        } | ConvertTo-Json -Depth 5
+        $settingsResponse = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Method Put `
+            -Uri "$baseUrl/api/settings" `
+            -ContentType "application/json" `
+            -Body $settingsBody `
+            -TimeoutSec 5
+        if ($settingsResponse.StatusCode -ne 200) {
+            throw "Expected saving QA settings to return 200, got $($settingsResponse.StatusCode)."
+        }
+        Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/api/settings" -TimeoutSec 5 | Out-Null
+        Assert-Path `
+            (Join-Path $DataDir "settings.json") `
+            "smoke settings store" `
+            "The backend responded, but saving QA settings did not persist settings.json."
+
         Write-Host "OK: backend smoke test passed" -ForegroundColor Green
     }
     finally {

@@ -1,6 +1,14 @@
 use std::time::Duration;
 
-use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
 use llm_adapter::types::{ChatRequest, Message, RequestContent};
 use llm_adapter_embedding::EmbeddingProvider;
 use llm_adapter_embedding::openai::OpenAIProvider;
@@ -10,10 +18,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
-pub fn settings_router() -> Router {
+use crate::settings_store::SettingsStore;
+
+#[derive(Clone)]
+struct SettingsState {
+    store: Arc<SettingsStore>,
+}
+
+pub fn settings_router(store: Arc<SettingsStore>) -> Router {
+    let state = SettingsState { store };
     Router::new()
+        .route("/api/settings", get(get_settings).put(save_settings))
         .route("/api/settings/test/llm", post(test_llm_config))
         .route("/api/settings/test/embedding", post(test_embedding_config))
+        .with_state(state)
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +85,28 @@ struct TestEmbeddingResponse {
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+async fn get_settings(State(state): State<SettingsState>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "settings": state.store.get() })),
+    )
+        .into_response()
+}
+
+async fn save_settings(
+    State(state): State<SettingsState>,
+    Json(settings): Json<Value>,
+) -> impl IntoResponse {
+    match state.store.replace(settings) {
+        Ok(settings) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "settings": settings })),
+        )
+            .into_response(),
+        Err(error) => json_error(StatusCode::BAD_REQUEST, error.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

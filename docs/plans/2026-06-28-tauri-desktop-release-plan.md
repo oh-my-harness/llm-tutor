@@ -287,12 +287,12 @@ Tasks:
 
 Decision:
 
-- v0.1 keeps frontend settings in the current WebView localStorage. This
-  includes LLM, embedding, search, budget, and approval settings.
-- Backend product data uses the configured app data root.
-- A later Settings Store task should move frontend settings into a backend
-  JSON store such as `<app-data-dir>/settings.json` when we want one shared
-  durable settings path across browser dev, desktop dev, and release builds.
+- v0.1 stores LLM, embedding, search, budget, and approval settings in the
+  backend Settings Store at `<data-dir>/settings.json`.
+- The frontend still writes a localStorage compatibility cache, but startup
+  prefers the backend Settings Store and migrates existing localStorage settings
+  into the backend when the backend store is empty.
+- Backend product data and settings now share the configured app data root.
 
 Acceptance:
 

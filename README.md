@@ -114,6 +114,8 @@ Windows 桌面版使用 Tauri 打包，脚本会构建 `web-ui`、release 版
 
 打包后的桌面应用会自动启动本地 `tutor-web` sidecar，并把数据写入系统
 app data 目录；Web 开发模式仍默认使用项目根目录下的 `.llm-tutor/`。
+LLM、Embedding、Search、预算和审批等设置会写入数据目录里的
+`settings.json`，前端 localStorage 仅作为兼容缓存。
 
 ## 当前功能
 

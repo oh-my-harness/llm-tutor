@@ -21,6 +21,7 @@ Use this checklist after running:
 - [ ] Start the app without running `cargo run`, `cargo tauri dev`, or `npm run dev`.
 - [ ] Confirm the app opens the React UI and does not show Vite proxy errors.
 - [ ] Confirm Settings shows the desktop data directory and the Open button opens it.
+- [ ] Change one setting, restart the app, and confirm it was restored from `settings.json`.
 - [ ] Configure one LLM provider.
 - [ ] Send a chat message and confirm streaming output.
 - [ ] Configure one embedding provider.
@@ -41,4 +42,3 @@ Use this checklist after running:
 - [ ] Fail
 
 Notes:
-

@@ -77,41 +77,46 @@ export const defaultLlmSettings: LlmSettings = {
   activeSearchConfigId: null,
 }
 
+const SETTINGS_STORAGE_KEY = 'tutor.llmSettings'
+
 export function loadLlmSettings(): LlmSettings {
-  const raw = localStorage.getItem('tutor.llmSettings')
+  const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
   if (!raw) return defaultLlmSettings
 
   try {
-    const parsed = JSON.parse(raw) as Partial<LlmSettings>
-    const llmConfigs = normalizeLlmConfigs(parsed.llmConfigs, parsed)
-    const activeLlmConfigId = normalizeActiveConfigId(parsed.activeLlmConfigId, llmConfigs)
-    const activeLlmConfig = llmConfigs.find((config) => config.id === activeLlmConfigId) ?? null
-    const embeddingConfigs = normalizeEmbeddingConfigs(parsed.embeddingConfigs)
-    const searchConfigs = normalizeSearchConfigs(parsed.searchConfigs)
-
-    return {
-      ...defaultLlmSettings,
-      ...parsed,
-      ...(activeLlmConfig ? llmConfigToLegacyFields(activeLlmConfig) : {}),
-      provider: activeLlmConfig
-        ? activeLlmConfig.provider
-        : normalizeLlmProvider((parsed as { provider?: unknown }).provider),
-      budgetLimitUsd: Number(parsed.budgetLimitUsd ?? defaultLlmSettings.budgetLimitUsd),
-      requireApproval: Boolean(parsed.requireApproval),
-      llmConfigs,
-      activeLlmConfigId,
-      embeddingConfigs,
-      activeEmbeddingConfigId: normalizeActiveConfigId(parsed.activeEmbeddingConfigId, embeddingConfigs),
-      searchConfigs,
-      activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
-    }
+    return normalizeLlmSettings(JSON.parse(raw) as Partial<LlmSettings>)
   } catch {
     return defaultLlmSettings
   }
 }
 
 export function saveLlmSettings(settings: LlmSettings) {
-  localStorage.setItem('tutor.llmSettings', JSON.stringify(settings))
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+}
+
+export function hasLocalLlmSettings(): boolean {
+  return Boolean(localStorage.getItem(SETTINGS_STORAGE_KEY))
+}
+
+export async function loadStoredLlmSettings(): Promise<LlmSettings | null> {
+  const response = await fetch('/api/settings')
+  if (!response.ok) {
+    throw new Error(`failed to load settings: HTTP ${response.status}`)
+  }
+  const payload = await response.json() as { settings?: unknown }
+  if (!hasSettingsPayload(payload.settings)) return null
+  return normalizeLlmSettings(payload.settings as Partial<LlmSettings>)
+}
+
+export async function saveStoredLlmSettings(settings: LlmSettings): Promise<void> {
+  const response = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!response.ok) {
+    throw new Error(`failed to save settings: HTTP ${response.status}`)
+  }
 }
 
 export function settingsForSession(settings: LlmSettings) {
@@ -295,6 +300,36 @@ function normalizeLlmConfigs(value: unknown, legacy: Partial<LlmSettings>): LlmM
   }
 
   return []
+}
+
+function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
+  const llmConfigs = normalizeLlmConfigs(parsed.llmConfigs, parsed)
+  const activeLlmConfigId = normalizeActiveConfigId(parsed.activeLlmConfigId, llmConfigs)
+  const activeLlmConfig = llmConfigs.find((config) => config.id === activeLlmConfigId) ?? null
+  const embeddingConfigs = normalizeEmbeddingConfigs(parsed.embeddingConfigs)
+  const searchConfigs = normalizeSearchConfigs(parsed.searchConfigs)
+
+  return {
+    ...defaultLlmSettings,
+    ...parsed,
+    ...(activeLlmConfig ? llmConfigToLegacyFields(activeLlmConfig) : {}),
+    provider: activeLlmConfig
+      ? activeLlmConfig.provider
+      : normalizeLlmProvider((parsed as { provider?: unknown }).provider),
+    budgetLimitUsd: Number(parsed.budgetLimitUsd ?? defaultLlmSettings.budgetLimitUsd),
+    requireApproval: Boolean(parsed.requireApproval),
+    llmConfigs,
+    activeLlmConfigId,
+    embeddingConfigs,
+    activeEmbeddingConfigId: normalizeActiveConfigId(parsed.activeEmbeddingConfigId, embeddingConfigs),
+    searchConfigs,
+    activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
+  }
+}
+
+function hasSettingsPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.keys(value).length > 0
 }
 
 function normalizeLlmConfig(value: unknown): LlmModelConfig {

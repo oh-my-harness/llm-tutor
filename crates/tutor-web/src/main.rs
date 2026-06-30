@@ -13,6 +13,7 @@ mod notebook_store;
 mod quiz_store;
 mod routes;
 mod session;
+mod settings_store;
 mod stream;
 
 #[tokio::main]
@@ -34,6 +35,9 @@ async fn main() -> anyhow::Result<()> {
     ));
     let memory = std::sync::Arc::new(memory_store::MemoryStore::new_with_root(
         config.data_dir.join("memory"),
+    ));
+    let settings = std::sync::Arc::new(settings_store::SettingsStore::new_with_path(
+        config.data_dir.join("settings.json"),
     ));
     let rag_root = config.data_dir.join("rag");
 
@@ -58,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::books::books_router(books))
         .merge(routes::notebook::notebook_router(notebook, memory.clone()))
         .merge(routes::memory::memory_router(memory.clone()))
-        .merge(routes::settings::settings_router())
+        .merge(routes::settings::settings_router(settings))
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
         .merge(routes::ws::ws_router(
             pool.clone(),
