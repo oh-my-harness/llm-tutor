@@ -475,7 +475,8 @@ Do not rush this simplification until Space is useful enough.
 
 ### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
 
-- [ ] Add a backend lookup endpoint for Space mention candidates.
+- [x] Add a backend lookup endpoint for Space mention candidates.
+- [x] Add a backend read endpoint for resolving mentioned Space artifacts.
 - [ ] Add structured mention storage to chat messages/sessions.
 - [ ] Add `read_space_item` product tool for Notebook entries, Quiz sessions, and Quiz questions.
 - [ ] Render selected mentions as compact chips in the chat composer.

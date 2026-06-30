@@ -53,14 +53,21 @@ async fn main() -> anyhow::Result<()> {
             rag_root.clone(),
         ))
         .merge(routes::quiz::quiz_router(
-            quizzes,
+            quizzes.clone(),
             knowledge.clone(),
             notebook.clone(),
             memory.clone(),
             rag_root.clone(),
         ))
         .merge(routes::books::books_router(books))
-        .merge(routes::notebook::notebook_router(notebook, memory.clone()))
+        .merge(routes::notebook::notebook_router(
+            notebook.clone(),
+            memory.clone(),
+        ))
+        .merge(routes::space::space_router(
+            notebook.clone(),
+            quizzes.clone(),
+        ))
         .merge(routes::memory::memory_router(memory.clone()))
         .merge(routes::settings::settings_router(settings))
         .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
