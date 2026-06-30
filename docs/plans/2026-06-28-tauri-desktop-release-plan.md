@@ -302,16 +302,25 @@ Acceptance:
 
 ### Phase 4: Release Build Script
 
-Status: planned.
+Status: implementation complete; pending manual release build QA.
 
 Tasks:
 
-- [ ] Add `scripts/build-desktop.ps1`.
-- [ ] Add root-level documentation for desktop build prerequisites.
-- [ ] Build `web-ui`.
-- [ ] Build `tutor-web --release`.
-- [ ] Build Tauri bundle.
-- [ ] Restore or ignore generated build cache files.
+- [x] Add `scripts/build-desktop.ps1`.
+- [x] Add root-level documentation for desktop build prerequisites.
+- [x] Build `web-ui`.
+- [x] Build `tutor-web --release`.
+- [x] Build Tauri bundle.
+- [x] Restore or ignore generated build cache files.
+
+Decision:
+
+- `cargo tauri build` runs the configured `beforeBuildCommand`, so the release
+  script lets Tauri build `web-ui` instead of running a duplicate frontend
+  build first.
+- The script builds `tutor-web` for the selected Rust target, copies it to the
+  Tauri sidecar filename expected by v2, then merges
+  `src-tauri/tauri.release.conf.json` for the bundle step.
 
 Acceptance:
 

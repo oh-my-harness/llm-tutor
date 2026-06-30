@@ -9,7 +9,11 @@ For the Windows v0.1 desktop release, build `tutor-web` and copy it here as:
 tutor-web-x86_64-pc-windows-msvc.exe
 ```
 
-The release build script will automate this in a later phase.
+The release build script automates this:
+
+```powershell
+.\scripts\build-desktop.ps1
+```
 
 `tauri.conf.json` intentionally does not declare the sidecar directly because
 Tauri validates `externalBin` during normal `cargo check`. Release packaging

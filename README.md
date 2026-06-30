@@ -87,6 +87,28 @@ http://localhost:5173
 
 本地产品数据默认存储在项目根目录的 `.llm-tutor/` 下。
 
+### 桌面应用打包
+
+Windows 桌面版使用 Tauri 打包，脚本会构建 `web-ui`、release 版
+`tutor-web` sidecar，并生成桌面安装/打包产物：
+
+```powershell
+.\scripts\build-desktop.ps1
+```
+
+常用选项：
+
+```powershell
+# 只构建 release 可执行文件，不生成安装包
+.\scripts\build-desktop.ps1 -NoBundle
+
+# 指定 Tauri bundle 类型，例如 NSIS
+.\scripts\build-desktop.ps1 -Bundles nsis
+```
+
+打包后的桌面应用会自动启动本地 `tutor-web` sidecar，并把数据写入系统
+app data 目录；Web 开发模式仍默认使用项目根目录下的 `.llm-tutor/`。
+
 ## 当前功能
 
 | 模块 | 支持能力 |
