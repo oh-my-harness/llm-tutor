@@ -26,7 +26,7 @@ use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
-use crate::space_tool::ReadSpaceItemTool;
+use crate::space_tool::{ProposeNotebookEditTool, ReadSpaceItemTool};
 
 #[derive(Clone)]
 struct WsState {
@@ -276,7 +276,8 @@ async fn run_tutor_message(
             .with_product_tool(Arc::new(ReadSpaceItemTool::new(
                 notebook.clone(),
                 quizzes.clone(),
-            )));
+            )))
+            .with_product_tool(Arc::new(ProposeNotebookEditTool::new(notebook.clone())));
         if let Some(search) = web_search_config_for_session(entry.search.clone()) {
             router = router.with_web_search(search);
         }

@@ -15,9 +15,19 @@ pub struct ReadSpaceItemTool {
     quizzes: Arc<QuizStore>,
 }
 
+pub struct ProposeNotebookEditTool {
+    notebook: Arc<NotebookStore>,
+}
+
 impl ReadSpaceItemTool {
     pub fn new(notebook: Arc<NotebookStore>, quizzes: Arc<QuizStore>) -> Self {
         Self { notebook, quizzes }
+    }
+}
+
+impl ProposeNotebookEditTool {
+    pub fn new(notebook: Arc<NotebookStore>) -> Self {
+        Self { notebook }
     }
 }
 
@@ -92,6 +102,109 @@ impl Tool for ReadSpaceItemTool {
                     "question_id": mention.question_id,
                     "title": mention.title,
                     "markdown": markdown,
+                }),
+                terminate: false,
+            })
+        })
+    }
+}
+
+static PROPOSE_NOTEBOOK_EDIT_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
+
+impl Tool for ProposeNotebookEditTool {
+    fn name(&self) -> &str {
+        "propose_notebook_edit"
+    }
+
+    fn description(&self) -> &str {
+        "Create a preview-only Notebook edit proposal for a user-mentioned Notebook entry. This tool never writes data. The user must explicitly confirm the proposal before the product updates the Notebook entry."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        PROPOSE_NOTEBOOK_EDIT_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "entry_id": {
+                        "type": "string",
+                        "description": "Notebook entry id to revise."
+                    },
+                    "proposed_title": {
+                        "type": "string",
+                        "description": "Optional replacement title. Omit to keep the current title."
+                    },
+                    "proposed_markdown": {
+                        "type": "string",
+                        "description": "Complete replacement Markdown for the Notebook entry."
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Short user-facing summary of the proposed change."
+                    }
+                },
+                "required": ["entry_id", "proposed_markdown", "summary"]
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let entry_id = args["entry_id"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ToolError::InvalidArguments("entry_id is required".into()))?;
+            let Some(entry) = self.notebook.get(entry_id) else {
+                return Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "Notebook entry not found. Ask the user to choose the entry again from the Space picker.".into(),
+                    }],
+                    details: json!({
+                        "found": false,
+                        "entry_id": entry_id,
+                    }),
+                    terminate: false,
+                });
+            };
+            let proposed_markdown = args["proposed_markdown"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ToolError::InvalidArguments("proposed_markdown is required".into())
+                })?;
+            let proposed_title = args["proposed_title"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(&entry.title);
+            let summary = args["summary"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("Proposed Notebook update");
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Notebook edit proposal is ready for user review. It has not been applied. Entry: {}.",
+                        entry.title
+                    ),
+                }],
+                details: json!({
+                    "found": true,
+                    "entry_id": entry.id,
+                    "entry_title": entry.title,
+                    "current_markdown": entry.markdown,
+                    "proposed_title": proposed_title,
+                    "proposed_markdown": proposed_markdown,
+                    "summary": summary,
+                    "requires_confirmation": true,
                 }),
                 terminate: false,
             })
@@ -223,5 +336,45 @@ mod tests {
             ContentBlock::Text { text } => assert!(text.contains("Alignment marks")),
             _ => panic!("expected text content"),
         }
+    }
+
+    #[tokio::test]
+    async fn propose_notebook_edit_returns_preview_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let notebook = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let entry = notebook
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                title: "Mask notes".into(),
+                markdown: "Original notes.".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+        let tool = ProposeNotebookEditTool::new(notebook.clone());
+
+        let result = tool
+            .execute(
+                json!({
+                    "entry_id": entry.id,
+                    "proposed_title": "Updated mask notes",
+                    "proposed_markdown": "# Updated\n\nBetter notes.",
+                    "summary": "Rewrite as structured notes."
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.details["requires_confirmation"], true);
+        assert_eq!(result.details["proposed_title"], "Updated mask notes");
+        assert_eq!(
+            notebook.get(&entry.id).unwrap().markdown,
+            "Original notes."
+        );
     }
 }

@@ -34,6 +34,7 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
 }
@@ -56,6 +57,15 @@ export interface SpaceMention {
   title: string
   preview?: string | null
   metadata?: Record<string, unknown>
+}
+
+export interface NotebookEditProposal {
+  entryId: string
+  entryTitle: string
+  proposedTitle: string
+  proposedMarkdown: string
+  summary: string
+  applied?: boolean
 }
 
 interface Citation {
@@ -88,6 +98,7 @@ interface Props {
   onKnowledgeBaseChange: (id: string) => void
   onLlmConfigChange: (id: string) => void
   onSaveToNotebook?: (markdown: string) => Promise<void>
+  onApplyNotebookEdit?: (proposal: NotebookEditProposal) => Promise<void>
   onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onQuizFinish?: (quizId: string) => Promise<void>
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
@@ -148,6 +159,7 @@ export function ChatBox({
   onKnowledgeBaseChange,
   onLlmConfigChange,
   onSaveToNotebook,
+  onApplyNotebookEdit,
   onQuizAnswer,
   onQuizFinish,
   onSourceNavigate,
@@ -281,6 +293,12 @@ export function ChatBox({
                       {msg.citations && msg.citations.length > 0 && (
                         <CitationList citations={msg.citations} onSourceNavigate={onSourceNavigate} />
                       )}
+                      {msg.notebookEditProposal && onApplyNotebookEdit && (
+                        <NotebookEditProposalCard
+                          proposal={msg.notebookEditProposal}
+                          onApply={onApplyNotebookEdit}
+                        />
+                      )}
                     </>
                   )
                 ) : (
@@ -363,6 +381,52 @@ function ContextCapacity({ stats }: { stats: ContextStats }) {
 function formatTokenCount(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`
   return String(value)
+}
+
+function NotebookEditProposalCard({
+  proposal,
+  onApply,
+}: {
+  proposal: NotebookEditProposal
+  onApply: (proposal: NotebookEditProposal) => Promise<void>
+}) {
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-blue-100 bg-white">
+      <div className="flex items-start justify-between gap-3 border-b border-blue-50 px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">Notebook edit proposal</div>
+          <div className="mt-1 text-xs text-gray-500">{proposal.entryTitle}</div>
+        </div>
+        {proposal.applied ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700">
+            <CheckCircle2 size={14} />
+            Applied
+          </span>
+        ) : (
+          <button
+            className="inline-flex h-8 items-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
+            type="button"
+            onClick={() => {
+              void onApply(proposal)
+            }}
+          >
+            <CheckCircle2 size={15} />
+            Apply
+          </button>
+        )}
+      </div>
+      <div className="space-y-3 px-4 py-3">
+        <p className="text-sm text-gray-700">{proposal.summary}</p>
+        <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          <span className="font-medium text-gray-900">New title:</span> {proposal.proposedTitle}
+        </div>
+        <details className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-gray-700">Preview Markdown</summary>
+          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs text-gray-700">{proposal.proposedMarkdown}</pre>
+        </details>
+      </div>
+    </div>
+  )
 }
 
 function CitationList({

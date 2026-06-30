@@ -386,6 +386,8 @@ fn chat_system_prompt() -> String {
      private profile facts or silently write ordinary chat content. Use rag_search to find relevant course material. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, \
      call read_space_item before relying on their content. Do not guess the contents of a referenced Space item. \
+     When the user asks you to modify a referenced Notebook entry, call read_space_item first, then call \
+     propose_notebook_edit with the complete replacement Markdown; do not claim the edit has been applied. \
      Web verification rules are strict: when the user asks you to collect facts, trivia, \
      current information, latest information, sources, external references, or information \
      about real-world/public entities, products, games, communities, papers, libraries, \
@@ -409,6 +411,7 @@ fn research_system_prompt() -> String {
      (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
      (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call rag_search when a knowledge base is associated, \
      (7) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
+     If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
@@ -428,6 +431,7 @@ mod tests {
         assert!(prompt.contains("Use write_memory only when the user explicitly"));
         assert!(prompt.contains("never infer"));
         assert!(prompt.contains("call read_space_item"));
+        assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("collect facts"));
         assert!(prompt.contains("trivia"));
         assert!(prompt.contains("must call web_search before answering"));
@@ -442,6 +446,7 @@ mod tests {
         assert!(prompt.contains("call web_search"));
         assert!(prompt.contains("call web_fetch"));
         assert!(prompt.contains("read_space_item"));
+        assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
     }

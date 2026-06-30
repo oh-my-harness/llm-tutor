@@ -288,11 +288,11 @@
 - REQ-636: Research mode shall default to saving reports into Notebook rather than directly into Books. Status: planned.
 - REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: planned.
 - REQ-638: Notebook entries may later be indexed into RAG. Status: planned.
-- REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: planned.
-- REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: planned.
-- REQ-641: Applying an agent-produced Notebook edit shall require explicit user confirmation. Status: planned.
-- REQ-642: Applied agent-produced Notebook edits shall update entry metadata and create a Notebook memory event. Status: planned.
-- REQ-643: Direct Notebook write tools shall be gated by explicit user instruction and product approval flow, not by implicit model choice alone. Status: planned.
+- REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: implemented.
+- REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: implemented as complete Markdown replacement preview.
+- REQ-641: Applying an agent-produced Notebook edit shall require explicit user confirmation. Status: implemented.
+- REQ-642: Applied agent-produced Notebook edits shall update entry metadata and create a Notebook memory event. Status: implemented.
+- REQ-643: Direct Notebook write tools shall be gated by explicit user instruction and product approval flow, not by implicit model choice alone. Status: implemented by exposing only a preview tool to the agent; writes happen through user-confirmed product UI.
 
 ## 18. Quiz Bank
 

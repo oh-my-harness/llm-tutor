@@ -483,9 +483,9 @@ Do not rush this simplification until Space is useful enough.
 - [x] Render sent mentions as compact references in the message body or metadata area.
 - [x] Let Chat mode answer questions about mentioned Space artifacts.
 - [x] Let Quiz mode generate questions from mentioned Space artifacts.
-- [ ] Let Chat propose Notebook edits for mentioned Notebook entries.
-- [ ] Require explicit user confirmation before applying an agent-produced Notebook edit.
-- [ ] Create Notebook memory events after confirmed agent edits.
+- [x] Let Chat propose Notebook edits for mentioned Notebook entries.
+- [x] Require explicit user confirmation before applying an agent-produced Notebook edit.
+- [x] Create Notebook memory events after confirmed agent edits.
 
 ### Phase 4: Student Profile
 

@@ -127,6 +127,7 @@ async fn update_entry(
                 serde_json::json!({
                     "entry_type": entry.entry_type,
                     "space_id": entry.space_id,
+                    "metadata": entry.metadata,
                 }),
             );
             (StatusCode::OK, Json(serde_json::json!({ "entry": entry }))).into_response()

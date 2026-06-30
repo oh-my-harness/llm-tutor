@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
-import type { ChatAttachment, ContextStats, SpaceMention } from './components/ChatBox'
+import type { ChatAttachment, ContextStats, NotebookEditProposal, SpaceMention } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
@@ -39,6 +39,7 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
 }
@@ -120,6 +121,7 @@ export default function App() {
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
   const pendingCitationsRef = useRef<Citation[]>([])
   const pendingDeepSolveRef = useRef<DeepSolveTraceEntry[]>([])
+  const pendingNotebookEditProposalRef = useRef<NotebookEditProposal | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -177,6 +179,7 @@ export default function App() {
           const finalText = streamingRef.current + event.payload.text
           const citations = pendingCitationsRef.current
           const deepSolve = pendingDeepSolveRef.current
+          const notebookEditProposal = pendingNotebookEditProposalRef.current
           setMessages((prev) => [
             ...dropTrailingTransientStatus(prev),
             {
@@ -184,10 +187,12 @@ export default function App() {
               text: finalText,
               citations,
               deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
+              notebookEditProposal,
             },
           ])
           pendingCitationsRef.current = []
           pendingDeepSolveRef.current = []
+          pendingNotebookEditProposalRef.current = undefined
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
@@ -201,6 +206,10 @@ export default function App() {
         const deepSolveEvent = deepSolveEventFromTrace(event.payload as Record<string, unknown>)
         if (deepSolveEvent) {
           pendingDeepSolveRef.current = [...pendingDeepSolveRef.current, deepSolveEvent]
+        }
+        const notebookEditProposal = notebookEditProposalFromTrace(event.payload as Record<string, unknown>)
+        if (notebookEditProposal) {
+          pendingNotebookEditProposalRef.current = notebookEditProposal
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -477,6 +486,42 @@ export default function App() {
     }
   }, [pushStatus, sessionId])
 
+  const handleApplyNotebookEdit = useCallback(async (proposal: NotebookEditProposal) => {
+    try {
+      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(proposal.entryId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: proposal.proposedTitle,
+          markdown: proposal.proposedMarkdown,
+          metadata: {
+            updated_by: 'agent_proposal',
+            proposal_summary: proposal.summary,
+            source_session_id: sessionId,
+          },
+        }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(errorMessage(data, res.status))
+      }
+      setMessages((prev) => prev.map((message) => {
+        if (message.notebookEditProposal?.entryId !== proposal.entryId) return message
+        return {
+          ...message,
+          notebookEditProposal: {
+            ...message.notebookEditProposal,
+            applied: true,
+          },
+        }
+      }))
+      pushStatus({ kind: 'done', label: 'Notebook updated', detail: proposal.proposedTitle })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Notebook update failed', detail: message })
+    }
+  }, [pushStatus, sessionId])
+
   const handleAskDeepSolveStep = useCallback((step: { id: string; title: string; summary?: string }) => {
     const prompt = [
       `Please explain Deep Solve step ${step.id}: ${step.title}.`,
@@ -500,7 +545,9 @@ export default function App() {
     setStreamingText('')
     streamingRef.current = ''
     setTraceEntries([])
+    pendingCitationsRef.current = []
     pendingDeepSolveRef.current = []
+    pendingNotebookEditProposalRef.current = undefined
     setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
@@ -594,7 +641,9 @@ export default function App() {
       setStreamingText('')
       streamingRef.current = ''
       setTraceEntries([])
+      pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
+      pendingNotebookEditProposalRef.current = undefined
       setLatestUsage(null)
       setSessionId(id)
       try {
@@ -778,6 +827,7 @@ export default function App() {
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onLlmConfigChange={handleLlmConfigChange}
                   onSaveToNotebook={handleSaveToNotebook}
+                  onApplyNotebookEdit={handleApplyNotebookEdit}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   onSourceNavigate={handleSourceNavigate}
@@ -988,6 +1038,25 @@ function mergeCitations(existing: Citation[], incoming: Citation[]): Citation[] 
     }
   }
   return merged
+}
+
+function notebookEditProposalFromTrace(payload: Record<string, unknown>): NotebookEditProposal | undefined {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'propose_notebook_edit' || payload.ok === false) return undefined
+  const details = payload.details
+  if (!details || typeof details !== 'object') return undefined
+  const item = details as Record<string, unknown>
+  if (item.found === false) return undefined
+  const entryId = typeof item.entry_id === 'string' ? item.entry_id : ''
+  const proposedMarkdown = typeof item.proposed_markdown === 'string' ? item.proposed_markdown : ''
+  if (!entryId || !proposedMarkdown.trim()) return undefined
+  const entryTitle = typeof item.entry_title === 'string' ? item.entry_title : 'Notebook entry'
+  return {
+    entryId,
+    entryTitle,
+    proposedTitle: typeof item.proposed_title === 'string' && item.proposed_title.trim() ? item.proposed_title : entryTitle,
+    proposedMarkdown,
+    summary: typeof item.summary === 'string' && item.summary.trim() ? item.summary : 'Proposed Notebook update',
+  }
 }
 
 function restoreTraceEntries(
