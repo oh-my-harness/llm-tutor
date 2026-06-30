@@ -29,6 +29,19 @@ Space organizes.
 Knowledge Base grounds.
 ```
 
+Chat may reference Space content explicitly with `@` mentions. This does not
+turn Space into a generation surface. It makes Space artifacts addressable from
+the normal conversation flow:
+
+```text
+User @mentions a Notebook entry or Quiz item -> Agent reads it through a product tool -> Agent answers, quizzes, or proposes an edit in Chat
+```
+
+For larger artifacts, Chat should pass structured references first and let the
+agent call a product tool such as `read_space_item`. This keeps prompts small,
+preserves traceability, and avoids silently injecting stale or irrelevant
+content.
+
 ## 2. First Space Modules
 
 For the next product iteration, Space should contain three tabs:
@@ -63,6 +76,16 @@ NotebookEntry {
 
 This avoids introducing a separate `ResearchReportStore` too early. If research later needs versions, source graphs, sub-tasks, or regeneration history, `research_report` entries can be migrated into a first-class store.
 
+Notebook entries are also editable Space artifacts. Agent-assisted editing
+should start from Chat:
+
+```text
+User @mentions a Notebook entry and asks for a change -> Agent proposes Markdown/diff -> User confirms -> Notebook entry is updated
+```
+
+The Notebook page can keep manual editing controls, but it should not become a
+separate agent chat surface in the MVP.
+
 ### Quiz Bank
 
 Quiz Bank shows historical quizzes and practice records.
@@ -88,6 +111,11 @@ Quiz Bank responsibilities:
 - show explanations and citations,
 - support re-practice/review,
 - filter by source later.
+
+Quiz records and individual questions should be mentionable from Chat. This
+supports follow-up explanation, targeted re-practice, and generating related
+questions from a known mistake without re-opening a separate Quiz generation
+page.
 
 ### Student Profile
 
@@ -332,8 +360,9 @@ NotebookEntry {
 QuizSession {
   id: string
   spaceId?: string
-  sourceType?: 'conversation' | 'knowledge_base' | 'notebook_entry'
+  sourceType?: 'conversation' | 'knowledge_base' | 'notebook_entry' | 'mentioned_space_items'
   sourceId?: string
+  sourceMentionIds?: string[]
   title: string
   questions: QuizQuestion[]
   answers: QuizAnswer[]
@@ -342,6 +371,22 @@ QuizSession {
   updatedAt: string
 }
 ```
+
+```ts
+SpaceMention {
+  id: string
+  type: 'notebook_entry' | 'quiz_session' | 'quiz_question'
+  targetId: string
+  questionId?: string
+  title: string
+  preview?: string
+  metadata?: Record<string, unknown>
+}
+```
+
+`SpaceMention` is a chat/session boundary object. It should store enough
+information for the UI to render chips and for the backend to resolve the
+artifact later, but it should not duplicate full Notebook or Quiz content.
 
 ```ts
 StudentProfile {
@@ -425,7 +470,21 @@ Do not rush this simplification until Space is useful enough.
 - [ ] Keep composer Quiz mode.
 - [ ] Move Quiz history/review UI into Space / Quiz Bank.
 - [ ] Keep Quiz generation in chat only.
+- [ ] Expose Quiz sessions and questions as Chat `@` mention targets.
 - [ ] Add filters by source type later.
+
+### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
+
+- [ ] Add a backend lookup endpoint for Space mention candidates.
+- [ ] Add structured mention storage to chat messages/sessions.
+- [ ] Add `read_space_item` product tool for Notebook entries, Quiz sessions, and Quiz questions.
+- [ ] Render selected mentions as compact chips in the chat composer.
+- [ ] Render sent mentions as compact references in the message body or metadata area.
+- [ ] Let Chat mode answer questions about mentioned Space artifacts.
+- [ ] Let Quiz mode generate questions from mentioned Space artifacts.
+- [ ] Let Chat propose Notebook edits for mentioned Notebook entries.
+- [ ] Require explicit user confirmation before applying an agent-produced Notebook edit.
+- [ ] Create Notebook memory events after confirmed agent edits.
 
 ### Phase 4: Student Profile
 

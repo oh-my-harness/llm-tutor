@@ -49,6 +49,11 @@ tool/session adapters.
 - Quiz Bank only reviews and manages historical quiz records.
 - Space and Notebook do not generate quizzes directly. They store and review
   materials that the user can reference from Chat.
+- Chat supports explicit `@` references to Space artifacts. Space remains the
+  durable review surface; Chat remains the place where the user asks the agent
+  to read, explain, quiz, revise, or transform those artifacts.
+- Agent edits to Notebook material should be proposed from Chat and applied
+  only after an explicit user confirmation.
 - The standalone Quiz page should be removed from primary navigation after Space Quiz Bank reaches parity.
 - Student Profile is a visible projection of Markdown Memory plus lightweight stats.
 - Learner memory is Markdown-first and user-editable.
@@ -66,6 +71,7 @@ Tasks:
 - [ ] Ensure Notebook entries can be sent to Books as chapters.
 - [ ] Ensure Quiz Bank lists completed quiz records from chat-generated quizzes.
 - [ ] Ensure Quiz Bank can show questions, selected answers, correct answers, explanations, and citations.
+- [ ] Ensure Notebook and Quiz Bank expose stable artifact IDs, titles, types, and metadata for Chat `@` references.
 - [ ] Add basic source/reference display for Student Profile memory claims.
 - [ ] Remove standalone Quiz navigation only after Quiz Bank review covers current needs.
 
@@ -73,7 +79,30 @@ Acceptance:
 
 - User can create or save durable content without leaving the normal chat flow.
 - User can review Notebook entries and Quiz records from Space.
+- User can reference Space artifacts from Chat without copying their content manually.
 - User can understand Student Profile as editable learning memory, not hidden analytics.
+
+## 3A. Phase 1A: Chat Mentions for Space Artifacts
+
+Status: planned.
+
+Tasks:
+
+- [ ] Add a structured `@` mention picker to the chat composer.
+- [ ] Support Notebook entry, Quiz session, and Quiz question mention targets first.
+- [ ] Persist selected mentions with the user message/session record.
+- [ ] Add a product tool such as `read_space_item` so the agent can read mentioned artifacts on demand.
+- [ ] Render selected mentions as removable chips before send and as compact references after send.
+- [ ] Make Chat answers cite or reference mentioned artifacts when their content was used.
+- [ ] Support `@notebook-entry` edit requests by returning a proposed Markdown replacement or diff.
+- [ ] Add an explicit apply step before writing an agent-produced Notebook edit.
+- [ ] Record applied Notebook edits into Notebook memory events.
+
+Acceptance:
+
+- User can type `@` in Chat, choose a Notebook entry or Quiz item, and ask a question about it.
+- User can ask the agent to modify a mentioned Notebook entry and review the proposed change before applying it.
+- The agent reads Space artifacts through a product boundary instead of relying on hidden prompt injection.
 
 ## 4. Phase 2: Make Quiz Work from Conversation, Notebook, and Knowledge Sources
 
@@ -83,7 +112,7 @@ Tasks:
 
 - [ ] Allow Quiz mode without requiring a selected knowledge base.
 - [ ] Generate quizzes from current conversation context.
-- [ ] Allow Chat Quiz mode to use saved notebook or research-report material when the user explicitly references it.
+- [ ] Allow Chat Quiz mode to use saved Notebook entries, research reports, Quiz records, or other mentioned Space material when the user explicitly references it with `@`.
 - [ ] Use RAG only when a knowledge base is selected or the user asks about uploaded material.
 - [ ] Use web search only when the quiz source needs external/current facts.
 - [ ] Validate answer/explanation consistency before rendering a quiz.

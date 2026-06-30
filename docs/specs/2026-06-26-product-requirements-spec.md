@@ -64,6 +64,14 @@
 - REQ-076: Chat mode shall avoid inventing facts when web search or fetch fails.
 - REQ-077: Chat mode shall display citations only when the agent actually used a citation-producing tool.
 - REQ-078: Chat mode shall not add backend-invented RAG citations when `rag_search` was not actually called.
+- REQ-079: Chat mode shall support user-selected `@` references to Space artifacts.
+- REQ-080: `@` references shall be stored as structured artifact references, not only as plain text mentions.
+- REQ-081: The first supported `@` reference targets shall include Notebook entries, Quiz sessions, and Quiz questions.
+- REQ-082: The chat composer shall display selected `@` references as removable chips.
+- REQ-083: The `@` reference picker shall search Space artifacts by title, type, and useful metadata.
+- REQ-084: Mentioned Space artifact IDs shall be persisted with the user message and restored with the session.
+- REQ-085: Agents shall access mentioned Space artifacts through product tools such as `read_space_item` where possible, instead of blindly injecting long artifact content into every prompt.
+- REQ-086: When an agent uses mentioned Space artifact content in an answer, the response shall identify the relevant artifact or cite it through the product reference system.
 
 ## 6. Attachments
 
@@ -280,6 +288,11 @@
 - REQ-636: Research mode shall default to saving reports into Notebook rather than directly into Books. Status: planned.
 - REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: planned.
 - REQ-638: Notebook entries may later be indexed into RAG. Status: planned.
+- REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: planned.
+- REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: planned.
+- REQ-641: Applying an agent-produced Notebook edit shall require explicit user confirmation. Status: planned.
+- REQ-642: Applied agent-produced Notebook edits shall update entry metadata and create a Notebook memory event. Status: planned.
+- REQ-643: Direct Notebook write tools shall be gated by explicit user instruction and product approval flow, not by implicit model choice alone. Status: planned.
 
 ## 18. Quiz Bank
 
@@ -294,6 +307,8 @@
 - REQ-658: The standalone Quiz navigation page shall be removed after Quiz Bank exists in Space.
 - REQ-659: Quiz history shall move from the current Quiz page into Space / Quiz Bank.
 - REQ-660: Quiz Bank shall support filtering by source type later. Status: planned.
+- REQ-661: Users shall be able to `@` a Quiz session or Quiz question in Chat for explanation, follow-up practice, review, or related quiz generation. Status: planned.
+- REQ-662: Quiz-related `@` references shall preserve enough metadata for the agent to read the original prompt, question text, answer, explanation, citations, and user answer where available. Status: planned.
 
 ## 19. Student Profile
 
