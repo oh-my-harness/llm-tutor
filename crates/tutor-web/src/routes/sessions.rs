@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -214,6 +214,21 @@ async fn get_session(
                 .into_response();
         }
     };
+    let message_mentions = match pool.message_mentions(&id).await {
+        Ok(items) => items,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let mentions_by_user_index = message_mentions
+        .into_iter()
+        .map(|item| (item.user_message_index, item.mentions))
+        .collect::<HashMap<_, _>>();
+    let mut user_message_index = 0usize;
 
     (
         StatusCode::OK,
@@ -230,10 +245,19 @@ async fn get_session(
             },
             "messages": messages.into_iter().filter_map(|message| {
                 let role = message_role(&message)?;
-                Some(serde_json::json!({
+                let mut value = serde_json::json!({
                     "role": role,
                     "text": message_text(&message),
-                }))
+                });
+                if role == "user" {
+                    user_message_index += 1;
+                    if let Some(mentions) = mentions_by_user_index.get(&user_message_index) {
+                        if let Some(map) = value.as_object_mut() {
+                            map.insert("mentions".into(), serde_json::Value::Array(mentions.clone()));
+                        }
+                    }
+                }
+                Some(value)
             }).collect::<Vec<_>>(),
             "trace": traces.into_iter().map(|trace| {
                 let mut payload = trace.payload;

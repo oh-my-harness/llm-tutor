@@ -82,6 +82,7 @@ interface SessionDetailResponse {
   messages?: Array<{
     role: 'user' | 'assistant'
     text: string
+    mentions?: SpaceMention[]
   }>
   trace?: Array<{
     kind: string
@@ -604,6 +605,7 @@ export default function App() {
           (data.messages ?? []).map((message) => ({
             role: message.role,
             text: message.text,
+            mentions: message.mentions,
           })),
           restoredTrace,
         )

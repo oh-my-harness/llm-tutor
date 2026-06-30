@@ -68,6 +68,13 @@ pub struct PersistedCompactSummary {
     pub message_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedMessageMentions {
+    pub user_message_index: usize,
+    pub mentions: Vec<serde_json::Value>,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 /// Thread-safe pool of active web session metadata plus runtime session repo.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
@@ -262,6 +269,57 @@ impl SessionPool {
             })
             .await?;
         Ok(())
+    }
+
+    pub async fn append_message_mentions(
+        &self,
+        id: &str,
+        user_message_index: usize,
+        mentions: Vec<serde_json::Value>,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        if mentions.is_empty() {
+            return Ok(());
+        }
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "message_mentions".into(),
+                data: serde_json::json!({
+                    "user_message_index": user_message_index,
+                    "mentions": mentions,
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn message_mentions(
+        &self,
+        id: &str,
+    ) -> Result<Vec<PersistedMessageMentions>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                    return None;
+                };
+                if custom_type != "message_mentions" {
+                    return None;
+                }
+                let user_message_index = data.get("user_message_index")?.as_u64()? as usize;
+                let mentions = data.get("mentions")?.as_array()?.clone();
+                Some(PersistedMessageMentions {
+                    user_message_index,
+                    mentions,
+                    timestamp: entry.timestamp,
+                })
+            })
+            .collect())
     }
 
     pub async fn traces(
@@ -636,6 +694,34 @@ mod tests {
         assert_eq!(traces.len(), 1);
         assert_eq!(traces[0].kind, "tool_call");
         assert_eq!(traces[0].payload["tool"], "rag_search");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn message_mentions_survive_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool.create("chat", None, None, None, None).await.unwrap();
+
+        pool.append_message_mentions(
+            &id,
+            1,
+            vec![serde_json::json!({
+                "id": "notebook_entry:note-1",
+                "type": "notebook_entry",
+                "target_id": "note-1",
+                "title": "Note 1"
+            })],
+        )
+        .await
+        .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let mentions = reopened.message_mentions(&id).await.unwrap();
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].user_message_index, 1);
+        assert_eq!(mentions[0].mentions[0]["title"], "Note 1");
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -211,6 +211,19 @@ async fn run_tutor_message(
     mentions: Vec<SpaceMention>,
 ) {
     let history_len = pool.history_len(&entry.id).await + 1;
+    let user_message_index = next_user_message_index(&pool, &entry.id).await;
+    if !mentions.is_empty() {
+        let _ = pool
+            .append_message_mentions(
+                &entry.id,
+                user_message_index,
+                mentions
+                    .iter()
+                    .map(|mention| serde_json::to_value(mention).unwrap_or_default())
+                    .collect(),
+            )
+            .await;
+    }
     let _ = entry
         .stream
         .status(
@@ -360,6 +373,19 @@ async fn run_tutor_message(
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
+}
+
+async fn next_user_message_index(pool: &SessionPool, session_id: &str) -> usize {
+    pool.messages(session_id)
+        .await
+        .map(|messages| {
+            messages
+                .iter()
+                .filter(|message| matches!(crate::session::message_role(message), Some("user")))
+                .count()
+                + 1
+        })
+        .unwrap_or(1)
 }
 
 struct ResolvedMessageContent {
