@@ -450,28 +450,28 @@ Do not rush this simplification until Space is useful enough.
 
 ### Phase 1: Space Shell
 
-- [ ] Replace Space placeholder with a tabbed Space page.
-- [ ] Add tabs: Notebook, Quiz Bank, Student Profile.
-- [ ] Use a default Space record.
-- [ ] Keep layout consistent with current blue/white/gray product UI.
+- [x] Replace Space placeholder with a tabbed Space page.
+- [x] Add tabs: Notebook, Quiz Bank, Student Profile.
+- [x] Use a default Space record.
+- [x] Keep layout consistent with current blue/white/gray product UI.
 
 ### Phase 2: Notebook Store
 
-- [ ] Add `NotebookEntry` store.
-- [ ] Add list/create/read/update/delete notebook entry APIs.
-- [ ] Add Notebook tab list/detail UI.
-- [ ] Save Research reports to Notebook as `type = research_report`.
-- [ ] Move current "Save to book" primary action to "Save to notebook".
-- [ ] Add secondary "Send to book" action from Notebook entry.
+- [x] Add `NotebookEntry` store.
+- [x] Add list/create/read/update/delete notebook entry APIs.
+- [x] Add Notebook tab list/detail UI.
+- [x] Save Research reports to Notebook as `type = research_report`.
+- [x] Move current "Save to book" primary action to "Save to notebook".
+- [x] Add secondary "Send to book" action from Notebook entry.
 
 ### Phase 3: Quiz Bank
 
-- [ ] Remove standalone Quiz nav entry.
-- [ ] Keep composer Quiz mode.
-- [ ] Move Quiz history/review UI into Space / Quiz Bank.
-- [ ] Keep Quiz generation in chat only.
+- [x] Remove standalone Quiz nav entry.
+- [x] Keep composer Quiz mode.
+- [x] Move Quiz history/review UI into Space / Quiz Bank.
+- [x] Keep Quiz generation in chat only.
 - [x] Expose Quiz sessions and questions as Chat `@` mention targets.
-- [ ] Add filters by source type later.
+- [x] Add filters by source type later.
 
 ### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
 
@@ -489,20 +489,20 @@ Do not rush this simplification until Space is useful enough.
 
 ### Phase 4: Student Profile
 
-- [ ] Add Memory module shell if it does not exist.
-- [ ] Add Markdown memory file viewer/editor.
-- [ ] Add manual consolidation action for L1/L2/L3 memory.
-- [ ] Add `read_memory` tool for agents.
-- [ ] Mount `read_memory` for Quiz, Research, Chat, and Deep Solve when memory exists.
-- [ ] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
-- [ ] Derive basic stat cards from Quiz history as supplemental UI.
-- [ ] Keep profile explainable and user-editable through Markdown.
+- [x] Add Memory module shell if it does not exist.
+- [x] Add Markdown memory file viewer/editor.
+- [x] Add manual consolidation action for L1/L2/L3 memory.
+- [x] Add `read_memory` tool for agents.
+- [x] Mount `read_memory` for Quiz, Research, Chat, and Deep Solve when memory exists.
+- [x] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
+- [x] Derive basic stat cards from Quiz history as supplemental UI.
+- [x] Keep profile explainable and user-editable through Markdown.
 
 ### Phase 5: Book Integration
 
-- [ ] Allow Notebook entries to become Book chapters.
-- [ ] Replace `sourceReportId` with `sourceNotebookEntryId` in future book chapter metadata.
-- [ ] Keep Books as polished outputs, not raw research storage.
+- [x] Allow Notebook entries to become Book chapters.
+- [x] Replace `sourceReportId` with `sourceNotebookEntryId` in future book chapter metadata.
+- [x] Keep Books as polished outputs, not raw research storage.
 
 ## 8. Open Questions
 

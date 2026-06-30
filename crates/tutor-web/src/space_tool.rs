@@ -372,9 +372,6 @@ mod tests {
 
         assert_eq!(result.details["requires_confirmation"], true);
         assert_eq!(result.details["proposed_title"], "Updated mask notes");
-        assert_eq!(
-            notebook.get(&entry.id).unwrap().markdown,
-            "Original notes."
-        );
+        assert_eq!(notebook.get(&entry.id).unwrap().markdown, "Original notes.");
     }
 }

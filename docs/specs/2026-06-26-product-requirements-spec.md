@@ -236,13 +236,13 @@
 
 ## 15. Books and Learning Records
 
-- REQ-340: Users shall be able to view Books.
-- REQ-341: Users shall be able to create a Book.
-- REQ-342: Users shall be able to turn Notebook entries into Book chapters.
-- REQ-343: Users shall be able to browse Book chapters.
-- REQ-344: Book chapters shall store Markdown content.
-- REQ-345: Book chapters shall store source session ID when available.
-- REQ-346: Book chapters shall eventually store source Notebook entry ID.
+- REQ-340: Users shall be able to view Books. Status: implemented.
+- REQ-341: Users shall be able to create a Book. Status: implemented.
+- REQ-342: Users shall be able to turn Notebook entries into Book chapters. Status: implemented.
+- REQ-343: Users shall be able to browse Book chapters. Status: implemented.
+- REQ-344: Book chapters shall store Markdown content. Status: implemented.
+- REQ-345: Book chapters shall store source session ID when available. Status: implemented.
+- REQ-346: Book chapters shall store source Notebook entry ID. Status: implemented.
 - REQ-347: Users shall be able to rename Books. Status: planned.
 - REQ-348: Users shall be able to delete Books. Status: planned.
 - REQ-349: Users shall be able to rename chapters. Status: planned.
@@ -286,7 +286,7 @@
 - REQ-634: Users shall be able to edit Notebook entries. Status: planned.
 - REQ-635: Users shall be able to delete Notebook entries. Status: planned.
 - REQ-636: Research mode shall default to saving reports into Notebook rather than directly into Books. Status: planned.
-- REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: planned.
+- REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: implemented.
 - REQ-638: Notebook entries may later be indexed into RAG. Status: planned.
 - REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: implemented.
 - REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: implemented as complete Markdown replacement preview.

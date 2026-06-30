@@ -21,7 +21,7 @@ struct CreateBookRequest {
 struct CreateChapterRequest {
     title: String,
     markdown: String,
-    source_report_id: Option<String>,
+    #[serde(alias = "source_report_id")]
     source_notebook_entry_id: Option<String>,
     source_session_id: Option<String>,
 }
@@ -56,7 +56,6 @@ async fn create_chapter(
         &book_id,
         req.title,
         req.markdown,
-        req.source_report_id,
         req.source_notebook_entry_id,
         req.source_session_id,
     ) {
@@ -124,6 +123,48 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = response_json(response).await;
         assert_eq!(body["book"]["chapters"][0]["title"], "Report");
+        assert_eq!(
+            body["book"]["chapters"][0]["source_notebook_entry_id"],
+            "notebook-1"
+        );
+        assert!(body["book"]["chapters"][0]["source_report_id"].is_null());
+    }
+
+    #[tokio::test]
+    async fn legacy_source_report_id_request_maps_to_notebook_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(BookStore::new_with_path(dir.path().join("books.json")));
+        let app = books_router(store);
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                Method::POST,
+                "/api/books",
+                serde_json::json!({ "title": "Research" }),
+            ))
+            .await
+            .unwrap();
+        let body = response_json(response).await;
+        let book_id = body["book"]["id"].as_str().unwrap();
+
+        let response = app
+            .oneshot(json_request(
+                Method::POST,
+                &format!("/api/books/{book_id}/chapters"),
+                serde_json::json!({
+                    "title": "Report",
+                    "markdown": "# Report",
+                    "source_report_id": "legacy-report-1"
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        assert_eq!(
+            body["book"]["chapters"][0]["source_notebook_entry_id"],
+            "legacy-report-1"
+        );
     }
 
     fn json_request(method: Method, uri: &str, value: serde_json::Value) -> Request<Body> {

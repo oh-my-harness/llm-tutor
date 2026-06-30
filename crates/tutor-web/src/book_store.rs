@@ -21,9 +21,7 @@ pub struct BookChapter {
     pub id: String,
     pub title: String,
     pub markdown: String,
-    #[serde(default)]
-    pub source_report_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "source_report_id")]
     pub source_notebook_entry_id: Option<String>,
     #[serde(default)]
     pub source_session_id: Option<String>,
@@ -83,7 +81,6 @@ impl BookStore {
         book_id: &str,
         title: String,
         markdown: String,
-        source_report_id: Option<String>,
         source_notebook_entry_id: Option<String>,
         source_session_id: Option<String>,
     ) -> Result<Book> {
@@ -99,7 +96,6 @@ impl BookStore {
             id: uuid::Uuid::new_v4().to_string(),
             title: normalize_title(&title),
             markdown,
-            source_report_id: source_report_id.filter(|value| !value.trim().is_empty()),
             source_notebook_entry_id: source_notebook_entry_id
                 .filter(|value| !value.trim().is_empty()),
             source_session_id: source_session_id.filter(|value| !value.trim().is_empty()),
@@ -153,7 +149,6 @@ mod tests {
                 &book.id,
                 "Chapter 1".into(),
                 "# Report".into(),
-                None,
                 Some("notebook-1".into()),
                 Some("session-1".into()),
             )
@@ -166,6 +161,41 @@ mod tests {
         assert_eq!(
             store.list()[0].chapters[0].source_session_id,
             Some("session-1".into())
+        );
+    }
+
+    #[test]
+    fn legacy_source_report_id_loads_as_source_notebook_entry_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("books.json");
+        fs::write(
+            &path,
+            r##"[
+              {
+                "id": "book-1",
+                "title": "Book",
+                "description": null,
+                "chapters": [
+                  {
+                    "id": "chapter-1",
+                    "title": "Report",
+                    "markdown": "# Report",
+                    "source_report_id": "legacy-report-1",
+                    "source_session_id": "session-1",
+                    "created_at": "2026-06-30T00:00:00Z",
+                    "updated_at": "2026-06-30T00:00:00Z"
+                  }
+                ],
+                "created_at": "2026-06-30T00:00:00Z",
+                "updated_at": "2026-06-30T00:00:00Z"
+              }
+            ]"##,
+        )
+        .unwrap();
+        let store = BookStore::new_with_path(path);
+        assert_eq!(
+            store.list()[0].chapters[0].source_notebook_entry_id,
+            Some("legacy-report-1".into())
         );
     }
 }

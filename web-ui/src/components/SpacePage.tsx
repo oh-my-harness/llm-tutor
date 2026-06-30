@@ -22,6 +22,7 @@ import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './Markdo
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type SpaceTab = 'notebook' | 'quiz_bank' | 'student_profile'
+type QuizSourceFilter = 'all' | 'knowledge_base' | 'conversation' | 'space' | 'notebook'
 
 interface NotebookEntry {
   id: string
@@ -56,6 +57,14 @@ const tabs: Array<{ key: SpaceTab; label: string; icon: typeof NotebookPen }> = 
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
 
+const quizSourceFilters: Array<{ key: QuizSourceFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'knowledge_base', label: 'Knowledge' },
+  { key: 'conversation', label: 'Conversation' },
+  { key: 'space', label: 'Space refs' },
+  { key: 'notebook', label: 'Notebook' },
+]
+
 type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }>
 
 export function SpacePage({
@@ -68,6 +77,7 @@ export function SpacePage({
   const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
+  const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
@@ -82,10 +92,22 @@ export function SpacePage({
   const [status, setStatus] = useState('Ready')
   const [loading, setLoading] = useState(false)
 
-  const activeQuiz = quizzes.find((quiz) => quiz.id === activeQuizId) ?? null
+  const filteredQuizzes = useMemo(
+    () => quizzes.filter((quiz) => quizSourceFilter === 'all' || quizSourceType(quiz) === quizSourceFilter),
+    [quizzes, quizSourceFilter],
+  )
+  const activeQuiz = filteredQuizzes.find((quiz) => quiz.id === activeQuizId) ?? null
   const activeQuestion = activeQuiz?.questions[questionIndex] ?? null
   const activeNotebookEntry = notebookEntries.find((entry) => entry.id === activeNotebookId) ?? null
   const profile = useMemo(() => buildProfile(quizzes), [quizzes])
+
+  useEffect(() => {
+    setActiveQuizId((current) =>
+      current && filteredQuizzes.some((quiz) => quiz.id === current)
+        ? current
+        : filteredQuizzes[0]?.id ?? null,
+    )
+  }, [filteredQuizzes])
 
   const refreshQuizzes = useCallback(async () => {
     setLoading(true)
@@ -452,6 +474,9 @@ export function SpacePage({
         {activeTab === 'quiz_bank' && (
           <QuizBankTab
             quizzes={quizzes}
+            filteredQuizzes={filteredQuizzes}
+            sourceFilter={quizSourceFilter}
+            onSourceFilterChange={setQuizSourceFilter}
             activeQuiz={activeQuiz}
             activeQuestion={activeQuestion}
             questionIndex={questionIndex}
@@ -666,21 +691,27 @@ function NotebookTab({
 
 function QuizBankTab({
   quizzes,
+  filteredQuizzes,
+  sourceFilter,
   activeQuiz,
   activeQuestion,
   questionIndex,
   status,
   onSelectQuiz,
+  onSourceFilterChange,
   onDeleteQuiz,
   onQuestionIndexChange,
   onSourceNavigate,
 }: {
   quizzes: QuizSession[]
+  filteredQuizzes: QuizSession[]
+  sourceFilter: QuizSourceFilter
   activeQuiz: QuizSession | null
   activeQuestion: QuizQuestion | null
   questionIndex: number
   status: string
   onSelectQuiz: (id: string) => void
+  onSourceFilterChange: (filter: QuizSourceFilter) => void
   onDeleteQuiz: (quiz: QuizSession) => void
   onQuestionIndexChange: (index: number) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
@@ -700,15 +731,36 @@ function QuizBankTab({
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
         <div className="px-4 py-3 text-xs text-gray-500">{status}</div>
+        <div className="border-b border-gray-100 px-3 pb-3">
+          <div className="flex flex-wrap gap-2">
+            {quizSourceFilters.map((filter) => (
+              <button
+                key={filter.key}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  sourceFilter === filter.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-blue-50 hover:text-blue-700'
+                }`}
+                type="button"
+                onClick={() => onSourceFilterChange(filter.key)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex-1 overflow-y-auto px-3 pb-4">
           {quizzes.length === 0 ? (
             <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No quiz records yet</div>
+          ) : filteredQuizzes.length === 0 ? (
+            <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No quizzes match this filter</div>
           ) : (
             <div className="space-y-2">
-              {quizzes.map((quiz) => {
+              {filteredQuizzes.map((quiz) => {
                 const active = activeQuiz?.id === quiz.id
                 const score = quiz.score ?? { correct: 0, total: quiz.questions.length }
                 const answeredCount = quiz.answers.length
+                const source = quizSourceType(quiz)
                 return (
                   <button
                     key={quiz.id}
@@ -724,7 +776,8 @@ function QuizBankTab({
                       <span className="mt-0.5 block text-xs text-gray-500">
                         {score.correct}/{score.total} correct · answered {answeredCount}/{quiz.questions.length} · {quiz.status}
                       </span>
-                      <span className="mt-0.5 block truncate text-xs text-gray-400">
+                      <span className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">{quizSourceLabel(source)}</span>
                         Created {formatTime(quiz.created_at)} · Updated {formatTime(quiz.updated_at)}
                       </span>
                     </span>
@@ -903,6 +956,22 @@ function quizCitationRawTarget(citation: QuizQuestion['citations'][number]) {
     return ['kb', citation.kb, citation.document_id, citation.chunk_id].filter(Boolean).join(':')
   }
   return citation.source
+}
+
+function quizSourceType(quiz: QuizSession): Exclude<QuizSourceFilter, 'all'> {
+  if (quiz.kb_id?.trim()) return 'knowledge_base'
+  const sources = quiz.questions.flatMap((question) => question.citations.map((citation) => citation.source.toLowerCase()))
+  const sourceText = [quiz.title, quiz.config.topic ?? '', ...sources].join(' ').toLowerCase()
+  if (sourceText.includes('space reference') || sourceText.includes('mentioned_space_items')) return 'space'
+  if (sourceText.includes('notebook:') || sourceText.includes('notebook')) return 'notebook'
+  return 'conversation'
+}
+
+function quizSourceLabel(source: Exclude<QuizSourceFilter, 'all'>) {
+  if (source === 'knowledge_base') return 'Knowledge'
+  if (source === 'space') return 'Space'
+  if (source === 'notebook') return 'Notebook'
+  return 'Conversation'
 }
 
 function StudentProfileTab({
