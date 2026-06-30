@@ -1,5 +1,12 @@
 # Tutor Agent Phase 2: Deep Solve (SolveOrchestrator + REPLAN)
 
+> Status: superseded | Date: 2026-06-13 | Superseded on: 2026-06-30.
+> This was an implementation checklist for the original Deep Solve runtime
+> experiment. It is kept for historical context only. Do not use the unchecked
+> tasks below as current project status. Current product work is tracked in
+> `docs/plans/2026-06-26-next-product-slice-plan.md` and the active product
+> requirements spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the four-phase Deep Solve pipeline (Pre-retrieve → Plan → Solve → Synthesize) with a REPLAN back-edge driven by `BeforeToolCallHook` interception.

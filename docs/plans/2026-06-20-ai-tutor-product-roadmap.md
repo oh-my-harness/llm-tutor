@@ -1,6 +1,21 @@
 # AI Tutor Product Roadmap
 
-> Status: in progress | Date: 2026-06-20 | Last updated: 2026-06-26 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
+> Status: in progress | Date: 2026-06-20 | Last updated: 2026-06-30 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
+
+## 0. Current Planning Entry Points
+
+Use this roadmap for product direction and milestone context. For execution,
+prefer the newer focused plans:
+
+- Current product slice:
+  `docs/plans/2026-06-26-next-product-slice-plan.md`
+- Consolidated requirements:
+  `docs/specs/2026-06-26-product-requirements-spec.md`
+- Desktop release hardening:
+  `docs/plans/2026-06-28-tauri-desktop-release-plan.md`
+
+The original 2026-06-13 Phase 1-5 implementation checklists are historical and
+have been superseded by the current product plans.
 
 ## 1. Product Direction
 

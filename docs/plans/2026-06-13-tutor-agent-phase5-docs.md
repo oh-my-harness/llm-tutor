@@ -1,5 +1,12 @@
 # Tutor Agent Phase 5: Docs + Framework Feedback
 
+> Status: superseded | Date: 2026-06-13 | Superseded on: 2026-06-30.
+> This was an implementation checklist for the first documentation and
+> framework-feedback pass. It is kept for historical context only. Do not use
+> the unchecked tasks below as current project status. Current product work is
+> tracked in `docs/plans/2026-06-26-next-product-slice-plan.md` and the active
+> product requirements spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Write user-facing README + quickstart, run the full end-to-end scenario in the browser, and write a structured framework feedback report for `llm-harness-runtime`.

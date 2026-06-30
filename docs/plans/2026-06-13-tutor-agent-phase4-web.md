@@ -1,5 +1,12 @@
 # Tutor Agent Phase 4: Web Backend + Frontend
 
+> Status: superseded | Date: 2026-06-13 | Superseded on: 2026-06-30.
+> This was an implementation checklist for the first web backend/frontend
+> scaffold. It is kept for historical context only. Do not use the unchecked
+> tasks below as current project status. Current product work is tracked in
+> `docs/plans/2026-06-26-next-product-slice-plan.md` and the active product
+> requirements spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a `tutor-web` axum server that exposes REST + WebSocket endpoints and a Vite + React + Tailwind `web-ui` frontend with streaming, TracePanel, BudgetPanel, and ApprovalDialog.

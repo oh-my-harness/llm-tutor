@@ -1,6 +1,25 @@
 # Next Product Slice Plan
 
-> Status: proposed | Date: 2026-06-26 | Scope: implement the next coherent product slice after the initial Space, Notebook, Memory, Quiz Bank, Research, and web-search work.
+> Status: active | Date: 2026-06-26 | Last updated: 2026-06-30 | Scope: implement the next coherent product slice after the initial Space, Notebook, Memory, Quiz Bank, Research, and web-search work.
+
+## 0. Plan Hygiene
+
+This is the current execution plan for post-alpha product work.
+
+Older phase checklists from 2026-06-13 are historical implementation notes for
+the first runtime demo and web scaffold. They are intentionally superseded and
+their unchecked boxes should not be interpreted as remaining product work.
+
+Use this file with:
+
+- `docs/specs/2026-06-26-product-requirements-spec.md` for the consolidated
+  requirement list.
+- `docs/plans/2026-06-26-space-workspace-plan.md` for Space, Notebook, Quiz
+  Bank, Student Profile, and Book positioning.
+- `docs/plans/2026-06-26-space-memory-implementation-plan.md` for Memory and
+  student-profile implementation details.
+- `docs/plans/2026-06-28-tauri-desktop-release-plan.md` for desktop release
+  hardening and QA.
 
 ## 1. Goal
 

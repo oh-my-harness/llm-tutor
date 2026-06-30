@@ -1,5 +1,12 @@
 # Tutor Agent Phase 1: Workspace Skeleton + Tools + Chat Capability
 
+> Status: superseded | Date: 2026-06-13 | Superseded on: 2026-06-30.
+> This was an implementation checklist for the original runtime demo skeleton.
+> It is kept for historical context only. Do not use the unchecked tasks below
+> as current project status. Current product work is tracked in
+> `docs/plans/2026-06-26-next-product-slice-plan.md` and the active product
+> requirements spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up the `tutor_agent` Rust workspace with `tutor-tools` (rag_search, web_search, code_exec) and a `Chat` capability that runs end-to-end against a real LLM.

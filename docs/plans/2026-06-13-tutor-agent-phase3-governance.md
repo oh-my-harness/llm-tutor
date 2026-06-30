@@ -1,5 +1,12 @@
 # Tutor Agent Phase 3: Governance (Budget + Audit + Human Approval)
 
+> Status: superseded | Date: 2026-06-13 | Superseded on: 2026-06-30.
+> This was an implementation checklist for early governance wiring. It is kept
+> for historical context only. Do not use the unchecked tasks below as current
+> project status. Current product work is tracked in
+> `docs/plans/2026-06-26-next-product-slice-plan.md` and the active product
+> requirements spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire `BudgetControlAdapter`, `JsonlAuditSink`, and `HumanApprovalWrapper` into the `CapabilityRouter` so that all harness sessions share a session-level cost budget, write audit events to JSONL, and require human approval before `code_exec` runs.
