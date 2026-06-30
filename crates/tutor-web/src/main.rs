@@ -74,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::ws::ws_router(
             pool.clone(),
             memory.clone(),
+            notebook.clone(),
+            quizzes.clone(),
             rag_root,
         ))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

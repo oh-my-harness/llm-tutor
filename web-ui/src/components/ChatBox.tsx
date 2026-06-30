@@ -25,7 +25,7 @@ import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './Markdo
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
-type OpenMenu = 'mode' | 'knowledge' | 'model' | null
+type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -35,6 +35,7 @@ interface Message {
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
   attachments?: ChatAttachment[]
+  mentions?: SpaceMention[]
 }
 
 export interface ChatAttachment {
@@ -45,6 +46,16 @@ export interface ChatAttachment {
   text?: string
   error?: string
   truncated?: boolean
+}
+
+export interface SpaceMention {
+  id: string
+  type: 'notebook_entry' | 'quiz_session' | 'quiz_question'
+  target_id?: string | null
+  question_id?: string | null
+  title: string
+  preview?: string | null
+  metadata?: Record<string, unknown>
 }
 
 interface Citation {
@@ -71,7 +82,7 @@ interface Props {
   activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
-  onSend: (text: string, attachments?: ChatAttachment[]) => void
+  onSend: (text: string, attachments?: ChatAttachment[], mentions?: SpaceMention[]) => void
   onAskDeepSolveStep?: (step: { id: string; title: string; summary?: string }) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
@@ -144,16 +155,18 @@ export function ChatBox({
 }: Props) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [mentions, setMentions] = useState<SpaceMention[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
 
   const handleSend = () => {
     const readyAttachments = attachments.filter((attachment) => !attachment.error)
-    if ((!input.trim() && readyAttachments.length === 0) || disabled) return
-    onSend(input.trim(), readyAttachments)
+    if ((!input.trim() && readyAttachments.length === 0 && mentions.length === 0) || disabled) return
+    onSend(input.trim(), readyAttachments, mentions)
     setInput('')
     setAttachments([])
+    setMentions([])
   }
 
   const handleAddAttachments = (items: ChatAttachment[]) => {
@@ -162,6 +175,14 @@ export function ChatBox({
 
   const handleRemoveAttachment = (id: string) => {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
+  }
+
+  const handleAddMention = (mention: SpaceMention) => {
+    setMentions((current) => current.some((item) => item.id === mention.id) ? current : [...current, mention])
+  }
+
+  const handleRemoveMention = (id: string) => {
+    setMentions((current) => current.filter((mention) => mention.id !== id))
   }
 
   const handleScroll = () => {
@@ -203,6 +224,9 @@ export function ChatBox({
               attachments={attachments}
               onAddAttachments={handleAddAttachments}
               onRemoveAttachment={handleRemoveAttachment}
+              mentions={mentions}
+              onAddMention={handleAddMention}
+              onRemoveMention={handleRemoveMention}
               disabled={disabled}
               variant="center"
             />
@@ -265,6 +289,9 @@ export function ChatBox({
                     {msg.attachments && msg.attachments.length > 0 && (
                       <AttachmentSummary attachments={msg.attachments} />
                     )}
+                    {msg.mentions && msg.mentions.length > 0 && (
+                      <MentionSummary mentions={msg.mentions} />
+                    )}
                   </>
                 )}
               </div>
@@ -292,6 +319,9 @@ export function ChatBox({
               attachments={attachments}
               onAddAttachments={handleAddAttachments}
               onRemoveAttachment={handleRemoveAttachment}
+              mentions={mentions}
+              onAddMention={handleAddMention}
+              onRemoveMention={handleRemoveMention}
               disabled={disabled}
               variant="bottom"
             />
@@ -617,6 +647,9 @@ function Composer({
   attachments,
   onAddAttachments,
   onRemoveAttachment,
+  mentions,
+  onAddMention,
+  onRemoveMention,
   disabled,
   variant,
 }: {
@@ -634,11 +667,17 @@ function Composer({
   attachments: ChatAttachment[]
   onAddAttachments: (attachments: ChatAttachment[]) => void
   onRemoveAttachment: (id: string) => void
+  mentions: SpaceMention[]
+  onAddMention: (mention: SpaceMention) => void
+  onRemoveMention: (id: string) => void
   disabled: boolean
   variant: 'center' | 'bottom'
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [readingAttachments, setReadingAttachments] = useState(false)
+  const [spaceQuery, setSpaceQuery] = useState('')
+  const [spaceMentions, setSpaceMentions] = useState<SpaceMention[]>([])
+  const [loadingSpaceMentions, setLoadingSpaceMentions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
   const activeKnowledge = knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
@@ -677,6 +716,36 @@ function Composer({
     }
   }
 
+  useEffect(() => {
+    if (openMenu !== 'space') return
+    let cancelled = false
+    const controller = new AbortController()
+    setLoadingSpaceMentions(true)
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams()
+      if (spaceQuery.trim()) params.set('q', spaceQuery.trim())
+      params.set('limit', '20')
+      fetch(`/api/space/mentions?${params.toString()}`, { signal: controller.signal })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({})) as { mentions?: SpaceMention[] }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          if (!cancelled) setSpaceMentions(data.mentions ?? [])
+        })
+        .catch(() => {
+          if (!cancelled) setSpaceMentions([])
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingSpaceMentions(false)
+        })
+    }, 160)
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [openMenu, spaceQuery])
+
   return (
     <div
       className={`relative rounded-3xl border border-blue-100 bg-white shadow-sm ${
@@ -704,6 +773,11 @@ function Composer({
             removable
             onRemove={onRemoveAttachment}
           />
+        </div>
+      )}
+      {mentions.length > 0 && (
+        <div className="border-t border-blue-50 px-4 py-2">
+          <MentionSummary mentions={mentions} removable onRemove={onRemoveMention} />
         </div>
       )}
       <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
@@ -776,14 +850,46 @@ function Composer({
           )}
         </div>
 
-        <button
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50"
-          type="button"
-        >
-          <AtSign size={18} />
-          空间
-          <ChevronDown size={16} />
-        </button>
+        <div className="relative">
+          <ToolbarButton
+            active={openMenu === 'space'}
+            icon={<AtSign size={18} />}
+            label={mentions.length > 0 ? `Space ${mentions.length}` : 'Space'}
+            onClick={() => toggleMenu('space')}
+          />
+          {openMenu === 'space' && (
+            <DropdownPanel widthClassName="w-[30rem]">
+              <div className="border-b border-blue-50 px-4 pb-2 pt-1">
+                <input
+                  className="h-9 w-full rounded-xl border border-blue-100 px-3 text-sm outline-none focus:border-blue-300"
+                  value={spaceQuery}
+                  onChange={(event) => setSpaceQuery(event.target.value)}
+                  placeholder="Search notebook and quiz..."
+                  autoFocus
+                />
+              </div>
+              {loadingSpaceMentions ? (
+                <div className="px-5 py-4 text-sm text-gray-500">Loading Space items...</div>
+              ) : spaceMentions.length === 0 ? (
+                <div className="px-5 py-4 text-sm text-gray-500">No matching Space items.</div>
+              ) : (
+                spaceMentions.map((mention) => (
+                  <DropdownOption
+                    key={mention.id}
+                    selected={mentions.some((item) => item.id === mention.id)}
+                    icon={spaceMentionIcon(mention)}
+                    title={mention.title}
+                    description={spaceMentionDescription(mention)}
+                    onClick={() => {
+                      onAddMention(mention)
+                      setOpenMenu(null)
+                    }}
+                  />
+                ))
+              )}
+            </DropdownPanel>
+          )}
+        </div>
 
         <div className="relative ml-auto">
           <ToolbarButton
@@ -824,7 +930,7 @@ function Composer({
         <button
           className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
           onClick={onSend}
-          disabled={disabled || (!input.trim() && attachments.filter((attachment) => !attachment.error).length === 0)}
+          disabled={disabled || (!input.trim() && attachments.filter((attachment) => !attachment.error).length === 0 && mentions.length === 0)}
           type="button"
           title="发送"
         >
@@ -986,6 +1092,59 @@ function AttachmentSummary({
       ))}
     </div>
   )
+}
+
+function MentionSummary({
+  mentions,
+  removable = false,
+  onRemove,
+}: {
+  mentions: SpaceMention[]
+  removable?: boolean
+  onRemove?: (id: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {mentions.map((mention) => (
+        <div
+          key={mention.id}
+          className="flex max-w-full items-center gap-2 rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs text-gray-700"
+          title={mention.preview || mention.title}
+        >
+          <span className="shrink-0 text-blue-600">{spaceMentionIcon(mention, 16)}</span>
+          <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+            {spaceMentionTypeLabel(mention)}
+          </span>
+          <span className="min-w-0 truncate font-medium">{mention.title}</span>
+          {removable && (
+            <button
+              className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-blue-50 hover:text-gray-900"
+              type="button"
+              onClick={() => onRemove?.(mention.id)}
+              title="Remove Space reference"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function spaceMentionIcon(mention: SpaceMention, size = 21) {
+  if (mention.type === 'notebook_entry') return <FileText size={size} />
+  return <FileQuestion size={size} />
+}
+
+function spaceMentionTypeLabel(mention: SpaceMention) {
+  if (mention.type === 'notebook_entry') return 'Note'
+  if (mention.type === 'quiz_question') return 'Question'
+  return 'Quiz'
+}
+
+function spaceMentionDescription(mention: SpaceMention) {
+  return [spaceMentionTypeLabel(mention), mention.preview].filter(Boolean).join(' - ')
 }
 
 function formatBytes(bytes: number) {

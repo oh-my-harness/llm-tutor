@@ -479,9 +479,9 @@ Do not rush this simplification until Space is useful enough.
 - [x] Add a backend read endpoint for resolving mentioned Space artifacts.
 - [ ] Add structured mention storage to chat messages/sessions.
 - [ ] Add `read_space_item` product tool for Notebook entries, Quiz sessions, and Quiz questions.
-- [ ] Render selected mentions as compact chips in the chat composer.
+- [x] Render selected mentions as compact chips in the chat composer.
 - [ ] Render sent mentions as compact references in the message body or metadata area.
-- [ ] Let Chat mode answer questions about mentioned Space artifacts.
+- [x] Let Chat mode answer questions about mentioned Space artifacts.
 - [ ] Let Quiz mode generate questions from mentioned Space artifacts.
 - [ ] Let Chat propose Notebook edits for mentioned Notebook entries.
 - [ ] Require explicit user confirmation before applying an agent-produced Notebook edit.

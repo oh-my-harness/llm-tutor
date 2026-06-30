@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
-import type { ChatAttachment, ContextStats } from './components/ChatBox'
+import type { ChatAttachment, ContextStats, SpaceMention } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
@@ -40,6 +40,7 @@ interface Message {
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
   attachments?: ChatAttachment[]
+  mentions?: SpaceMention[]
 }
 
 interface Citation {
@@ -326,10 +327,10 @@ export default function App() {
     })
   }, [refreshSessions, refreshKnowledgeBases, pushStatus])
 
-  const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = []) => {
+  const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = [], mentions: SpaceMention[] = []) => {
     try {
       const content = buildMessageContentWithAttachments(text, attachments)
-      const displayText = text.trim() || `发送了 ${attachments.length} 个附件`
+      const displayText = text.trim() || (attachments.length > 0 ? `发送了 ${attachments.length} 个附件` : `引用了 ${mentions.length} 个空间内容`)
       let sid = sessionId
       if (!sid) {
         const kb = selectedKnowledgeBaseId || null
@@ -353,7 +354,7 @@ export default function App() {
         upsertRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
       }
 
-      setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments }])
+      setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments, mentions }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       if (capability === 'quiz') {
@@ -400,7 +401,7 @@ export default function App() {
         void refreshSessions()
         return
       }
-      send({ type: 'message', content })
+      send({ type: 'message', content, mentions })
       void refreshSessions()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

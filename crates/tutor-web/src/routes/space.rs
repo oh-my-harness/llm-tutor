@@ -30,26 +30,28 @@ struct ReadItemQuery {
     question_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum SpaceMentionType {
+pub enum SpaceMentionType {
     NotebookEntry,
     QuizSession,
     QuizQuestion,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct SpaceMention {
-    id: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceMention {
+    pub id: String,
     #[serde(rename = "type")]
-    mention_type: SpaceMentionType,
-    target_id: String,
+    pub mention_type: SpaceMentionType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    question_id: Option<String>,
-    title: String,
+    pub target_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    preview: Option<String>,
-    metadata: serde_json::Value,
+    pub question_id: Option<String>,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,6 +171,52 @@ async fn read_item(
     }
 }
 
+pub fn resolve_space_mention_markdown(
+    notebook: &NotebookStore,
+    quizzes: &QuizStore,
+    mention: &SpaceMention,
+) -> Option<(String, String)> {
+    let target_id = mention
+        .target_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| target_from_mention_id(&mention.id));
+    match mention.mention_type {
+        SpaceMentionType::NotebookEntry => {
+            let entry = notebook.get(target_id?)?;
+            Some((
+                mention_for_notebook_entry(&entry).id,
+                notebook_markdown(&entry),
+            ))
+        }
+        SpaceMentionType::QuizSession => {
+            let quiz = quizzes.get(target_id?)?;
+            Some((
+                mention_for_quiz_session(&quiz).id,
+                quiz_session_markdown(&quiz),
+            ))
+        }
+        SpaceMentionType::QuizQuestion => {
+            let quiz = quizzes.get(target_id?)?;
+            let question_id = mention
+                .question_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .or_else(|| question_from_mention_id(&mention.id))?;
+            let question = quiz
+                .questions
+                .iter()
+                .find(|question| question.id == question_id)?;
+            Some((
+                mention_for_quiz_question(&quiz, question).id,
+                quiz_question_markdown(&quiz, question),
+            ))
+        }
+    }
+}
+
 pub fn space_router(notebook: Arc<NotebookStore>, quizzes: Arc<QuizStore>) -> Router {
     let state = SpaceState { notebook, quizzes };
     Router::new()
@@ -197,7 +245,7 @@ fn mention_for_notebook_entry(entry: &NotebookEntry) -> SpaceMention {
     SpaceMention {
         id: format!("notebook_entry:{}", entry.id),
         mention_type: SpaceMentionType::NotebookEntry,
-        target_id: entry.id.clone(),
+        target_id: Some(entry.id.clone()),
         question_id: None,
         title: entry.title.clone(),
         preview: first_text_line(&entry.markdown),
@@ -215,7 +263,7 @@ fn mention_for_quiz_session(quiz: &QuizSession) -> SpaceMention {
     SpaceMention {
         id: format!("quiz_session:{}", quiz.id),
         mention_type: SpaceMentionType::QuizSession,
-        target_id: quiz.id.clone(),
+        target_id: Some(quiz.id.clone()),
         question_id: None,
         title: quiz.title.clone(),
         preview: Some(format!(
@@ -237,7 +285,7 @@ fn mention_for_quiz_question(quiz: &QuizSession, question: &QuizQuestion) -> Spa
     SpaceMention {
         id: format!("quiz_question:{}:{}", quiz.id, question.id),
         mention_type: SpaceMentionType::QuizQuestion,
-        target_id: quiz.id.clone(),
+        target_id: Some(quiz.id.clone()),
         question_id: Some(question.id.clone()),
         title: truncate_chars(&question.stem, 120),
         preview: Some(format!("{} - {}", quiz.title, answer_label(question))),
@@ -250,6 +298,19 @@ fn mention_for_quiz_question(quiz: &QuizSession, question: &QuizQuestion) -> Spa
             "updated_at": quiz.updated_at,
         }),
     }
+}
+
+fn target_from_mention_id(id: &str) -> Option<&str> {
+    let mut parts = id.split(':');
+    let _kind = parts.next()?;
+    parts.next().filter(|value| !value.trim().is_empty())
+}
+
+fn question_from_mention_id(id: &str) -> Option<&str> {
+    let mut parts = id.split(':');
+    let _kind = parts.next()?;
+    let _target = parts.next()?;
+    parts.next().filter(|value| !value.trim().is_empty())
 }
 
 fn notebook_markdown(entry: &NotebookEntry) -> String {

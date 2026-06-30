@@ -22,12 +22,17 @@ use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
 
 use crate::memory_store::{MemoryEventCategory, MemoryStore};
+use crate::notebook_store::NotebookStore;
+use crate::quiz_store::QuizStore;
+use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
 
 #[derive(Clone)]
 struct WsState {
     pool: Arc<SessionPool>,
     memory: Arc<MemoryStore>,
+    notebook: Arc<NotebookStore>,
+    quizzes: Arc<QuizStore>,
     rag_root: PathBuf,
 }
 
@@ -79,7 +84,10 @@ impl PricingProvider for NoOpPricing {
 #[serde(tag = "type")]
 enum ClientMessage {
     #[serde(rename = "message")]
-    Message { content: String },
+    Message {
+        content: String,
+        mentions: Option<Vec<SpaceMention>>,
+    },
     #[serde(rename = "approval_response")]
     ApprovalResponse { request_id: String, approved: bool },
 }
@@ -120,7 +128,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 match parsed {
-                    Ok(ClientMessage::Message { content }) => {
+                    Ok(ClientMessage::Message { content, mentions }) => {
                         let active_entry = pool
                             .ensure_entry(&session_id)
                             .await
@@ -128,9 +136,12 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                         run_tutor_message(
                             pool.clone(),
                             state.memory.clone(),
+                            state.notebook.clone(),
+                            state.quizzes.clone(),
                             state.rag_root.clone(),
                             active_entry,
                             content,
+                            mentions.unwrap_or_default(),
                         )
                         .await;
                     }
@@ -173,11 +184,15 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
 pub fn ws_router(
     pool: Arc<SessionPool>,
     memory: Arc<MemoryStore>,
+    notebook: Arc<NotebookStore>,
+    quizzes: Arc<QuizStore>,
     rag_root: impl Into<PathBuf>,
 ) -> Router {
     let state = WsState {
         pool,
         memory,
+        notebook,
+        quizzes,
         rag_root: rag_root.into(),
     };
     Router::new()
@@ -188,9 +203,12 @@ pub fn ws_router(
 async fn run_tutor_message(
     pool: Arc<SessionPool>,
     memory: Arc<MemoryStore>,
+    notebook: Arc<NotebookStore>,
+    quizzes: Arc<QuizStore>,
     rag_root: PathBuf,
     entry: SessionEntry,
     content: String,
+    mentions: Vec<SpaceMention>,
 ) {
     let history_len = pool.history_len(&entry.id).await + 1;
     let _ = entry
@@ -250,8 +268,22 @@ async fn run_tutor_message(
         if let Some(kb) = entry.kb.clone() {
             router = router.with_associated_kb(kb);
         }
+        let resolved_content =
+            resolve_message_content_with_space_mentions(&notebook, &quizzes, &content, &mentions);
+        if !mentions.is_empty() {
+            let _ = entry
+                .stream
+                .status(
+                    "space_context",
+                    serde_json::json!({
+                        "count": mentions.len(),
+                        "resolved": resolved_content.resolved_count,
+                    }),
+                )
+                .await;
+        }
         let answer = router
-            .run_with_session(capability, runtime_session, &content)
+            .run_with_session(capability, runtime_session, &resolved_content.content)
             .await?;
         Ok((answer, streamed_content.load(Ordering::SeqCst)))
     }
@@ -273,7 +305,14 @@ async fn run_tutor_message(
                     serde_json::json!({
                         "session_id": entry.id,
                         "capability": entry.capability,
-                        "user": content.chars().take(500).collect::<String>(),
+                    "user": content.chars().take(500).collect::<String>(),
+                    "space_mentions": mentions.iter().map(|mention| serde_json::json!({
+                        "id": mention.id,
+                        "type": mention.mention_type,
+                        "target_id": mention.target_id,
+                        "question_id": mention.question_id,
+                        "title": mention.title,
+                    })).collect::<Vec<_>>(),
                         "assistant": answer.chars().take(1000).collect::<String>(),
                     }),
                 );
@@ -321,6 +360,81 @@ async fn run_tutor_message(
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
         }
     }
+}
+
+struct ResolvedMessageContent {
+    content: String,
+    resolved_count: usize,
+}
+
+fn resolve_message_content_with_space_mentions(
+    notebook: &NotebookStore,
+    quizzes: &QuizStore,
+    content: &str,
+    mentions: &[SpaceMention],
+) -> ResolvedMessageContent {
+    if mentions.is_empty() {
+        return ResolvedMessageContent {
+            content: content.to_string(),
+            resolved_count: 0,
+        };
+    }
+
+    let mut resolved_count = 0usize;
+    let mut blocks = Vec::new();
+    let mut remaining_chars = 24_000usize;
+    for mention in mentions.iter().take(8) {
+        let Some((resolved_id, markdown)) =
+            resolve_space_mention_markdown(notebook, quizzes, mention)
+        else {
+            continue;
+        };
+        resolved_count += 1;
+        let clipped = take_chars(&markdown, remaining_chars.min(6_000));
+        remaining_chars = remaining_chars.saturating_sub(clipped.chars().count());
+        blocks.push(format!(
+            "<space_item id=\"{}\" type=\"{:?}\" title=\"{}\">\n{}\n</space_item>",
+            resolved_id,
+            mention.mention_type,
+            escape_attr(&mention.title),
+            clipped
+        ));
+        if remaining_chars == 0 {
+            break;
+        }
+    }
+
+    if blocks.is_empty() {
+        return ResolvedMessageContent {
+            content: content.to_string(),
+            resolved_count,
+        };
+    }
+
+    ResolvedMessageContent {
+        content: format!(
+            "The user explicitly referenced these Space artifacts. Use them when relevant, and identify the artifact if you rely on it.\n\n{}\n\nUser message:\n{}",
+            blocks.join("\n\n"),
+            content
+        ),
+        resolved_count,
+    }
+}
+
+fn take_chars(value: &str, max_chars: usize) -> String {
+    let mut output = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        output.push_str("\n\n[truncated]");
+    }
+    output
+}
+
+fn escape_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn summarize_exchange(user: &str, assistant: &str) -> String {
@@ -385,4 +499,48 @@ fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Resu
         config.chat_path,
         config.context_window_tokens,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notebook_store::{NotebookEntryInput, NotebookEntryType};
+
+    #[test]
+    fn resolves_space_mentions_into_turn_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let notebook = NotebookStore::new_with_path(dir.path().join("notebook.json"));
+        let quizzes = QuizStore::new_with_path(dir.path().join("quizzes.json"));
+        let entry = notebook
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                title: "Mask notes".into(),
+                markdown: "Alignment marks are used during lithography.".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+
+        let resolved = resolve_message_content_with_space_mentions(
+            &notebook,
+            &quizzes,
+            "summarize this",
+            &[SpaceMention {
+                id: format!("notebook_entry:{}", entry.id),
+                mention_type: crate::routes::space::SpaceMentionType::NotebookEntry,
+                target_id: Some(entry.id),
+                question_id: None,
+                title: "Mask notes".into(),
+                preview: None,
+                metadata: serde_json::json!({}),
+            }],
+        );
+
+        assert_eq!(resolved.resolved_count, 1);
+        assert!(resolved.content.contains("<space_item"));
+        assert!(resolved.content.contains("Alignment marks"));
+        assert!(resolved.content.contains("User message:\nsummarize this"));
+    }
 }
