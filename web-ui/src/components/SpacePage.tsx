@@ -317,35 +317,6 @@ export function SpacePage({
     }
   }
 
-  const generateQuizFromNotebookEntry = async (entry: NotebookEntry) => {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/quizzes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          notebook_entry_id: entry.id,
-          title: `${entry.title} Quiz`,
-          topic: `${entry.title} review`,
-          difficulty: 'medium',
-          question_count: 5,
-        }),
-      })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const quiz = data.quiz as QuizSession
-      setQuizzes((items) => [quiz, ...items.filter((item) => item.id !== quiz.id)])
-      setActiveQuizId(quiz.id)
-      setQuestionIndex(0)
-      setActiveTab('quiz_bank')
-      setStatus('Quiz generated from notebook entry')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const deleteQuiz = async (quiz: QuizSession) => {
     if (!window.confirm(`Delete "${quiz.title}"?`)) return
     const previous = quizzes
@@ -475,7 +446,6 @@ export function SpacePage({
             onEditMarkdownChange={setEditMarkdown}
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
-            onGenerateQuiz={(entry) => void generateQuizFromNotebookEntry(entry)}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -532,7 +502,6 @@ function NotebookTab({
   onEditMarkdownChange,
   onSaveEntry,
   onSendToBook,
-  onGenerateQuiz,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
@@ -555,7 +524,6 @@ function NotebookTab({
   onEditMarkdownChange: (value: string) => void
   onSaveEntry: (entry: NotebookEntry) => void
   onSendToBook: (entry: NotebookEntry) => void
-  onGenerateQuiz: (entry: NotebookEntry) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
@@ -668,10 +636,6 @@ function NotebookTab({
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onSendToBook(activeEntry)}>
                     <Send size={16} />
                     Send to Book
-                  </button>
-                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onGenerateQuiz(activeEntry)}>
-                    <FileQuestion size={16} />
-                    Generate Quiz
                   </button>
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onStartEdit(activeEntry)}>
                     <Edit3 size={16} />

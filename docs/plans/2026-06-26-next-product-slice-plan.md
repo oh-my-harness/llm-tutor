@@ -47,6 +47,8 @@ tool/session adapters.
 - Books are polished outputs created from Notebook entries when needed.
 - Quiz generation stays in chat through the composer mode.
 - Quiz Bank only reviews and manages historical quiz records.
+- Space and Notebook do not generate quizzes directly. They store and review
+  materials that the user can reference from Chat.
 - The standalone Quiz page should be removed from primary navigation after Space Quiz Bank reaches parity.
 - Student Profile is a visible projection of Markdown Memory plus lightweight stats.
 - Learner memory is Markdown-first and user-editable.
@@ -81,7 +83,7 @@ Tasks:
 
 - [ ] Allow Quiz mode without requiring a selected knowledge base.
 - [ ] Generate quizzes from current conversation context.
-- [ ] Generate quizzes from selected Notebook entries later.
+- [ ] Allow Chat Quiz mode to use saved notebook or research-report material when the user explicitly references it.
 - [ ] Use RAG only when a knowledge base is selected or the user asks about uploaded material.
 - [ ] Use web search only when the quiz source needs external/current facts.
 - [ ] Validate answer/explanation consistency before rendering a quiz.
@@ -128,7 +130,7 @@ Tasks:
 - [ ] Attach a dedicated source list to each report.
 - [ ] Save Research reports to Notebook as `type = research_report`.
 - [ ] Preserve query, sources, session id, and tool trace ids in Notebook metadata.
-- [ ] Support "Generate Quiz from this report" after Notebook source selection exists.
+- [ ] Support Chat follow-up flows where the user asks to generate a Quiz from a saved report.
 - [ ] Support "Send to Book" from the Notebook report detail.
 
 Acceptance:

@@ -283,13 +283,13 @@ Quiz should consider:
   personalized quiz, or follow-up quizzes.
 - [x] Avoid requiring a Knowledge Base for Quiz.
 - [x] Support Quiz from conversation context.
-- [x] Support Quiz from Notebook entry later.
+- [x] Keep Quiz generation in Chat; Notebook entries remain source material, not a separate generation surface.
 - [x] Write Quiz events into L1 memory after generation and answer submission.
 
 ### Acceptance
 
 - [x] User can ask for a quiz from current conversation without selecting a KB.
-- [x] User can generate a quiz from a Notebook entry in Space.
+- [x] User can ask in Chat to generate a quiz from current conversation material.
 - [x] If memory says the learner is weak on a concept, Quiz planning can target it when the request asks for personalization or review and an LLM config is available.
 - [x] Quiz generation still works when memory is empty.
 - [x] Quiz does not hallucinate memory; it uses L3 memory only as personalization context and never as a citation source.

@@ -183,7 +183,7 @@
 
 - REQ-270: Users shall be able to generate a Quiz from a selected knowledge base.
 - REQ-271: Users shall be able to generate a Quiz from conversation material.
-- REQ-272: Users shall eventually be able to generate a Quiz from a Notebook research report entry. Status: planned.
+- REQ-272: Users shall generate Quiz content from Chat Quiz mode using conversation context, attachments, selected knowledge sources, or user-referenced saved material; Notebook and Research report pages shall not provide independent Quiz generation entry points.
 - REQ-273: Quiz generation shall retrieve source chunks when a knowledge base is selected.
 - REQ-274: Quiz generation shall produce strict structured JSON.
 - REQ-275: Quiz questions shall include answer options.
@@ -291,8 +291,8 @@
 - REQ-655: Quiz Bank shall support review and re-practice. Status: planned.
 - REQ-656: Quiz Bank shall not be the primary quiz generation surface.
 - REQ-657: Quiz generation shall remain in chat through the composer Quiz mode.
-- REQ-658: The standalone Quiz navigation page shall be removed after Quiz Bank exists in Space. Status: planned.
-- REQ-659: Quiz history shall move from the current Quiz page into Space / Quiz Bank. Status: planned.
+- REQ-658: The standalone Quiz navigation page shall be removed after Quiz Bank exists in Space.
+- REQ-659: Quiz history shall move from the current Quiz page into Space / Quiz Bank.
 - REQ-660: Quiz Bank shall support filtering by source type later. Status: planned.
 
 ## 19. Student Profile

@@ -75,6 +75,11 @@ Quiz generation stays in conversation through the composer `Quiz` mode:
 User asks in chat -> Agent generates Quiz card -> User answers in chat -> Quiz record appears in Space / Quiz Bank
 ```
 
+Notebook and Research report detail pages should not expose independent Quiz
+generation buttons. Saved notes and reports are durable material; quiz
+generation remains a Chat action so the active mode, model, source selection,
+attachments, and conversation context are explicit.
+
 Quiz Bank responsibilities:
 
 - list historical quizzes,

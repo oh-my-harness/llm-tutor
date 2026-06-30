@@ -13,7 +13,8 @@ The user should be able to:
 - get a final Markdown report with citations,
 - inspect the sources used by the report,
 - save the report as a book chapter,
-- continue asking questions or generate Quiz from the report later.
+- continue asking questions and, from Chat Quiz mode, ask to generate a Quiz
+  based on the saved report or current conversation.
 
 Research is different from normal chat:
 
@@ -76,7 +77,7 @@ Final Report
 
 Actions
   Save to book
-  Generate Quiz
+  Ask in Chat to generate Quiz
   Continue research
 ```
 
@@ -340,7 +341,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 6: Follow-up Work
 
-- [ ] Generate Quiz from a report.
+- [ ] Support Chat Quiz follow-up prompts that use a saved report as source material.
 - [ ] Improve source quality scoring.
 - [ ] Add report regeneration.
 - [ ] Add PDF/webpage source ingestion into knowledge base.
