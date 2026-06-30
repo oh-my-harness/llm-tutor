@@ -23,6 +23,8 @@ struct MentionQuery {
     q: Option<String>,
     limit: Option<usize>,
     space_id: Option<String>,
+    #[serde(rename = "type")]
+    mention_type: Option<SpaceMentionType>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,7 +32,7 @@ struct ReadItemQuery {
     question_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SpaceMentionType {
     NotebookEntry,
@@ -72,32 +74,40 @@ async fn list_mentions(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let mention_type = query.mention_type;
     let mut mentions = Vec::new();
 
-    for entry in state.notebook.list(space_id) {
-        if !matches_query(
-            query_text,
-            &[&entry.title, entry_type_label(&entry), &entry.markdown],
-        ) {
-            continue;
-        }
-        mentions.push(mention_for_notebook_entry(&entry));
-        if mentions.len() >= limit {
-            return ok_mentions(mentions);
+    if mention_type_matches(mention_type, SpaceMentionType::NotebookEntry) {
+        for entry in state.notebook.list(space_id) {
+            if !matches_query(
+                query_text,
+                &[&entry.title, entry_type_label(&entry), &entry.markdown],
+            ) {
+                continue;
+            }
+            mentions.push(mention_for_notebook_entry(&entry));
+            if mentions.len() >= limit {
+                return ok_mentions(mentions);
+            }
         }
     }
 
     for quiz in state.quizzes.list() {
-        if matches_query(
-            query_text,
-            &[&quiz.title, quiz_topic(&quiz), &quiz_stems(&quiz)],
-        ) {
+        if mention_type_matches(mention_type, SpaceMentionType::QuizSession)
+            && matches_query(
+                query_text,
+                &[&quiz.title, quiz_topic(&quiz), &quiz_stems(&quiz)],
+            )
+        {
             mentions.push(mention_for_quiz_session(&quiz));
             if mentions.len() >= limit {
                 return ok_mentions(mentions);
             }
         }
 
+        if !mention_type_matches(mention_type, SpaceMentionType::QuizQuestion) {
+            continue;
+        }
         for question in &quiz.questions {
             if !matches_query(
                 query_text,
@@ -118,6 +128,13 @@ async fn list_mentions(
     }
 
     ok_mentions(mentions)
+}
+
+fn mention_type_matches(filter: Option<SpaceMentionType>, mention_type: SpaceMentionType) -> bool {
+    match filter {
+        Some(filter) => filter == mention_type,
+        None => true,
+    }
 }
 
 async fn read_item(
@@ -510,6 +527,40 @@ mod tests {
         let mentions = body["mentions"].as_array().unwrap();
         assert!(mentions.iter().any(|item| item["type"] == "notebook_entry"));
         assert!(mentions.iter().any(|item| item["type"] == "quiz_session"));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/space/mentions?q=lithography&type=notebook_entry")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let mentions = body["mentions"].as_array().unwrap();
+        assert!(!mentions.is_empty());
+        assert!(mentions.iter().all(|item| item["type"] == "notebook_entry"));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/space/mentions?q=photoresist&type=quiz_question")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        let mentions = body["mentions"].as_array().unwrap();
+        assert!(!mentions.is_empty());
+        assert!(mentions.iter().all(|item| item["type"] == "quiz_question"));
 
         let response = app
             .oneshot(

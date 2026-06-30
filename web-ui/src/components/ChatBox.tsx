@@ -26,6 +26,7 @@ import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
 type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
+type SpaceMentionFilter = 'all' | SpaceMention['type']
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -58,6 +59,17 @@ export interface SpaceMention {
   preview?: string | null
   metadata?: Record<string, unknown>
 }
+
+const spaceMentionFilterOptions: Array<{
+  value: SpaceMentionFilter
+  label: string
+  icon: ReactNode
+}> = [
+  { value: 'all', label: '全部', icon: <AtSign size={14} /> },
+  { value: 'notebook_entry', label: '笔记', icon: <FileText size={14} /> },
+  { value: 'quiz_session', label: '测验', icon: <SearchCheck size={14} /> },
+  { value: 'quiz_question', label: '题目', icon: <FileQuestion size={14} /> },
+]
 
 export interface NotebookEditProposal {
   entryId: string
@@ -740,6 +752,7 @@ function Composer({
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [readingAttachments, setReadingAttachments] = useState(false)
   const [spaceQuery, setSpaceQuery] = useState('')
+  const [spaceMentionFilter, setSpaceMentionFilter] = useState<SpaceMentionFilter>('all')
   const [spaceMentions, setSpaceMentions] = useState<SpaceMention[]>([])
   const [loadingSpaceMentions, setLoadingSpaceMentions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -788,6 +801,7 @@ function Composer({
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams()
       if (spaceQuery.trim()) params.set('q', spaceQuery.trim())
+      if (spaceMentionFilter !== 'all') params.set('type', spaceMentionFilter)
       params.set('limit', '20')
       fetch(`/api/space/mentions?${params.toString()}`, { signal: controller.signal })
         .then(async (res) => {
@@ -808,7 +822,7 @@ function Composer({
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [openMenu, spaceQuery])
+  }, [openMenu, spaceQuery, spaceMentionFilter])
 
   return (
     <div
@@ -926,7 +940,24 @@ function Composer({
               widthClassName="w-[30rem] max-w-[calc(100vw-2rem)]"
               className="flex max-h-[min(28rem,calc(100vh-10rem))] flex-col"
             >
-              <div className="shrink-0 border-b border-blue-50 bg-white px-4 pb-2 pt-1">
+              <div className="shrink-0 space-y-2 border-b border-blue-50 bg-white px-4 pb-2 pt-1">
+                <div className="flex rounded-xl bg-gray-50 p-1">
+                  {spaceMentionFilterOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition ${
+                        spaceMentionFilter === option.value
+                          ? 'bg-white text-blue-700 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-900'
+                      }`}
+                      type="button"
+                      onClick={() => setSpaceMentionFilter(option.value)}
+                    >
+                      {option.icon}
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
                 <input
                   className="h-9 w-full rounded-xl border border-blue-100 px-3 text-sm outline-none focus:border-blue-300"
                   value={spaceQuery}
@@ -939,7 +970,9 @@ function Composer({
                 {loadingSpaceMentions ? (
                   <div className="px-5 py-4 text-sm text-gray-500">Loading Space items...</div>
                 ) : spaceMentions.length === 0 ? (
-                  <div className="px-5 py-4 text-sm text-gray-500">No matching Space items.</div>
+                  <div className="px-5 py-4 text-sm text-gray-500">
+                    No matching {spaceMentionFilterLabel(spaceMentionFilter)}.
+                  </div>
                 ) : (
                   spaceMentions.map((mention) => (
                     <DropdownOption
@@ -1210,6 +1243,13 @@ function spaceMentionTypeLabel(mention: SpaceMention) {
   if (mention.type === 'notebook_entry') return 'Note'
   if (mention.type === 'quiz_question') return 'Question'
   return 'Quiz'
+}
+
+function spaceMentionFilterLabel(filter: SpaceMentionFilter) {
+  if (filter === 'notebook_entry') return 'notes'
+  if (filter === 'quiz_question') return 'questions'
+  if (filter === 'quiz_session') return 'quizzes'
+  return 'Space items'
 }
 
 function spaceMentionDescription(mention: SpaceMention) {
