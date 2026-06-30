@@ -6,4 +6,5 @@ pub mod quiz_store;
 pub mod routes;
 pub mod session;
 pub mod settings_store;
+pub mod space_tool;
 pub mod stream;

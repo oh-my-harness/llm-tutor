@@ -14,6 +14,7 @@ mod quiz_store;
 mod routes;
 mod session;
 mod settings_store;
+mod space_tool;
 mod stream;
 
 #[tokio::main]

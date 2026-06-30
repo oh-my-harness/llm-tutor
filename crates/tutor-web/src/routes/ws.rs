@@ -26,6 +26,7 @@ use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
+use crate::space_tool::ReadSpaceItemTool;
 
 #[derive(Clone)]
 struct WsState {
@@ -270,7 +271,12 @@ async fn run_tutor_message(
             stream: entry.stream.clone(),
             streamed_content: streamed_content.clone(),
         });
-        let mut router = CapabilityRouter::new(env, llm, governance).with_event_sink(sink);
+        let mut router = CapabilityRouter::new(env, llm, governance)
+            .with_event_sink(sink)
+            .with_product_tool(Arc::new(ReadSpaceItemTool::new(
+                notebook.clone(),
+                quizzes.clone(),
+            )));
         if let Some(search) = web_search_config_for_session(entry.search.clone()) {
             router = router.with_web_search(search);
         }
@@ -408,26 +414,21 @@ fn resolve_message_content_with_space_mentions(
 
     let mut resolved_count = 0usize;
     let mut blocks = Vec::new();
-    let mut remaining_chars = 24_000usize;
     for mention in mentions.iter().take(8) {
-        let Some((resolved_id, markdown)) =
+        let Some((resolved_id, _markdown)) =
             resolve_space_mention_markdown(notebook, quizzes, mention)
         else {
             continue;
         };
         resolved_count += 1;
-        let clipped = take_chars(&markdown, remaining_chars.min(6_000));
-        remaining_chars = remaining_chars.saturating_sub(clipped.chars().count());
         blocks.push(format!(
-            "<space_item id=\"{}\" type=\"{:?}\" title=\"{}\">\n{}\n</space_item>",
+            "- id: {}; item_type: {}; target_id: {}; question_id: {}; title: {}",
             resolved_id,
-            mention.mention_type,
-            escape_attr(&mention.title),
-            clipped
+            mention_type_name(&mention.mention_type),
+            mention.target_id.as_deref().unwrap_or(""),
+            mention.question_id.as_deref().unwrap_or(""),
+            mention.title
         ));
-        if remaining_chars == 0 {
-            break;
-        }
     }
 
     if blocks.is_empty() {
@@ -439,28 +440,20 @@ fn resolve_message_content_with_space_mentions(
 
     ResolvedMessageContent {
         content: format!(
-            "The user explicitly referenced these Space artifacts. Use them when relevant, and identify the artifact if you rely on it.\n\n{}\n\nUser message:\n{}",
-            blocks.join("\n\n"),
+            "The user explicitly referenced these Space artifacts. Use the read_space_item tool to inspect exact content before relying on a referenced item, and identify the artifact when you use it.\n\n{}\n\nUser message:\n{}",
+            blocks.join("\n"),
             content
         ),
         resolved_count,
     }
 }
 
-fn take_chars(value: &str, max_chars: usize) -> String {
-    let mut output = value.chars().take(max_chars).collect::<String>();
-    if value.chars().count() > max_chars {
-        output.push_str("\n\n[truncated]");
+fn mention_type_name(value: &crate::routes::space::SpaceMentionType) -> &'static str {
+    match value {
+        crate::routes::space::SpaceMentionType::NotebookEntry => "notebook_entry",
+        crate::routes::space::SpaceMentionType::QuizSession => "quiz_session",
+        crate::routes::space::SpaceMentionType::QuizQuestion => "quiz_question",
     }
-    output
-}
-
-fn escape_attr(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn summarize_exchange(user: &str, assistant: &str) -> String {
@@ -565,8 +558,9 @@ mod tests {
         );
 
         assert_eq!(resolved.resolved_count, 1);
-        assert!(resolved.content.contains("<space_item"));
-        assert!(resolved.content.contains("Alignment marks"));
+        assert!(resolved.content.contains("read_space_item"));
+        assert!(resolved.content.contains("notebook_entry:"));
+        assert!(!resolved.content.contains("Alignment marks"));
         assert!(resolved.content.contains("User message:\nsummarize this"));
     }
 }

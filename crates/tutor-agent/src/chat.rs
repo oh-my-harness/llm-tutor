@@ -109,7 +109,7 @@ async fn run_chat_inner(
         None => rag_tool,
     };
 
-    let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
+    let mut tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
         Arc::new(ReadMemoryTool::new()),
         Arc::new(WriteMemoryTool::new()),
         Arc::new(rag_tool),
@@ -123,6 +123,7 @@ async fn run_chat_inner(
         }),
         Arc::new(CodeExecTool::new()),
     ];
+    tools.extend(router.product_tools.iter().cloned());
 
     let gov = &router.governance;
 
@@ -383,6 +384,8 @@ fn chat_system_prompt() -> String {
      do not treat it as an external factual source. Use write_memory only when the user explicitly \
      asks you to remember something or clearly approves recording a durable preference; never infer \
      private profile facts or silently write ordinary chat content. Use rag_search to find relevant course material. \
+     When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, \
+     call read_space_item before relying on their content. Do not guess the contents of a referenced Space item. \
      Web verification rules are strict: when the user asks you to collect facts, trivia, \
      current information, latest information, sources, external references, or information \
      about real-world/public entities, products, games, communities, papers, libraries, \
@@ -404,8 +407,8 @@ fn research_system_prompt() -> String {
      a durable preference or approves recording it; research findings belong in reports, not memory. \
      Follow this workflow: (1) briefly identify the research question and scope, \
      (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
-     (4) call web_fetch on the most relevant sources before relying on them, (5) optionally call rag_search when a knowledge base is associated, \
-     (6) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
+     (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call rag_search when a knowledge base is associated, \
+     (7) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
@@ -424,6 +427,7 @@ mod tests {
         assert!(prompt.contains("do not treat it as an external factual source"));
         assert!(prompt.contains("Use write_memory only when the user explicitly"));
         assert!(prompt.contains("never infer"));
+        assert!(prompt.contains("call read_space_item"));
         assert!(prompt.contains("collect facts"));
         assert!(prompt.contains("trivia"));
         assert!(prompt.contains("must call web_search before answering"));
@@ -437,6 +441,7 @@ mod tests {
         assert!(prompt.contains("research findings belong in reports"));
         assert!(prompt.contains("call web_search"));
         assert!(prompt.contains("call web_fetch"));
+        assert!(prompt.contains("read_space_item"));
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
     }

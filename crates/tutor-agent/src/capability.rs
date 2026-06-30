@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use llm_adapter::provider::Provider;
 use llm_harness_agent::Session;
-use llm_harness_types::{AgentMessage, ContentBlock, ExecutionEnv};
+use llm_harness_types::{AgentMessage, ContentBlock, ExecutionEnv, Tool};
 use tutor_rag::KnowledgeRetriever;
 
 use crate::error::{Result, TutorError};
@@ -51,6 +51,7 @@ pub struct CapabilityRouter {
     pub retriever: Option<Arc<dyn KnowledgeRetriever>>,
     pub associated_kb: Option<String>,
     pub web_search: Option<WebSearchConfig>,
+    pub product_tools: Vec<Arc<dyn Tool>>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -64,6 +65,7 @@ impl CapabilityRouter {
             retriever: None,
             associated_kb: None,
             web_search: None,
+            product_tools: vec![],
             client: None,
         }
     }
@@ -95,6 +97,11 @@ impl CapabilityRouter {
 
     pub fn with_web_search(mut self, config: WebSearchConfig) -> Self {
         self.web_search = Some(config);
+        self
+    }
+
+    pub fn with_product_tool(mut self, tool: Arc<dyn Tool>) -> Self {
+        self.product_tools.push(tool);
         self
     }
 
