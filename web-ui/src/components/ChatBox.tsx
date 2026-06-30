@@ -922,8 +922,11 @@ function Composer({
             onClick={() => toggleMenu('space')}
           />
           {openMenu === 'space' && (
-            <DropdownPanel widthClassName="w-[30rem]">
-              <div className="border-b border-blue-50 px-4 pb-2 pt-1">
+            <DropdownPanel
+              widthClassName="w-[30rem] max-w-[calc(100vw-2rem)]"
+              className="flex max-h-[min(28rem,calc(100vh-10rem))] flex-col"
+            >
+              <div className="shrink-0 border-b border-blue-50 bg-white px-4 pb-2 pt-1">
                 <input
                   className="h-9 w-full rounded-xl border border-blue-100 px-3 text-sm outline-none focus:border-blue-300"
                   value={spaceQuery}
@@ -932,25 +935,27 @@ function Composer({
                   autoFocus
                 />
               </div>
-              {loadingSpaceMentions ? (
-                <div className="px-5 py-4 text-sm text-gray-500">Loading Space items...</div>
-              ) : spaceMentions.length === 0 ? (
-                <div className="px-5 py-4 text-sm text-gray-500">No matching Space items.</div>
-              ) : (
-                spaceMentions.map((mention) => (
-                  <DropdownOption
-                    key={mention.id}
-                    selected={mentions.some((item) => item.id === mention.id)}
-                    icon={spaceMentionIcon(mention)}
-                    title={mention.title}
-                    description={spaceMentionDescription(mention)}
-                    onClick={() => {
-                      onAddMention(mention)
-                      setOpenMenu(null)
-                    }}
-                  />
-                ))
-              )}
+              <div className="min-h-0 overflow-y-auto py-2">
+                {loadingSpaceMentions ? (
+                  <div className="px-5 py-4 text-sm text-gray-500">Loading Space items...</div>
+                ) : spaceMentions.length === 0 ? (
+                  <div className="px-5 py-4 text-sm text-gray-500">No matching Space items.</div>
+                ) : (
+                  spaceMentions.map((mention) => (
+                    <DropdownOption
+                      key={mention.id}
+                      selected={mentions.some((item) => item.id === mention.id)}
+                      icon={spaceMentionIcon(mention)}
+                      title={mention.title}
+                      description={spaceMentionDescription(mention)}
+                      onClick={() => {
+                        onAddMention(mention)
+                        setOpenMenu(null)
+                      }}
+                    />
+                  ))
+                )}
+              </div>
             </DropdownPanel>
           )}
         </div>
@@ -1250,10 +1255,18 @@ function ToolbarButton({
   )
 }
 
-function DropdownPanel({ children, widthClassName }: { children: ReactNode; widthClassName: string }) {
+function DropdownPanel({
+  children,
+  widthClassName,
+  className = '',
+}: {
+  children: ReactNode
+  widthClassName: string
+  className?: string
+}) {
   return (
     <div
-      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-2xl border border-blue-100 bg-white py-2 shadow-2xl shadow-blue-950/10 ${widthClassName}`}
+      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-2'}`}
     >
       {children}
     </div>
