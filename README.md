@@ -117,6 +117,21 @@ app data 目录；Web 开发模式仍默认使用项目根目录下的 `.llm-tut
 LLM、Embedding、Search、预算和审批等设置会写入数据目录里的
 `settings.json`，前端 localStorage 仅作为兼容缓存。
 
+### 版本管理
+
+发布前使用脚本同步 Cargo、Tauri 和前端包版本：
+
+```powershell
+.\scripts\bump-version.ps1 0.1.0-alpha.1
+```
+
+建议发布节奏：
+
+- `0.1.0-alpha.1`：第一版内部测试。
+- `0.1.0-alpha.N`：修复 QA 问题后的内部测试版。
+- `0.1.0-beta.1`：功能基本稳定后的外部试用版。
+- `0.1.0`：第一版正式发布。
+
 ## 当前功能
 
 | 模块 | 支持能力 |

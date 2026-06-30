@@ -335,6 +335,7 @@ Tasks:
 
 - [x] Add desktop release QA automation script.
 - [x] Add manual desktop QA checklist.
+- [x] Add changelog and version bump script.
 - [ ] Run `scripts/build-desktop.ps1` on a local machine with enough build time.
 - [ ] Run `scripts/qa-desktop.ps1` against the built artifact.
 - [ ] Install or unpack app on a clean Windows machine/profile.
