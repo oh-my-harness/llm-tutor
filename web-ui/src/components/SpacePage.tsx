@@ -12,6 +12,10 @@ import {
   Link2,
   Network,
   NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RefreshCw,
   Save,
@@ -605,7 +609,7 @@ export function SpacePage({
               aria-label={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
               onClick={() => setSpaceNavCollapsed((value) => !value)}
             >
-              <PanelToggleIcon side="left" collapsed={spaceNavCollapsed} />
+              {spaceNavCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
           </div>
           {!spaceNavCollapsed && (
@@ -724,23 +728,6 @@ export function SpacePage({
         )}
       </section>
     </main>
-  )
-}
-
-function PanelToggleIcon({ side, collapsed }: { side: 'left' | 'right'; collapsed: boolean }) {
-  const showRight = side === 'left' ? collapsed : !collapsed
-
-  return (
-    <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-[4px] border-2 border-gray-500 text-gray-500">
-      <span
-        className={`absolute top-0 h-full w-0.5 bg-gray-500 ${side === 'left' ? 'left-[5px]' : 'right-[5px]'}`}
-      />
-      {showRight ? (
-        <ChevronRight size={13} strokeWidth={2.5} className={side === 'left' ? 'translate-x-[2px]' : '-translate-x-[2px]'} />
-      ) : (
-        <ChevronLeft size={13} strokeWidth={2.5} className={side === 'left' ? 'translate-x-[2px]' : '-translate-x-[2px]'} />
-      )}
-    </span>
   )
 }
 
@@ -1086,7 +1073,7 @@ function NotebookRelationsPanel({
           aria-label="Expand related information"
           onClick={() => onCollapsedChange(false)}
         >
-          <PanelToggleIcon side="right" collapsed />
+          <PanelRightOpen size={18} />
         </button>
         <div className="mt-4 rotate-90 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-gray-400">
           Related
@@ -1107,7 +1094,7 @@ function NotebookRelationsPanel({
             aria-label="Collapse related information"
             onClick={() => onCollapsedChange(true)}
           >
-            <PanelToggleIcon side="right" collapsed={false} />
+            <PanelRightClose size={16} />
           </button>
         </div>
         <NotebookLocalGraph
