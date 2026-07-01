@@ -493,11 +493,16 @@ retrieval.
 - [x] Add Organize mode as a Chat workflow.
 - [x] Add `search_notebook` product tool for plain-text Notebook lookup.
 - [x] Demote code execution from visible Chat mode to a tool available inside modes.
-- [ ] Add "suggest links" proposal workflow.
-- [ ] Add "suggest tags" proposal workflow.
-- [ ] Add "merge duplicate notes" proposal workflow.
-- [ ] Keep apply/reject explicit.
-- [ ] Record applied organization changes as Notebook memory events.
+- [x] Add "suggest links" proposal workflow through structured edit proposals.
+- [x] Add "suggest tags" proposal workflow through structured edit proposals.
+- [x] Add "merge duplicate notes" proposal workflow through structured edit proposals.
+- [x] Keep apply/reject explicit.
+- [x] Record applied organization changes as Notebook memory events.
+
+Phase 4 first implementation uses complete Markdown replacement plus structured
+proposal metadata (`proposal_kind`, suggested links, suggested tags, and merge
+source ids). More specialized apply APIs can be added later if this becomes too
+blunt.
 
 ### Phase 5: Graph and Advanced Portability
 

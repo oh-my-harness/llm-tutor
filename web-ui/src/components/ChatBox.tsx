@@ -77,6 +77,10 @@ export interface NotebookEditProposal {
   proposedTitle: string
   proposedMarkdown: string
   summary: string
+  proposalKind?: 'edit' | 'links' | 'tags' | 'merge'
+  suggestedLinks?: Array<{ text: string; target: string; reason?: string }>
+  suggestedTags?: Array<{ tag: string; action: 'add' | 'keep' | 'remove'; reason?: string }>
+  mergeSourceEntryIds?: string[]
   applied?: boolean
 }
 
@@ -422,7 +426,7 @@ function NotebookEditProposalCard({
     <div className="mt-3 overflow-hidden rounded-lg border border-blue-100 bg-white">
       <div className="flex items-start justify-between gap-3 border-b border-blue-50 px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-gray-900">Notebook edit proposal</div>
+          <div className="text-sm font-semibold text-gray-900">{notebookProposalTitle(proposal)}</div>
           <div className="mt-1 text-xs text-gray-500">{proposal.entryTitle}</div>
         </div>
         {proposal.applied ? (
@@ -445,6 +449,28 @@ function NotebookEditProposalCard({
       </div>
       <div className="space-y-3 px-4 py-3">
         <p className="text-sm text-gray-700">{proposal.summary}</p>
+        {proposal.suggestedLinks && proposal.suggestedLinks.length > 0 && (
+          <ProposalDetailList
+            title="Suggested links"
+            items={proposal.suggestedLinks.map((link) =>
+              `${link.text} -> [[${link.target}]]${link.reason ? ` · ${link.reason}` : ''}`,
+            )}
+          />
+        )}
+        {proposal.suggestedTags && proposal.suggestedTags.length > 0 && (
+          <ProposalDetailList
+            title="Suggested tags"
+            items={proposal.suggestedTags.map((tag) =>
+              `${tag.action}: #${tag.tag.replace(/^#/, '')}${tag.reason ? ` · ${tag.reason}` : ''}`,
+            )}
+          />
+        )}
+        {proposal.mergeSourceEntryIds && proposal.mergeSourceEntryIds.length > 0 && (
+          <ProposalDetailList
+            title="Merge sources"
+            items={proposal.mergeSourceEntryIds.map((id) => `Notebook entry ${id}`)}
+          />
+        )}
         <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
           <span className="font-medium text-gray-900">New title:</span> {proposal.proposedTitle}
         </div>
@@ -453,6 +479,26 @@ function NotebookEditProposalCard({
           <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs text-gray-700">{proposal.proposedMarkdown}</pre>
         </details>
       </div>
+    </div>
+  )
+}
+
+function notebookProposalTitle(proposal: NotebookEditProposal) {
+  if (proposal.proposalKind === 'links') return 'Notebook link proposal'
+  if (proposal.proposalKind === 'tags') return 'Notebook tag proposal'
+  if (proposal.proposalKind === 'merge') return 'Notebook merge proposal'
+  return 'Notebook edit proposal'
+}
+
+function ProposalDetailList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-md border border-blue-50 bg-blue-50/40 px-3 py-2">
+      <div className="text-xs font-semibold text-blue-900">{title}</div>
+      <ul className="mt-1 space-y-1 text-xs leading-5 text-gray-700">
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
+        ))}
+      </ul>
     </div>
   )
 }

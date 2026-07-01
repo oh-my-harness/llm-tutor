@@ -237,6 +237,42 @@ impl Tool for ProposeNotebookEditTool {
                     "summary": {
                         "type": "string",
                         "description": "Short user-facing summary of the proposed change."
+                    },
+                    "proposal_kind": {
+                        "type": "string",
+                        "enum": ["edit", "links", "tags", "merge"],
+                        "description": "Organization proposal type. Use links for wiki-link suggestions, tags for tag cleanup, merge for duplicate-note consolidation, and edit for general rewrites."
+                    },
+                    "suggested_links": {
+                        "type": "array",
+                        "description": "Optional wiki-link suggestions included in this replacement.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": { "type": "string" },
+                                "target": { "type": "string" },
+                                "reason": { "type": "string" }
+                            },
+                            "required": ["text", "target"]
+                        }
+                    },
+                    "suggested_tags": {
+                        "type": "array",
+                        "description": "Optional tags to add, keep, or remove.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tag": { "type": "string" },
+                                "action": { "type": "string", "enum": ["add", "keep", "remove"] },
+                                "reason": { "type": "string" }
+                            },
+                            "required": ["tag", "action"]
+                        }
+                    },
+                    "merge_source_entry_ids": {
+                        "type": "array",
+                        "description": "For merge proposals, duplicate/source Notebook entry ids that were considered. Applying this proposal updates only entry_id; it does not delete these source entries.",
+                        "items": { "type": "string" }
                     }
                 },
                 "required": ["entry_id", "proposed_markdown", "summary"]
@@ -284,22 +320,51 @@ impl Tool for ProposeNotebookEditTool {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .unwrap_or("Proposed Notebook update");
+            let proposal_kind = args["proposal_kind"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| matches!(*value, "edit" | "links" | "tags" | "merge"))
+                .unwrap_or("edit");
+            let suggested_links = args["suggested_links"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let suggested_tags = args["suggested_tags"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let merge_source_entry_ids = args["merge_source_entry_ids"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
 
             Ok(ToolResult {
                 content: vec![ContentBlock::Text {
                     text: format!(
-                        "Notebook edit proposal is ready for user review. It has not been applied. Entry: {}.",
+                        "Notebook {proposal_kind} proposal is ready for user review. It has not been applied. Entry: {}.",
                         entry.title
                     ),
                 }],
                 details: json!({
                     "found": true,
+                    "proposal_kind": proposal_kind,
                     "entry_id": entry.id,
                     "entry_title": entry.title,
                     "current_markdown": entry.markdown,
                     "proposed_title": proposed_title,
                     "proposed_markdown": proposed_markdown,
                     "summary": summary,
+                    "suggested_links": suggested_links,
+                    "suggested_tags": suggested_tags,
+                    "merge_source_entry_ids": merge_source_entry_ids,
                     "requires_confirmation": true,
                 }),
                 terminate: false,
@@ -544,7 +609,14 @@ mod tests {
                     "entry_id": entry.id,
                     "proposed_title": "Updated mask notes",
                     "proposed_markdown": "# Updated\n\nBetter notes.",
-                    "summary": "Rewrite as structured notes."
+                    "summary": "Rewrite as structured notes.",
+                    "proposal_kind": "links",
+                    "suggested_links": [
+                        { "text": "mask alignment", "target": "Mask Alignment", "reason": "Connect related concept" }
+                    ],
+                    "suggested_tags": [
+                        { "tag": "semiconductor", "action": "add", "reason": "Topic tag" }
+                    ]
                 }),
                 &make_ctx(),
             )
@@ -552,6 +624,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.details["requires_confirmation"], true);
+        assert_eq!(result.details["proposal_kind"], "links");
+        assert_eq!(result.details["suggested_links"][0]["target"], "Mask Alignment");
+        assert_eq!(result.details["suggested_tags"][0]["tag"], "semiconductor");
         assert_eq!(result.details["proposed_title"], "Updated mask notes");
         assert_eq!(notebook.get(&entry.id).unwrap().markdown, "Original notes.");
     }

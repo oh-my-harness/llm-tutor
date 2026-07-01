@@ -505,7 +505,11 @@ export default function App() {
           markdown: proposal.proposedMarkdown,
           metadata: {
             updated_by: 'agent_proposal',
+            proposal_kind: proposal.proposalKind ?? 'edit',
             proposal_summary: proposal.summary,
+            suggested_links: proposal.suggestedLinks ?? [],
+            suggested_tags: proposal.suggestedTags ?? [],
+            merge_source_entry_ids: proposal.mergeSourceEntryIds ?? [],
             source_session_id: sessionId,
           },
         }),
@@ -1098,7 +1102,59 @@ function notebookEditProposalFromTrace(payload: Record<string, unknown>): Notebo
     proposedTitle: typeof item.proposed_title === 'string' && item.proposed_title.trim() ? item.proposed_title : entryTitle,
     proposedMarkdown,
     summary: typeof item.summary === 'string' && item.summary.trim() ? item.summary : 'Proposed Notebook update',
+    proposalKind: notebookProposalKind(item.proposal_kind),
+    suggestedLinks: notebookSuggestedLinks(item.suggested_links),
+    suggestedTags: notebookSuggestedTags(item.suggested_tags),
+    mergeSourceEntryIds: notebookMergeSourceEntryIds(item.merge_source_entry_ids),
   }
+}
+
+function notebookProposalKind(value: unknown): NotebookEditProposal['proposalKind'] {
+  return value === 'links' || value === 'tags' || value === 'merge' || value === 'edit' ? value : 'edit'
+}
+
+function notebookSuggestedLinks(value: unknown): NotebookEditProposal['suggestedLinks'] {
+  if (!Array.isArray(value)) return []
+  const links: NonNullable<NotebookEditProposal['suggestedLinks']> = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const text = typeof record.text === 'string' ? record.text.trim() : ''
+    const target = typeof record.target === 'string' ? record.target.trim() : ''
+    if (!text || !target) continue
+    links.push({
+      text,
+      target,
+      reason: typeof record.reason === 'string' && record.reason.trim() ? record.reason.trim() : undefined,
+    })
+  }
+  return links
+}
+
+function notebookSuggestedTags(value: unknown): NotebookEditProposal['suggestedTags'] {
+  if (!Array.isArray(value)) return []
+  const tags: NonNullable<NotebookEditProposal['suggestedTags']> = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const tag = typeof record.tag === 'string' ? record.tag.trim().replace(/^#/, '') : ''
+    const action = record.action
+    if (!tag || (action !== 'add' && action !== 'keep' && action !== 'remove')) continue
+    tags.push({
+      tag,
+      action,
+      reason: typeof record.reason === 'string' && record.reason.trim() ? record.reason.trim() : undefined,
+    })
+  }
+  return tags
+}
+
+function notebookMergeSourceEntryIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function restoreTraceEntries(

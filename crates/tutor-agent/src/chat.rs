@@ -456,8 +456,9 @@ fn organize_system_prompt() -> String {
      user asks about saved notes, prior notes, Notebook contents, organization, tags, links, or \
      duplicates. Use read_space_item when the user references an explicit Space item. Before \
      proposing edits, read the exact Notebook entry. Use propose_notebook_edit for complete \
-     replacement Markdown proposals; never claim an edit has been applied because the product UI \
-     requires explicit user confirmation. You may use code_exec for parsing or verification if it \
+     replacement Markdown proposals; set proposal_kind to links, tags, merge, or edit, and include \
+     suggested_links, suggested_tags, or merge_source_entry_ids when relevant. Never claim an edit \
+     has been applied because the product UI requires explicit user confirmation. You may use code_exec for parsing or verification if it \
      helps, and web_search only when the user explicitly asks for external/current facts. Keep \
      organization suggestions concrete and cite the Notebook entries you used."
         .into()
@@ -501,6 +502,10 @@ mod tests {
         assert!(prompt.contains("search_notebook"));
         assert!(prompt.contains("plain-text Markdown workspace"));
         assert!(prompt.contains("propose_notebook_edit"));
+        assert!(prompt.contains("proposal_kind"));
+        assert!(prompt.contains("suggested_links"));
+        assert!(prompt.contains("suggested_tags"));
+        assert!(prompt.contains("merge_source_entry_ids"));
         assert!(prompt.contains("requires explicit user confirmation"));
     }
 }
