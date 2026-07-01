@@ -508,8 +508,15 @@ blunt.
 
 - [x] Add local graph for current note.
 - [x] Add unresolved link review.
-- [ ] Add Obsidian-compatible vault export.
-- [ ] Evaluate file-backed vault mode.
+- [x] Add Obsidian-compatible vault export.
+- [x] Evaluate file-backed vault mode.
+
+File-backed vault mode evaluation: keep JSON-backed `NotebookEntry` as the
+product source of truth for now. Markdown import/export gives portability
+without introducing file watcher conflicts, rename ambiguity, cross-platform
+path edge cases, or partial-write recovery problems. Revisit file-backed mode
+only after Notebook editing, links, imports, exports, and agent proposals are
+stable.
 
 ## 9. Open Questions
 

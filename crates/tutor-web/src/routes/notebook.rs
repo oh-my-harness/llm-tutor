@@ -313,6 +313,32 @@ async fn export_entries_zip(
     }
 }
 
+async fn export_obsidian_vault_zip(
+    State(state): State<NotebookState>,
+    Query(query): Query<ExportNotebookQuery>,
+) -> impl IntoResponse {
+    let mut entries = state.store.list_views(query.space_id.as_deref());
+    if let Some(ids) = query.entry_ids {
+        let requested = ids
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        entries.retain(|entry| requested.iter().any(|id| id == &entry.entry.id));
+    }
+    if entries.is_empty() {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "no notebook entries to export".into(),
+        );
+    }
+    match export_obsidian_vault(&entries) {
+        Ok(bytes) => bytes_response("notebook-vault.zip", "application/zip", bytes),
+        Err(err) => error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+    }
+}
+
 pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> Router {
     let state = NotebookState { store, memory };
     Router::new()
@@ -329,6 +355,10 @@ pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> R
             get(export_entry),
         )
         .route("/api/notebook/export.zip", get(export_entries_zip))
+        .route(
+            "/api/notebook/export-vault.zip",
+            get(export_obsidian_vault_zip),
+        )
         .route(
             "/api/notebook/import/preview",
             axum::routing::post(preview_import_entries),
@@ -583,6 +613,39 @@ fn export_zip(entries: &[crate::notebook_store::NotebookEntryView]) -> anyhow::R
     Ok(writer.finish()?.into_inner())
 }
 
+fn export_obsidian_vault(
+    entries: &[crate::notebook_store::NotebookEntryView],
+) -> anyhow::Result<Vec<u8>> {
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(cursor);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut used_names = Vec::new();
+
+    writer.start_file(".obsidian/app.json", options)?;
+    std::io::Write::write_all(
+        &mut writer,
+        br#"{"alwaysUpdateLinks":true,"newFileLocation":"root","attachmentFolderPath":"assets"}"#,
+    )?;
+    writer.start_file(".obsidian/appearance.json", options)?;
+    std::io::Write::write_all(&mut writer, br#"{"theme":"obsidian"}"#)?;
+    writer.start_file("README.md", options)?;
+    std::io::Write::write_all(
+        &mut writer,
+        b"# Notebook Vault\n\nExported from Tutor Agent. Notes keep their YAML frontmatter and wiki links.\n",
+    )?;
+
+    for entry in entries {
+        let file_name = unique_file_name(
+            &safe_markdown_file_name(&entry.entry.title),
+            &mut used_names,
+        );
+        writer.start_file(file_name, options)?;
+        std::io::Write::write_all(&mut writer, export_markdown(entry).as_bytes())?;
+    }
+    Ok(writer.finish()?.into_inner())
+}
+
 fn markdown_response(file_name: String, markdown: String) -> axum::response::Response {
     bytes_response(
         file_name,
@@ -723,6 +786,7 @@ mod tests {
         assert_eq!(body["entry"]["markdown"], "# Updated report");
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::DELETE)
@@ -767,6 +831,7 @@ mod tests {
         assert_eq!(body["skipped"].as_array().unwrap().len(), 0);
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
@@ -844,6 +909,7 @@ mod tests {
         assert!(text.contains("# Imported OPC"));
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
@@ -858,6 +924,24 @@ mod tests {
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         assert_eq!(archive.len(), 1);
         assert_eq!(archive.by_index(0).unwrap().name(), "Imported OPC.md");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/notebook/export-vault.zip?space_id=default")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        assert!(archive.by_name(".obsidian/app.json").is_ok());
+        assert!(archive.by_name(".obsidian/appearance.json").is_ok());
+        assert!(archive.by_name("README.md").is_ok());
+        assert!(archive.by_name("Imported OPC.md").is_ok());
     }
 
     #[test]

@@ -415,6 +415,24 @@ export function SpacePage({
     }
   }
 
+  const exportNotebookVault = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/export-vault.zip?space_id=default')
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      const blob = await res.blob()
+      downloadBlob(blob, 'notebook-vault.zip')
+      setStatus('Exported Obsidian vault zip')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const deleteNotebookEntry = async (entry: NotebookEntry) => {
     if (!window.confirm(`Delete "${entry.title}"?`)) return
     const previous = notebookEntries
@@ -650,6 +668,7 @@ export function SpacePage({
             onCancelImport={cancelNotebookImport}
             onExportEntry={(entry) => void exportNotebookEntry(entry)}
             onExportAll={() => void exportNotebookZip()}
+            onExportVault={() => void exportNotebookVault()}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -716,6 +735,7 @@ function NotebookTab({
   onCancelImport,
   onExportEntry,
   onExportAll,
+  onExportVault,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
@@ -745,6 +765,7 @@ function NotebookTab({
   onCancelImport: () => void
   onExportEntry: (entry: NotebookEntry) => void
   onExportAll: () => void
+  onExportVault: () => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
@@ -786,7 +807,7 @@ function NotebookTab({
               event.currentTarget.value = ''
             }}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               className={secondaryButtonClassName}
               type="button"
@@ -804,6 +825,15 @@ function NotebookTab({
             >
               <Download size={16} />
               Export
+            </button>
+            <button
+              className={secondaryButtonClassName}
+              type="button"
+              disabled={loading || entries.length === 0}
+              onClick={onExportVault}
+            >
+              <BookMarked size={16} />
+              Vault
             </button>
           </div>
           {importPreview && (
