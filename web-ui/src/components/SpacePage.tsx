@@ -605,7 +605,7 @@ export function SpacePage({
               aria-label={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
               onClick={() => setSpaceNavCollapsed((value) => !value)}
             >
-              {spaceNavCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+              <PanelToggleIcon side="left" collapsed={spaceNavCollapsed} />
             </button>
           </div>
           {!spaceNavCollapsed && (
@@ -727,6 +727,23 @@ export function SpacePage({
   )
 }
 
+function PanelToggleIcon({ side, collapsed }: { side: 'left' | 'right'; collapsed: boolean }) {
+  const showRight = side === 'left' ? collapsed : !collapsed
+
+  return (
+    <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-[4px] border-2 border-gray-500 text-gray-500">
+      <span
+        className={`absolute top-0 h-full w-0.5 bg-gray-500 ${side === 'left' ? 'left-[5px]' : 'right-[5px]'}`}
+      />
+      {showRight ? (
+        <ChevronRight size={13} strokeWidth={2.5} className={side === 'left' ? 'translate-x-[2px]' : '-translate-x-[2px]'} />
+      ) : (
+        <ChevronLeft size={13} strokeWidth={2.5} className={side === 'left' ? 'translate-x-[2px]' : '-translate-x-[2px]'} />
+      )}
+    </span>
+  )
+}
+
 function NotebookTab({
   entries,
   activeEntry,
@@ -790,6 +807,7 @@ function NotebookTab({
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const importInputRef = useRef<HTMLInputElement | null>(null)
+  const [relationsCollapsed, setRelationsCollapsed] = useState(false)
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -1025,6 +1043,8 @@ function NotebookTab({
               {!isEditing && (
                 <NotebookRelationsPanel
                   entry={activeEntry}
+                  collapsed={relationsCollapsed}
+                  onCollapsedChange={setRelationsCollapsed}
                   onSelectEntry={onSelectEntry}
                   onCreateLinkedEntry={onCreateLinkedEntry}
                 />
@@ -1039,10 +1059,14 @@ function NotebookTab({
 
 function NotebookRelationsPanel({
   entry,
+  collapsed,
+  onCollapsedChange,
   onSelectEntry,
   onCreateLinkedEntry,
 }: {
   entry: NotebookEntry
+  collapsed: boolean
+  onCollapsedChange: (collapsed: boolean) => void
   onSelectEntry: (id: string) => void
   onCreateLinkedEntry: (title: string) => void
 }) {
@@ -1052,9 +1076,40 @@ function NotebookRelationsPanel({
   const unresolvedLinks = links.filter((link) => !link.resolved)
   const [localGraphCollapsed, setLocalGraphCollapsed] = useState(false)
 
+  if (collapsed) {
+    return (
+      <aside className="hidden w-12 shrink-0 border-l border-gray-100 bg-white px-1.5 py-5 xl:flex xl:flex-col xl:items-center">
+        <button
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-blue-50 hover:text-blue-700"
+          type="button"
+          title="Expand related information"
+          aria-label="Expand related information"
+          onClick={() => onCollapsedChange(false)}
+        >
+          <PanelToggleIcon side="right" collapsed />
+        </button>
+        <div className="mt-4 rotate-90 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-gray-400">
+          Related
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-100 bg-white px-4 py-5 xl:block">
       <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Related information</div>
+          <button
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-blue-50 hover:text-blue-700"
+            type="button"
+            title="Collapse related information"
+            aria-label="Collapse related information"
+            onClick={() => onCollapsedChange(true)}
+          >
+            <PanelToggleIcon side="right" collapsed={false} />
+          </button>
+        </div>
         <NotebookLocalGraph
           entry={entry}
           links={links}
