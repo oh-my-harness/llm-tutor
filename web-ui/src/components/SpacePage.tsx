@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookMarked,
   CheckCircle2,
@@ -16,6 +16,7 @@ import {
   Tags,
   Target,
   Trash2,
+  Upload,
   UserRound,
   X,
 } from 'lucide-react'
@@ -293,6 +294,31 @@ export function SpacePage({
     }
   }
 
+  const importNotebookFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const form = new FormData()
+    form.append('space_id', 'default')
+    Array.from(files).forEach((file) => form.append('file', file))
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/import', {
+        method: 'POST',
+        body: form,
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const imported = (data.entries ?? []) as NotebookEntry[]
+      await refreshNotebook()
+      if (imported[0]?.id) setActiveNotebookId(imported[0].id)
+      const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0
+      setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const deleteNotebookEntry = async (entry: NotebookEntry) => {
     if (!window.confirm(`Delete "${entry.title}"?`)) return
     const previous = notebookEntries
@@ -522,6 +548,7 @@ export function SpacePage({
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
+            onImportFiles={(files) => void importNotebookFiles(files)}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -582,6 +609,7 @@ function NotebookTab({
   onSaveEntry,
   onSendToBook,
   onCreateLinkedEntry,
+  onImportFiles,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
@@ -605,9 +633,11 @@ function NotebookTab({
   onSaveEntry: (entry: NotebookEntry) => void
   onSendToBook: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
+  onImportFiles: (files: FileList | null) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -633,6 +663,26 @@ function NotebookTab({
           >
             <Plus size={16} />
             New note
+          </button>
+          <input
+            ref={importInputRef}
+            className="hidden"
+            type="file"
+            accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
+            multiple
+            onChange={(event) => {
+              onImportFiles(event.currentTarget.files)
+              event.currentTarget.value = ''
+            }}
+          />
+          <button
+            className={secondaryButtonClassName}
+            type="button"
+            disabled={loading}
+            onClick={() => importInputRef.current?.click()}
+          >
+            <Upload size={16} />
+            Import Markdown / Zip
           </button>
           <div className="text-xs text-gray-500">{status}</div>
         </div>

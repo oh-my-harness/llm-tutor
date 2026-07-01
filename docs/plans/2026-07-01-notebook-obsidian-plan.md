@@ -296,12 +296,12 @@ retrieval corpus.
 
 ### Phase 2: Import
 
-- [ ] Add Markdown file import API.
-- [ ] Add zip import API.
-- [ ] Parse YAML frontmatter.
+- [x] Add Markdown file import API.
+- [x] Add zip import API.
+- [x] Parse YAML frontmatter.
 - [ ] Add import preview with duplicate/conflict detection.
-- [ ] Add Notebook UI import action.
-- [ ] Add tests for Markdown/frontmatter/link preservation.
+- [x] Add Notebook UI import action.
+- [x] Add tests for Markdown/frontmatter/link preservation.
 
 ### Phase 3: Export
 

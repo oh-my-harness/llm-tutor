@@ -1,8 +1,10 @@
+use std::io::{Cursor, Read};
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Multipart, Path as AxumPath, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
@@ -58,7 +60,7 @@ async fn list_entries(
 
 async fn get_entry(
     State(state): State<NotebookState>,
-    Path(entry_id): Path<String>,
+    AxumPath(entry_id): AxumPath<String>,
 ) -> impl IntoResponse {
     match state.store.get_view(&entry_id) {
         Some(entry) => {
@@ -105,7 +107,7 @@ async fn create_entry(
 
 async fn update_entry(
     State(state): State<NotebookState>,
-    Path(entry_id): Path<String>,
+    AxumPath(entry_id): AxumPath<String>,
     Json(req): Json<UpdateNotebookEntryRequest>,
 ) -> impl IntoResponse {
     match state.store.update(
@@ -141,7 +143,7 @@ async fn update_entry(
 
 async fn delete_entry(
     State(state): State<NotebookState>,
-    Path(entry_id): Path<String>,
+    AxumPath(entry_id): AxumPath<String>,
 ) -> impl IntoResponse {
     let existing = state.store.get(&entry_id);
     if state.store.delete(&entry_id) {
@@ -164,6 +166,100 @@ async fn delete_entry(
     }
 }
 
+async fn import_entries(
+    State(state): State<NotebookState>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let mut space_id = None;
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
+        };
+
+        match field.name() {
+            Some("space_id") => match field.text().await {
+                Ok(value) => {
+                    if !value.trim().is_empty() {
+                        space_id = Some(value.trim().to_string());
+                    }
+                }
+                Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
+            },
+            Some("file") | Some("files") => {
+                let file_name = field.file_name().unwrap_or("notebook.md").to_string();
+                let bytes = match field.bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
+                };
+                match import_payloads_from_upload(&file_name, bytes.as_ref()) {
+                    Ok(payloads) => {
+                        if payloads.is_empty() {
+                            skipped.push(serde_json::json!({
+                                "file_name": file_name,
+                                "reason": "no markdown files found",
+                            }));
+                            continue;
+                        }
+                        for payload in payloads {
+                            match state.store.create(NotebookEntryInput {
+                                space_id: space_id.clone(),
+                                entry_type: NotebookEntryType::Note,
+                                title: payload.title,
+                                markdown: payload.markdown,
+                                metadata: Some(payload.metadata),
+                                source_session_id: None,
+                                source_message_id: None,
+                            }) {
+                                Ok(entry) => imported.push(entry),
+                                Err(err) => skipped.push(serde_json::json!({
+                                    "file_name": payload.source_path,
+                                    "reason": err.to_string(),
+                                })),
+                            }
+                        }
+                    }
+                    Err(err) => skipped.push(serde_json::json!({
+                        "file_name": file_name,
+                        "reason": err.to_string(),
+                    })),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if imported.is_empty() && skipped.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "missing file field".into());
+    }
+
+    if !imported.is_empty() {
+        let _ = state.memory.record_event(
+            MemoryEventCategory::Notebook,
+            "imported",
+            format!("Imported {} notebook entries", imported.len()),
+            None,
+            serde_json::json!({
+                "entry_ids": imported.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+                "skipped_count": skipped.len(),
+            }),
+        );
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "entries": imported,
+            "skipped": skipped,
+        })),
+    )
+        .into_response()
+}
+
 pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> Router {
     let state = NotebookState { store, memory };
     Router::new()
@@ -175,11 +271,130 @@ pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> R
             "/api/notebook/entries/{entry_id}",
             get(get_entry).patch(update_entry).delete(delete_entry),
         )
+        .route("/api/notebook/import", axum::routing::post(import_entries))
         .with_state(state)
 }
 
 fn error_response(status: StatusCode, message: String) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
+}
+
+#[derive(Debug)]
+struct ImportPayload {
+    source_path: String,
+    title: String,
+    markdown: String,
+    metadata: serde_json::Value,
+}
+
+fn import_payloads_from_upload(
+    file_name: &str,
+    bytes: &[u8],
+) -> anyhow::Result<Vec<ImportPayload>> {
+    if file_name.to_lowercase().ends_with(".zip") {
+        return import_payloads_from_zip(file_name, bytes);
+    }
+    if !file_name.to_lowercase().ends_with(".md")
+        && !file_name.to_lowercase().ends_with(".markdown")
+    {
+        anyhow::bail!("unsupported notebook import file type");
+    }
+    let markdown = decode_utf8(bytes)?;
+    Ok(vec![payload_from_markdown(file_name, markdown)?])
+}
+
+fn import_payloads_from_zip(file_name: &str, bytes: &[u8]) -> anyhow::Result<Vec<ImportPayload>> {
+    let reader = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader)?;
+    let mut payloads = Vec::new();
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index)?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().replace('\\', "/");
+        if !name.to_lowercase().ends_with(".md") && !name.to_lowercase().ends_with(".markdown") {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        let markdown = decode_utf8(&bytes)?;
+        payloads.push(payload_from_markdown(&name, markdown)?);
+    }
+    payloads.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    if payloads.is_empty() {
+        anyhow::bail!("{file_name} contains no markdown files");
+    }
+    Ok(payloads)
+}
+
+fn payload_from_markdown(source_path: &str, markdown: String) -> anyhow::Result<ImportPayload> {
+    if markdown.trim().is_empty() {
+        anyhow::bail!("markdown file is empty");
+    }
+    let frontmatter = parse_frontmatter(&markdown);
+    let title = frontmatter
+        .as_ref()
+        .and_then(|value| value.get("title"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| title_from_path(source_path));
+    let mut metadata = serde_json::json!({
+        "import": {
+            "source_path": source_path,
+            "format": "markdown",
+        },
+        "frontmatter": frontmatter.unwrap_or_else(|| serde_json::json!({})),
+    });
+    if let Some(tags) = metadata["frontmatter"].get("tags").cloned() {
+        metadata["tags"] = tags;
+    }
+    if let Some(tag) = metadata["frontmatter"].get("tag").cloned() {
+        metadata["tag"] = tag;
+    }
+    Ok(ImportPayload {
+        source_path: source_path.to_string(),
+        title,
+        markdown,
+        metadata,
+    })
+}
+
+fn parse_frontmatter(markdown: &str) -> Option<serde_json::Value> {
+    let normalized = markdown
+        .strip_prefix("---\r\n")
+        .or_else(|| markdown.strip_prefix("---\n"))?;
+    let frontmatter_start = markdown.len() - normalized.len();
+    let mut offset = frontmatter_start;
+    for line in normalized.split_inclusive('\n') {
+        let line_text = line.trim_end_matches(['\r', '\n']);
+        if line_text.trim() == "---" {
+            let yaml = &markdown[frontmatter_start..offset];
+            return serde_yaml::from_str::<serde_yaml::Value>(yaml)
+                .ok()
+                .and_then(|value| serde_json::to_value(value).ok());
+        }
+        offset += line.len();
+    }
+    None
+}
+
+fn title_from_path(source_path: &str) -> String {
+    let normalized = source_path.replace('\\', "/");
+    let file_name = normalized.rsplit('/').next().unwrap_or(source_path);
+    Path::new(file_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Imported note")
+        .to_string()
+}
+
+fn decode_utf8(bytes: &[u8]) -> anyhow::Result<String> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| anyhow::anyhow!("file is not valid UTF-8"))
 }
 
 #[cfg(test)]
@@ -260,6 +475,77 @@ mod tests {
         assert!(!memory.recent_events(10).unwrap().is_empty());
     }
 
+    #[tokio::test]
+    async fn imports_markdown_entries_from_multipart() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let app = notebook_router(store, memory.clone());
+        let markdown = "---\ntitle: Imported OPC\ntags:\n  - optics\n  - opc\n---\n# Imported OPC\n\nSee [[Lithography]].\n";
+        let body = multipart_body("BOUNDARY", "opc.md", "text/markdown", markdown.as_bytes());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/notebook/import")
+                    .header("content-type", "multipart/form-data; boundary=BOUNDARY")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(body["entries"][0]["title"], "Imported OPC");
+        assert_eq!(body["skipped"].as_array().unwrap().len(), 0);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/notebook/entries")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response_json(response).await;
+        assert_eq!(body["entries"][0]["tags"][0], "opc");
+        assert_eq!(body["entries"][0]["tags"][1], "optics");
+        assert_eq!(body["entries"][0]["links"][0]["target"], "Lithography");
+        assert!(!memory.recent_events(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_markdown_frontmatter_and_zip_imports() {
+        let markdown = "---\r\ntitle: Process Notes\ntags: lithography opc\r\n---\r\n# Body";
+        let payload = payload_from_markdown("folder/process.md", markdown.into()).unwrap();
+        assert_eq!(payload.title, "Process Notes");
+        assert_eq!(payload.metadata["frontmatter"]["tags"], "lithography opc");
+
+        let mut zip_bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut zip_bytes);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            writer.start_file("notes/a.md", options).unwrap();
+            std::io::Write::write_all(&mut writer, b"# A").unwrap();
+            writer.start_file("assets/image.png", options).unwrap();
+            std::io::Write::write_all(&mut writer, b"not markdown").unwrap();
+            writer.finish().unwrap();
+        }
+        let payloads = import_payloads_from_upload("vault.zip", zip_bytes.get_ref()).unwrap();
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].title, "a");
+        assert_eq!(payloads[0].source_path, "notes/a.md");
+    }
+
     fn json_request(method: Method, uri: &str, value: serde_json::Value) -> Request<Body> {
         Request::builder()
             .method(method)
@@ -272,5 +558,23 @@ mod tests {
     async fn response_json(response: axum::response::Response) -> serde_json::Value {
         let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
+    }
+
+    fn multipart_body(
+        boundary: &str,
+        file_name: &str,
+        content_type: &str,
+        bytes: &[u8],
+    ) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n")
+                .as_bytes(),
+        );
+        body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body
     }
 }
