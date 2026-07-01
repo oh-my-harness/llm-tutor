@@ -299,18 +299,18 @@ retrieval corpus.
 - [x] Add Markdown file import API.
 - [x] Add zip import API.
 - [x] Parse YAML frontmatter.
-- [ ] Add import preview with duplicate/conflict detection.
+- [x] Add import preview with duplicate/conflict detection.
 - [x] Add Notebook UI import action.
 - [x] Add tests for Markdown/frontmatter/link preservation.
 
 ### Phase 3: Export
 
-- [ ] Add single-note Markdown export.
-- [ ] Add selected-notes export.
-- [ ] Add whole-Notebook zip export.
-- [ ] Include frontmatter in exported notes.
-- [ ] Add Notebook UI export action.
-- [ ] Add tests for stable exported filenames and metadata.
+- [x] Add single-note Markdown export.
+- [x] Add selected-notes export.
+- [x] Add whole-Notebook zip export.
+- [x] Include frontmatter in exported notes.
+- [x] Add Notebook UI export action.
+- [x] Add tests for stable exported filenames and metadata.
 
 ### Phase 4: Agent-Assisted Organization
 

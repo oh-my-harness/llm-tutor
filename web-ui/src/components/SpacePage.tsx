@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Download,
   Edit3,
   FileQuestion,
   FileText,
@@ -60,6 +61,26 @@ interface NotebookBacklink {
   snippet: string
 }
 
+interface NotebookImportPreviewItem {
+  source_path: string
+  title: string
+  markdown_chars: number
+  tags: string[]
+  duplicate_title_entry_id?: string | null
+  duplicate_title?: string | null
+}
+
+interface NotebookImportSkipped {
+  file_name: string
+  reason: string
+}
+
+interface NotebookImportPreview {
+  items: NotebookImportPreviewItem[]
+  skipped: NotebookImportSkipped[]
+  conflict_count: number
+}
+
 interface Book {
   id: string
   title: string
@@ -109,6 +130,8 @@ export function SpacePage({
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editMarkdown, setEditMarkdown] = useState('')
+  const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([])
+  const [importPreview, setImportPreview] = useState<NotebookImportPreview | null>(null)
   const [editingMemoryPath, setEditingMemoryPath] = useState<string | null>(null)
   const [memoryDraft, setMemoryDraft] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
@@ -294,11 +317,38 @@ export function SpacePage({
     }
   }
 
-  const importNotebookFiles = async (files: FileList | null) => {
+  const previewNotebookFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const nextFiles = Array.from(files)
     const form = new FormData()
     form.append('space_id', 'default')
-    Array.from(files).forEach((file) => form.append('file', file))
+    nextFiles.forEach((file) => form.append('file', file))
+    setPendingImportFiles(nextFiles)
+    setImportPreview(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/import/preview', {
+        method: 'POST',
+        body: form,
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const preview = data as unknown as NotebookImportPreview
+      setImportPreview(preview)
+      setStatus(`Previewed ${preview.items.length} note${preview.items.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      setPendingImportFiles([])
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const importNotebookFiles = async () => {
+    if (pendingImportFiles.length === 0) return
+    const form = new FormData()
+    form.append('space_id', 'default')
+    pendingImportFiles.forEach((file) => form.append('file', file))
     setLoading(true)
     try {
       const res = await fetch('/api/notebook/import', {
@@ -311,7 +361,51 @@ export function SpacePage({
       await refreshNotebook()
       if (imported[0]?.id) setActiveNotebookId(imported[0].id)
       const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0
+      setPendingImportFiles([])
+      setImportPreview(null)
       setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const cancelNotebookImport = () => {
+    setPendingImportFiles([])
+    setImportPreview(null)
+    setStatus('Import cancelled')
+  }
+
+  const exportNotebookEntry = async (entry: NotebookEntry) => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(entry.id)}/export.md`)
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      const blob = await res.blob()
+      downloadBlob(blob, `${safeDownloadName(entry.title)}.md`)
+      setStatus(`Exported note: ${entry.title}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const exportNotebookZip = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/export.zip?space_id=default')
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      const blob = await res.blob()
+      downloadBlob(blob, 'notebook-export.zip')
+      setStatus('Exported notebook zip')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -548,7 +642,12 @@ export function SpacePage({
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
-            onImportFiles={(files) => void importNotebookFiles(files)}
+            importPreview={importPreview}
+            onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
+            onConfirmImport={() => void importNotebookFiles()}
+            onCancelImport={cancelNotebookImport}
+            onExportEntry={(entry) => void exportNotebookEntry(entry)}
+            onExportAll={() => void exportNotebookZip()}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -609,7 +708,12 @@ function NotebookTab({
   onSaveEntry,
   onSendToBook,
   onCreateLinkedEntry,
-  onImportFiles,
+  importPreview,
+  onPreviewImportFiles,
+  onConfirmImport,
+  onCancelImport,
+  onExportEntry,
+  onExportAll,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
@@ -633,7 +737,12 @@ function NotebookTab({
   onSaveEntry: (entry: NotebookEntry) => void
   onSendToBook: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
-  onImportFiles: (files: FileList | null) => void
+  importPreview: NotebookImportPreview | null
+  onPreviewImportFiles: (files: FileList | null) => void
+  onConfirmImport: () => void
+  onCancelImport: () => void
+  onExportEntry: (entry: NotebookEntry) => void
+  onExportAll: () => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
@@ -671,19 +780,78 @@ function NotebookTab({
             accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
             multiple
             onChange={(event) => {
-              onImportFiles(event.currentTarget.files)
+              onPreviewImportFiles(event.currentTarget.files)
               event.currentTarget.value = ''
             }}
           />
-          <button
-            className={secondaryButtonClassName}
-            type="button"
-            disabled={loading}
-            onClick={() => importInputRef.current?.click()}
-          >
-            <Upload size={16} />
-            Import Markdown / Zip
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className={secondaryButtonClassName}
+              type="button"
+              disabled={loading}
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload size={16} />
+              Import
+            </button>
+            <button
+              className={secondaryButtonClassName}
+              type="button"
+              disabled={loading || entries.length === 0}
+              onClick={onExportAll}
+            >
+              <Download size={16} />
+              Export
+            </button>
+          </div>
+          {importPreview && (
+            <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-3 text-xs shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-gray-900">
+                  Import preview · {importPreview.items.length} note{importPreview.items.length === 1 ? '' : 's'}
+                </span>
+                {importPreview.conflict_count > 0 && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-600">
+                    {importPreview.conflict_count} conflict{importPreview.conflict_count === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                {importPreview.items.map((item) => (
+                  <div key={item.source_path} className="rounded-md bg-gray-50 p-2">
+                    <div className="truncate font-medium text-gray-800">{item.title}</div>
+                    <div className="mt-0.5 truncate text-gray-500">{item.source_path} · {item.markdown_chars} chars</div>
+                    {item.duplicate_title_entry_id && (
+                      <div className="mt-1 text-red-600">Same title as "{item.duplicate_title}"</div>
+                    )}
+                  </div>
+                ))}
+                {importPreview.skipped.map((item) => (
+                  <div key={`${item.file_name}-${item.reason}`} className="rounded-md bg-red-50 p-2 text-red-600">
+                    {item.file_name}: {item.reason}
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="inline-flex h-8 flex-1 items-center justify-center rounded-md bg-blue-600 px-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-200"
+                  type="button"
+                  disabled={loading || importPreview.items.length === 0}
+                  onClick={onConfirmImport}
+                >
+                  Import
+                </button>
+                <button
+                  className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 px-3 font-medium text-gray-600 hover:bg-gray-50"
+                  type="button"
+                  disabled={loading}
+                  onClick={onCancelImport}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           <div className="text-xs text-gray-500">{status}</div>
         </div>
 
@@ -776,6 +944,10 @@ function NotebookTab({
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onSendToBook(activeEntry)}>
                     <Send size={16} />
                     Send to Book
+                  </button>
+                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onExportEntry(activeEntry)}>
+                    <Download size={16} />
+                    Export
                   </button>
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onStartEdit(activeEntry)}>
                     <Edit3 size={16} />
@@ -1445,6 +1617,22 @@ function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function safeDownloadName(value: string) {
+  const name = value.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').trim().replace(/^\.+|\.+$/g, '')
+  return name || 'note'
 }
 
 const secondaryButtonClassName = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3.5 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50'
