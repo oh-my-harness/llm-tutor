@@ -244,6 +244,86 @@ propose_notebook_merge
 `read_space_item` can remain the initial boundary. Add more specific Notebook
 tools only when the generic Space tool becomes awkward.
 
+### Chat-Triggered Organization
+
+Notebook organization should primarily be triggered from Chat, not from a
+separate "AI maintenance" surface inside Notebook.
+
+Supported user intents:
+
+- "帮 @OPC 这篇笔记补一些 wiki links。"
+- "给 @光刻模型 这篇笔记整理标签。"
+- "看看 @OPC 和 @光学邻近校正 是不是重复。"
+- "把这篇笔记改得更适合后续出题。"
+
+The product flow is:
+
+```text
+User asks in Chat
+  -> Agent reads mentioned Notebook entries through read_space_item
+  -> Agent produces a proposal tool result
+  -> Chat renders a review card
+  -> User applies or rejects
+  -> Product updates Notebook through normal Notebook APIs
+  -> Product records a Notebook memory event
+```
+
+The agent must not directly write Notebook content. Even if the user asks the
+agent to "修改这篇笔记", the agent should produce a proposal first. The product
+UI owns the final write after explicit user confirmation.
+
+Proposal types:
+
+- `notebook_edit`: complete Markdown replacement or diff for one entry.
+- `notebook_tags`: suggested tags to add/remove.
+- `notebook_links`: suggested `[[wiki links]]` to add or normalize.
+- `notebook_merge`: suggested canonical note, merged Markdown, and affected
+  source entries.
+
+For the first implementation, all organization proposal types can be serialized
+as a structured proposal plus a complete Markdown replacement. More specialized
+apply APIs can come later if complete Markdown replacement becomes too blunt.
+
+### Notebook Lookup Without Explicit `@`
+
+Users should not always have to `@` a note. If the user asks a question that
+appears to involve saved notes, the agent may search Notebook before answering.
+
+Examples:
+
+- "我之前关于 OPC 记了什么？"
+- "根据我的笔记解释一下光刻胶模型。"
+- "帮我从已有笔记里找一下和 EUV 有关的内容。"
+- "这和我之前研究的张仕林有什么关系？"
+
+This requires a separate Notebook lookup capability from `read_space_item`:
+
+```text
+search_notebook(query, limit, filters?)
+  -> returns candidate entries with id, title, type, tags, snippet, score
+
+read_notebook_note(entry_id)
+  -> returns exact Markdown for a selected candidate
+```
+
+Behavior rules:
+
+- If the user explicitly references an artifact with `@`, use `read_space_item`
+  for that exact artifact.
+- If the user asks about "my notes", "Notebook", "previously saved", or a topic
+  likely stored in Notebook, call `search_notebook` before answering.
+- If search returns one or a few high-confidence candidates, read the relevant
+  note(s) and answer with Notebook citations.
+- If search returns ambiguous candidates, ask the user to choose or present the
+  candidate list before making strong claims.
+- If no candidate is found, say that no relevant Notebook entry was found, then
+  optionally answer from general knowledge only if the user asked for that.
+- For edit/merge requests without `@`, search first, then ask the user to
+  confirm the target notes before creating a proposal.
+
+This keeps Chat natural while avoiding two bad extremes: forcing users to always
+pick notes manually, or letting the agent silently invent Notebook context.
+
 ## 6. Import / Export Architecture
 
 Backend responsibilities:

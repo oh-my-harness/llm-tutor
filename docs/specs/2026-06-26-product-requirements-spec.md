@@ -303,6 +303,16 @@
 - REQ-787: Notebook export shall include stable frontmatter for title, id, type, tags, source metadata, created time, and updated time. Status: planned.
 - REQ-788: Notebook import/export shall be local and portable; exported notes shall remain readable outside this app. Status: planned.
 - REQ-789: Notebook shall support agent-assisted organization proposals such as suggested links, tags, and duplicate-note merges, with explicit user confirmation before writes. Status: planned.
+- REQ-790: Agent-assisted Notebook organization shall be primarily triggered from Chat, not from independent generation buttons inside Notebook. Status: planned.
+- REQ-791: When users ask Chat to organize a mentioned Notebook entry, the agent shall read the exact entry first and then produce a reviewable proposal. Status: planned.
+- REQ-792: Notebook organization proposals shall include enough structure to distinguish complete Markdown edits, tag suggestions, wiki-link suggestions, and duplicate-note merge suggestions. Status: planned.
+- REQ-793: Users shall be able to apply or reject Notebook organization proposals from Chat. Status: planned.
+- REQ-794: If users ask about their notes without explicitly using `@`, the agent may search Notebook for candidate entries before answering. Status: planned.
+- REQ-795: Notebook search for unmentioned questions shall return candidate entry ids, titles, types, tags, snippets, and confidence or ranking metadata. Status: planned.
+- REQ-796: If Notebook search finds high-confidence candidates, the agent shall read the relevant entries before answering and cite the used Notebook entries. Status: planned.
+- REQ-797: If Notebook search is ambiguous, the agent shall ask the user to choose candidate notes or present the candidate list before making strong claims. Status: planned.
+- REQ-798: If users ask to edit, tag, link, or merge Notebook content without `@`, the agent shall search first and ask for target confirmation before creating a write proposal. Status: planned.
+- REQ-799: If Notebook search finds no relevant entries, the agent shall say no relevant Notebook content was found before falling back to general knowledge or other tools. Status: planned.
 
 ## 18. Quiz Bank
 
