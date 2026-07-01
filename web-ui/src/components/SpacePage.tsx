@@ -139,6 +139,7 @@ export function SpacePage({
   const [questionIndex, setQuestionIndex] = useState(0)
   const [status, setStatus] = useState('Ready')
   const [loading, setLoading] = useState(false)
+  const [spaceNavCollapsed, setSpaceNavCollapsed] = useState(false)
 
   const filteredQuizzes = useMemo(
     () => quizzes.filter((quiz) => quizSourceFilter === 'all' || quizSourceType(quiz) === quizSourceFilter),
@@ -588,36 +589,55 @@ export function SpacePage({
 
   return (
     <main className="flex h-full min-h-0 bg-white">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
-        <div className="px-5 py-5">
-          <div className="text-xs font-medium uppercase tracking-wide text-blue-600">Default Space</div>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-950">Learning Space</h1>
-          <p className="mt-2 text-sm leading-6 text-gray-500">
-            Organize notes, quiz records, and learner memory in one workspace.
-          </p>
+      <aside className={`flex shrink-0 flex-col border-r border-gray-200 bg-gray-50 transition-[width] duration-200 ${spaceNavCollapsed ? 'w-16' : 'w-72'}`}>
+        <div className={`${spaceNavCollapsed ? 'px-2 py-4' : 'px-5 py-5'}`}>
+          <div className="flex items-start justify-between gap-3">
+            {!spaceNavCollapsed && (
+              <div className="min-w-0">
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-600">Default Space</div>
+                <h1 className="mt-1 text-2xl font-semibold text-gray-950">Learning Space</h1>
+              </div>
+            )}
+            <button
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-blue-700"
+              type="button"
+              title={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
+              aria-label={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
+              onClick={() => setSpaceNavCollapsed((value) => !value)}
+            >
+              {spaceNavCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            </button>
+          </div>
+          {!spaceNavCollapsed && (
+            <p className="mt-2 text-sm leading-6 text-gray-500">
+              Organize notes, quiz records, and learner memory in one workspace.
+            </p>
+          )}
         </div>
 
-        <nav className="space-y-1 px-3">
+        <nav className={`space-y-1 ${spaceNavCollapsed ? 'px-2' : 'px-3'}`}>
           {tabs.map((tab) => {
             const Icon = tab.icon
             const active = activeTab === tab.key
             return (
               <button
                 key={tab.key}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+                className={`flex w-full items-center rounded-lg py-2.5 text-left text-sm font-medium ${
                   active ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100' : 'text-gray-700 hover:bg-white hover:text-gray-950'
-                }`}
+                } ${spaceNavCollapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}
                 type="button"
+                title={tab.label}
+                aria-label={tab.label}
                 onClick={() => setActiveTab(tab.key)}
               >
                 <Icon size={18} />
-                <span>{tab.label}</span>
+                {!spaceNavCollapsed && <span>{tab.label}</span>}
               </button>
             )
           })}
         </nav>
 
-        <div className="mt-auto border-t border-gray-200 px-5 py-4 text-xs text-gray-500">
+        <div className={`mt-auto border-t border-gray-200 px-5 py-4 text-xs text-gray-500 ${spaceNavCollapsed ? 'hidden' : ''}`}>
           Local-first space. Multi-space management can come later.
         </div>
       </aside>
@@ -1030,6 +1050,7 @@ function NotebookRelationsPanel({
   const links = entry.links ?? []
   const backlinks = entry.backlinks ?? []
   const unresolvedLinks = links.filter((link) => !link.resolved)
+  const [localGraphCollapsed, setLocalGraphCollapsed] = useState(false)
 
   return (
     <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-100 bg-white px-4 py-5 xl:block">
@@ -1038,6 +1059,8 @@ function NotebookRelationsPanel({
           entry={entry}
           links={links}
           backlinks={backlinks}
+          collapsed={localGraphCollapsed}
+          onCollapsedChange={setLocalGraphCollapsed}
           onSelectEntry={onSelectEntry}
           onCreateLinkedEntry={onCreateLinkedEntry}
         />
@@ -1154,12 +1177,16 @@ function NotebookLocalGraph({
   entry,
   links,
   backlinks,
+  collapsed,
+  onCollapsedChange,
   onSelectEntry,
   onCreateLinkedEntry,
 }: {
   entry: NotebookEntry
   links: NotebookLink[]
   backlinks: NotebookBacklink[]
+  collapsed: boolean
+  onCollapsedChange: (collapsed: boolean) => void
   onSelectEntry: (id: string) => void
   onCreateLinkedEntry: (title: string) => void
 }) {
@@ -1169,10 +1196,17 @@ function NotebookLocalGraph({
 
   return (
     <section>
-      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <button
+        className="mb-2 flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 hover:text-blue-700"
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => onCollapsedChange(!collapsed)}
+      >
         <Network size={14} />
-        Local graph
-      </div>
+        <span className="flex-1">Local graph</span>
+        <ChevronRight size={14} className={collapsed ? '' : 'rotate-90'} />
+      </button>
+      {!collapsed && (
       <div className="rounded-xl border border-blue-50 bg-gradient-to-b from-blue-50/70 to-white p-3">
         <div className="flex justify-center">
           <div className="max-w-full truncate rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
@@ -1227,6 +1261,7 @@ function NotebookLocalGraph({
           </div>
         )}
       </div>
+      )}
     </section>
   )
 }
