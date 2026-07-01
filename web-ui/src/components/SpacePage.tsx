@@ -782,15 +782,6 @@ function NotebookTab({
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
         <div className="space-y-3 border-b border-gray-100 p-4">
-          <button
-            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
-            type="button"
-            disabled={loading}
-            onClick={onCreateEntry}
-          >
-            <Plus size={16} />
-            New note
-          </button>
           <input
             ref={importInputRef}
             className="hidden"
@@ -803,9 +794,18 @@ function NotebookTab({
               event.currentTarget.value = ''
             }}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
-              className={secondaryButtonClassName}
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
+              type="button"
+              disabled={loading}
+              onClick={onCreateEntry}
+            >
+              <Plus size={14} />
+              New
+            </button>
+            <button
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
               type="button"
               disabled={loading}
               onClick={() => {
@@ -813,17 +813,17 @@ function NotebookTab({
                 importInputRef.current?.click()
               }}
             >
-              <Upload size={16} />
+              <Upload size={14} />
               Import
             </button>
             <div className="relative">
               <button
-                className={secondaryButtonClassName}
+                className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
                 type="button"
                 disabled={loading || entries.length === 0}
                 onClick={() => setExportMenuOpen((value) => !value)}
               >
-                <Download size={16} />
+                <Download size={14} />
                 Export
               </button>
               {exportMenuOpen && (
