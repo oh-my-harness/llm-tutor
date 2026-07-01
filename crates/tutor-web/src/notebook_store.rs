@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +59,15 @@ pub struct NotebookEntryView {
     pub backlinks: Vec<NotebookBacklink>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotebookEntrySummary {
+    #[serde(flatten)]
+    pub entry: NotebookEntry,
+    pub tags: Vec<String>,
+    pub links: Vec<NotebookLink>,
+    pub backlinks: Vec<NotebookBacklink>,
+}
+
 pub struct NotebookStore {
     path: PathBuf,
     items: Mutex<Vec<NotebookEntry>>,
@@ -108,6 +117,15 @@ impl NotebookStore {
     pub fn list_views(&self, space_id: Option<&str>) -> Vec<NotebookEntryView> {
         let entries = self.list(space_id);
         entry_views(&entries)
+    }
+
+    pub fn list_summaries(&self, space_id: Option<&str>) -> Vec<NotebookEntrySummary> {
+        let entries = self.list(space_id);
+        let all_entries = self.list(None);
+        entries
+            .into_iter()
+            .map(|entry| entry_summary(entry, &all_entries))
+            .collect()
     }
 
     pub fn get_view(&self, id: &str) -> Option<NotebookEntryView> {
@@ -233,6 +251,23 @@ pub fn entry_view(entry: NotebookEntry, entries: &[NotebookEntry]) -> NotebookEn
         tags,
         links,
         backlinks,
+    }
+}
+
+pub fn entry_summary(entry: NotebookEntry, entries: &[NotebookEntry]) -> NotebookEntrySummary {
+    let tags = merge_tags(
+        parse_tags(&entry.markdown),
+        metadata_tags(entry.metadata.as_ref()),
+    );
+    let links = parse_links(&entry.markdown)
+        .into_iter()
+        .map(|link| resolve_link(link, entries))
+        .collect::<Vec<_>>();
+    NotebookEntrySummary {
+        entry,
+        tags,
+        links,
+        backlinks: Vec::new(),
     }
 }
 
@@ -616,11 +651,9 @@ mod tests {
         assert_eq!(target_view.tags, vec!["process", "semiconductor"]);
         assert_eq!(target_view.backlinks.len(), 1);
         assert_eq!(target_view.backlinks[0].source_title, "OPC");
-        assert!(
-            target_view.backlinks[0]
-                .snippet
-                .contains("[[Lithography|litho]]")
-        );
+        assert!(target_view.backlinks[0]
+            .snippet
+            .contains("[[Lithography|litho]]"));
         assert_eq!(source_view.links.len(), 1);
         assert!(source_view.links[0].resolved);
         assert_eq!(source_view.links[0].target_id.as_deref(), Some("target-1"));

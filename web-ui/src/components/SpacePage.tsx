@@ -135,6 +135,7 @@ export function SpacePage({
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
+  const [activeNotebookDetail, setActiveNotebookDetail] = useState<NotebookEntry | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -155,7 +156,10 @@ export function SpacePage({
   )
   const activeQuiz = filteredQuizzes.find((quiz) => quiz.id === activeQuizId) ?? null
   const activeQuestion = activeQuiz?.questions[questionIndex] ?? null
-  const activeNotebookEntry = notebookEntries.find((entry) => entry.id === activeNotebookId) ?? null
+  const activeNotebookEntry =
+    activeNotebookDetail?.id === activeNotebookId
+      ? activeNotebookDetail
+      : notebookEntries.find((entry) => entry.id === activeNotebookId) ?? null
   const profile = useMemo(() => buildProfile(quizzes), [quizzes])
 
   useEffect(() => {
@@ -191,12 +195,26 @@ export function SpacePage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
       setNotebookEntries(entries)
+      setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
       setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
       setStatus(entries.length ? 'Notebook entries loaded' : 'No notebook entries yet')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
+    }
+  }, [])
+
+  const loadNotebookDetail = useCallback(async (entryId: string) => {
+    try {
+      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(entryId)}`)
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const entry = data.entry as NotebookEntry
+      setActiveNotebookDetail(entry)
+      setNotebookEntries((items) => items.map((item) => item.id === entry.id ? { ...item, ...entry } : item))
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
     }
   }, [])
 
@@ -220,6 +238,15 @@ export function SpacePage({
     void refreshNotebook()
     void refreshMemory()
   }, [refreshNotebook, refreshQuizzes, refreshMemory])
+
+  useEffect(() => {
+    if (!activeNotebookId) {
+      setActiveNotebookDetail(null)
+      return
+    }
+    if (activeNotebookDetail?.id === activeNotebookId) return
+    void loadNotebookDetail(activeNotebookId)
+  }, [activeNotebookDetail?.id, activeNotebookId, loadNotebookDetail])
 
   useEffect(() => {
     if (focusTarget?.type === 'quiz' && focusTarget.quizId === activeQuizId) return
@@ -516,6 +543,7 @@ export function SpacePage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const updated = data.entry as NotebookEntry
       setNotebookEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
+      setActiveNotebookDetail(updated)
       setEditingNotebookId(null)
       setStatus('Notebook entry updated')
     } catch (err) {
@@ -821,6 +849,34 @@ function NotebookTab({
   const [relationsCollapsed, setRelationsCollapsed] = useState(false)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const wikiLinkResolver = useCallback((target: string): SourceReference | undefined => {
+    if (!activeEntry) return undefined
+    const normalized = target.trim().toLowerCase()
+    const link = (activeEntry.links ?? []).find((item) => {
+      return item.target.trim().toLowerCase() === normalized
+        || item.target_title?.trim().toLowerCase() === normalized
+        || item.target_id === target
+    })
+    const title = link?.alias || link?.target_title || link?.target || target
+    if (link?.target_id) {
+      return {
+        id: `wiki:${activeEntry.id}:${target}`,
+        label: title,
+        raw: `notebook:${link.target_id}`,
+        surface: 'notebook',
+        title,
+        target: { type: 'notebook', entryId: link.target_id },
+      }
+    }
+    return {
+      id: `wiki:${activeEntry.id}:${target}`,
+      label: title,
+      raw: `notebook:${target}`,
+      surface: 'notebook',
+      title,
+      metadata: { missingReason: 'Create linked notebook entry' },
+    }
+  }, [activeEntry])
   const chooseNotebookFolder = async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
@@ -1136,7 +1192,12 @@ function NotebookTab({
                 />
               ) : (
                 <div className="max-w-4xl rounded-lg border border-gray-200 bg-gray-50 p-5">
-                  <MarkdownMessage text={activeEntry.markdown || ' '} onSourceNavigate={onSourceNavigate} />
+                  <MarkdownMessage
+                    text={activeEntry.markdown || ' '}
+                    onSourceNavigate={onSourceNavigate}
+                    wikiLinkResolver={wikiLinkResolver}
+                    onWikiLinkCreate={onCreateLinkedEntry}
+                  />
                 </div>
               )}
               </div>

@@ -66,7 +66,7 @@ async fn list_entries(
     let space_id = query.space_id.as_deref();
     (
         StatusCode::OK,
-        Json(serde_json::json!({ "entries": state.store.list_views(space_id) })),
+        Json(serde_json::json!({ "entries": state.store.list_summaries(space_id) })),
     )
 }
 

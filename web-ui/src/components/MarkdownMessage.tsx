@@ -12,12 +12,14 @@ import remarkMath from 'remark-math'
 interface Props {
   text: string
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+  wikiLinkResolver?: (target: string) => SourceReference | undefined
+  onWikiLinkCreate?: (target: string) => void
 }
 
-export function MarkdownMessage({ text, onSourceNavigate }: Props) {
+export function MarkdownMessage({ text, onSourceNavigate, wikiLinkResolver, onWikiLinkCreate }: Props) {
   const rawId = useId()
   const sourceListId = `source-refs-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const prepared = prepareMarkdownWithSourceReferences(text, sourceListId)
+  const prepared = prepareMarkdownWithSourceReferences(text, sourceListId, wikiLinkResolver)
   const components: Components = {
     a({ href, children, ...props }) {
       if (href?.startsWith(`#${sourceListId}-item-`)) {
@@ -34,6 +36,23 @@ export function MarkdownMessage({ text, onSourceNavigate }: Props) {
           >
             {label}
           </a>
+        )
+      }
+      if (href?.startsWith('#notebook-wiki-')) {
+        const rawTarget = decodeURIComponent(href.slice('#notebook-wiki-'.length))
+        const reference = wikiLinkResolver?.(rawTarget)
+        return (
+          <button
+            className="inline p-0 text-left font-medium text-blue-700 underline-offset-2 hover:text-blue-800 hover:underline"
+            type="button"
+            onClick={(event) => {
+              event.preventDefault()
+              if (reference?.target) onSourceNavigate?.(reference.target, reference)
+              else onWikiLinkCreate?.(rawTarget)
+            }}
+          >
+            {children}
+          </button>
         )
       }
       return (
@@ -270,15 +289,35 @@ function shortId(value: string) {
   return value.length > 10 ? `${value.slice(0, 8)}...` : value
 }
 
-function prepareMarkdownWithSourceReferences(text: string, sourceListId: string) {
+function prepareMarkdownWithSourceReferences(
+  text: string,
+  sourceListId: string,
+  wikiLinkResolver?: (target: string) => SourceReference | undefined,
+) {
   const withoutMarkers = stripInternalMemoryMarkers(text)
   const { markdown, references } = extractFootnoteReferences(withoutMarkers)
   const labels = new Set(references.map((reference) => reference.label))
-  const linkedMarkdown = markdown.replace(/\[\^([^\]\s]+)\]/g, (match, label: string) => {
+  const sourceLinkedMarkdown = markdown.replace(/\[\^([^\]\s]+)\]/g, (match, label: string) => {
     if (!labels.has(label)) return match
     return `[${label}](#${sourceListId}-item-${safeReferenceId(label)})`
   })
+  const linkedMarkdown = wikiLinkResolver ? linkNotebookWikiLinks(sourceLinkedMarkdown) : sourceLinkedMarkdown
   return { markdown: linkedMarkdown, references }
+}
+
+function linkNotebookWikiLinks(markdown: string) {
+  return markdown.replace(/!?\[\[([^\]]+)\]\]/g, (match, inner: string) => {
+    if (match.startsWith('!')) return match
+    const [rawTarget, rawAlias] = inner.split('|')
+    const target = rawTarget?.trim()
+    if (!target) return match
+    const alias = rawAlias?.trim() || target
+    return `[${escapeMarkdownLinkText(alias)}](#notebook-wiki-${encodeURIComponent(target)})`
+  })
+}
+
+function escapeMarkdownLinkText(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
 }
 
 function stripInternalMemoryMarkers(text: string) {
