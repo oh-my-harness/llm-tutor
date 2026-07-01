@@ -506,8 +506,8 @@ blunt.
 
 ### Phase 5: Graph and Advanced Portability
 
-- [ ] Add local graph for current note.
-- [ ] Add unresolved link review.
+- [x] Add local graph for current note.
+- [x] Add unresolved link review.
 - [ ] Add Obsidian-compatible vault export.
 - [ ] Evaluate file-backed vault mode.
 

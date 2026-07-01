@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   BookMarked,
   CheckCircle2,
   ChevronLeft,
@@ -9,6 +10,7 @@ import {
   FileQuestion,
   FileText,
   Link2,
+  Network,
   NotebookPen,
   Plus,
   RefreshCw,
@@ -997,10 +999,43 @@ function NotebookRelationsPanel({
   const tags = entry.tags ?? []
   const links = entry.links ?? []
   const backlinks = entry.backlinks ?? []
+  const unresolvedLinks = links.filter((link) => !link.resolved)
 
   return (
     <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-100 bg-white px-4 py-5 xl:block">
       <div className="space-y-6">
+        <NotebookLocalGraph
+          entry={entry}
+          links={links}
+          backlinks={backlinks}
+          onSelectEntry={onSelectEntry}
+          onCreateLinkedEntry={onCreateLinkedEntry}
+        />
+
+        <section>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <AlertTriangle size={14} />
+            Unresolved links
+          </div>
+          {unresolvedLinks.length === 0 ? (
+            <div className="text-sm text-gray-400">All outgoing links resolve</div>
+          ) : (
+            <div className="space-y-2">
+              {unresolvedLinks.map((link) => (
+                <button
+                  key={`unresolved-${link.raw}-${link.target}`}
+                  className="w-full rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800 transition hover:bg-amber-100"
+                  type="button"
+                  onClick={() => onCreateLinkedEntry(link.target)}
+                >
+                  <span className="block truncate font-medium">{link.alias || link.target}</span>
+                  <span className="mt-0.5 block truncate text-xs text-amber-700">Create note from {link.raw}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
             <Tags size={14} />
@@ -1082,6 +1117,87 @@ function NotebookRelationsPanel({
         </section>
       </div>
     </aside>
+  )
+}
+
+function NotebookLocalGraph({
+  entry,
+  links,
+  backlinks,
+  onSelectEntry,
+  onCreateLinkedEntry,
+}: {
+  entry: NotebookEntry
+  links: NotebookLink[]
+  backlinks: NotebookBacklink[]
+  onSelectEntry: (id: string) => void
+  onCreateLinkedEntry: (title: string) => void
+}) {
+  const outgoing = links.slice(0, 5)
+  const incoming = backlinks.slice(0, 5)
+  const hasNodes = outgoing.length > 0 || incoming.length > 0
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <Network size={14} />
+        Local graph
+      </div>
+      <div className="rounded-xl border border-blue-50 bg-gradient-to-b from-blue-50/70 to-white p-3">
+        <div className="flex justify-center">
+          <div className="max-w-full truncate rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+            {entry.title}
+          </div>
+        </div>
+        {!hasNodes ? (
+          <div className="mt-3 text-center text-xs text-gray-400">No linked notes yet</div>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Out</div>
+              {outgoing.length === 0 ? (
+                <div className="text-xs text-gray-400">None</div>
+              ) : (
+                outgoing.map((link) => (
+                  <button
+                    key={`graph-out-${link.raw}-${link.target_id ?? link.target}`}
+                    className={`w-full truncate rounded-lg border px-2 py-1.5 text-left text-xs transition ${
+                      link.resolved
+                        ? 'border-blue-100 bg-white text-blue-800 hover:bg-blue-50'
+                        : 'border-dashed border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    }`}
+                    type="button"
+                    onClick={() => {
+                      if (link.target_id) onSelectEntry(link.target_id)
+                      else onCreateLinkedEntry(link.target)
+                    }}
+                  >
+                    {link.alias || link.target_title || link.target}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">In</div>
+              {incoming.length === 0 ? (
+                <div className="text-xs text-gray-400">None</div>
+              ) : (
+                incoming.map((backlink) => (
+                  <button
+                    key={`graph-in-${backlink.source_entry_id}-${backlink.raw}`}
+                    className="w-full truncate rounded-lg border border-gray-100 bg-white px-2 py-1.5 text-left text-xs text-gray-700 transition hover:border-blue-100 hover:bg-blue-50"
+                    type="button"
+                    onClick={() => onSelectEntry(backlink.source_entry_id)}
+                  >
+                    {backlink.source_title}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
