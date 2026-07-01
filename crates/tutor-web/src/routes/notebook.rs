@@ -52,7 +52,7 @@ async fn list_entries(
     let space_id = query.space_id.as_deref();
     (
         StatusCode::OK,
-        Json(serde_json::json!({ "entries": state.store.list(space_id) })),
+        Json(serde_json::json!({ "entries": state.store.list_views(space_id) })),
     )
 }
 
@@ -60,7 +60,7 @@ async fn get_entry(
     State(state): State<NotebookState>,
     Path(entry_id): Path<String>,
 ) -> impl IntoResponse {
-    match state.store.get(&entry_id) {
+    match state.store.get_view(&entry_id) {
         Some(entry) => {
             (StatusCode::OK, Json(serde_json::json!({ "entry": entry }))).into_response()
         }

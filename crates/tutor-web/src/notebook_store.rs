@@ -31,6 +31,34 @@ pub struct NotebookEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NotebookLink {
+    pub raw: String,
+    pub target: String,
+    pub alias: Option<String>,
+    pub target_id: Option<String>,
+    pub target_title: Option<String>,
+    pub resolved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NotebookBacklink {
+    pub source_entry_id: String,
+    pub source_title: String,
+    pub raw: String,
+    pub alias: Option<String>,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotebookEntryView {
+    #[serde(flatten)]
+    pub entry: NotebookEntry,
+    pub tags: Vec<String>,
+    pub links: Vec<NotebookLink>,
+    pub backlinks: Vec<NotebookBacklink>,
+}
+
 pub struct NotebookStore {
     path: PathBuf,
     items: Mutex<Vec<NotebookEntry>>,
@@ -75,6 +103,17 @@ impl NotebookStore {
             .iter()
             .find(|item| item.id == id)
             .cloned()
+    }
+
+    pub fn list_views(&self, space_id: Option<&str>) -> Vec<NotebookEntryView> {
+        let entries = self.list(space_id);
+        entry_views(&entries)
+    }
+
+    pub fn get_view(&self, id: &str) -> Option<NotebookEntryView> {
+        let entries = self.list(None);
+        let entry = entries.iter().find(|item| item.id == id)?.clone();
+        Some(entry_view(entry, &entries))
     }
 
     pub fn create(&self, input: NotebookEntryInput) -> Result<NotebookEntry> {
@@ -144,6 +183,218 @@ impl NotebookStore {
         fs::write(&self.path, serde_json::to_string_pretty(items)?)?;
         Ok(())
     }
+}
+
+pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
+    entries
+        .iter()
+        .cloned()
+        .map(|entry| entry_view(entry, entries))
+        .collect()
+}
+
+pub fn entry_view(entry: NotebookEntry, entries: &[NotebookEntry]) -> NotebookEntryView {
+    let tags = parse_tags(&entry.markdown);
+    let links = parse_links(&entry.markdown)
+        .into_iter()
+        .map(|link| resolve_link(link, entries))
+        .collect::<Vec<_>>();
+    let backlinks = entries
+        .iter()
+        .filter(|source| source.id != entry.id)
+        .flat_map(|source| backlinks_from_source(source, &entry, entries))
+        .collect::<Vec<_>>();
+    NotebookEntryView {
+        entry,
+        tags,
+        links,
+        backlinks,
+    }
+}
+
+pub fn parse_links(markdown: &str) -> Vec<NotebookLink> {
+    let mut links = Vec::new();
+    let mut rest = markdown;
+    while let Some(start) = rest.find("[[") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("]]") else {
+            break;
+        };
+        let raw_inner = after_start[..end].trim();
+        if !raw_inner.is_empty() {
+            let (target, alias) = parse_link_inner(raw_inner);
+            if !target.is_empty() {
+                links.push(NotebookLink {
+                    raw: format!("[[{raw_inner}]]"),
+                    target,
+                    alias,
+                    target_id: None,
+                    target_title: None,
+                    resolved: false,
+                });
+            }
+        }
+        rest = &after_start[end + 2..];
+    }
+    dedupe_links(links)
+}
+
+pub fn parse_tags(markdown: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let chars = markdown.char_indices().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let (byte_index, ch) = chars[index];
+        if ch != '#' || is_escaped_hash(markdown, byte_index) {
+            index += 1;
+            continue;
+        }
+        if byte_index > 0 {
+            let previous = markdown[..byte_index].chars().next_back();
+            if previous.is_some_and(|value| value.is_alphanumeric() || value == '_') {
+                index += 1;
+                continue;
+            }
+        }
+        let mut end = byte_index + ch.len_utf8();
+        let mut next_index = index + 1;
+        while next_index < chars.len() {
+            let (next_byte, next_ch) = chars[next_index];
+            if next_ch.is_alphanumeric() || matches!(next_ch, '_' | '-' | '/') {
+                end = next_byte + next_ch.len_utf8();
+                next_index += 1;
+            } else {
+                break;
+            }
+        }
+        if end > byte_index + 1 {
+            tags.push(markdown[byte_index + 1..end].to_string());
+        }
+        index = next_index.max(index + 1);
+    }
+    tags.sort_by_key(|tag| tag.to_lowercase());
+    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    tags
+}
+
+fn parse_link_inner(raw: &str) -> (String, Option<String>) {
+    let mut parts = raw.splitn(2, '|');
+    let target = parts.next().unwrap_or_default().trim().to_string();
+    let alias = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    (target, alias)
+}
+
+fn resolve_link(mut link: NotebookLink, entries: &[NotebookEntry]) -> NotebookLink {
+    let target_key = normalize_lookup_key(&link.target);
+    let resolved = entries
+        .iter()
+        .find(|entry| entry.id == link.target || normalize_lookup_key(&entry.title) == target_key);
+    if let Some(entry) = resolved {
+        link.target_id = Some(entry.id.clone());
+        link.target_title = Some(entry.title.clone());
+        link.resolved = true;
+    }
+    link
+}
+
+fn backlinks_from_source(
+    source: &NotebookEntry,
+    target: &NotebookEntry,
+    entries: &[NotebookEntry],
+) -> Vec<NotebookBacklink> {
+    parse_links_with_positions(&source.markdown)
+        .into_iter()
+        .filter_map(|(link, start, end)| {
+            let resolved = resolve_link(link, entries);
+            if resolved.target_id.as_deref() != Some(target.id.as_str()) {
+                return None;
+            }
+            Some(NotebookBacklink {
+                source_entry_id: source.id.clone(),
+                source_title: source.title.clone(),
+                raw: resolved.raw,
+                alias: resolved.alias,
+                snippet: snippet_around(&source.markdown, start, end),
+            })
+        })
+        .collect()
+}
+
+fn parse_links_with_positions(markdown: &str) -> Vec<(NotebookLink, usize, usize)> {
+    let mut links = Vec::new();
+    let mut offset = 0usize;
+    let mut rest = markdown;
+    while let Some(start) = rest.find("[[") {
+        let absolute_start = offset + start;
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("]]") else {
+            break;
+        };
+        let absolute_end = absolute_start + 2 + end + 2;
+        let raw_inner = after_start[..end].trim();
+        if !raw_inner.is_empty() {
+            let (target, alias) = parse_link_inner(raw_inner);
+            if !target.is_empty() {
+                links.push((
+                    NotebookLink {
+                        raw: format!("[[{raw_inner}]]"),
+                        target,
+                        alias,
+                        target_id: None,
+                        target_title: None,
+                        resolved: false,
+                    },
+                    absolute_start,
+                    absolute_end,
+                ));
+            }
+        }
+        offset = absolute_end;
+        rest = &markdown[offset..];
+    }
+    links
+}
+
+fn dedupe_links(links: Vec<NotebookLink>) -> Vec<NotebookLink> {
+    let mut deduped = Vec::new();
+    for link in links {
+        let seen = deduped.iter().any(|existing: &NotebookLink| {
+            normalize_lookup_key(&existing.target) == normalize_lookup_key(&link.target)
+                && existing.alias == link.alias
+        });
+        if !seen {
+            deduped.push(link);
+        }
+    }
+    deduped
+}
+
+fn normalize_lookup_key(value: &str) -> String {
+    value.trim().trim_matches('#').trim().to_lowercase()
+}
+
+fn snippet_around(markdown: &str, start: usize, end: usize) -> String {
+    let left = markdown[..start].chars().rev().take(48).collect::<String>();
+    let left = left.chars().rev().collect::<String>();
+    let right = markdown[end..].chars().take(72).collect::<String>();
+    format!("{left}{}{right}", &markdown[start..end])
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_escaped_hash(markdown: &str, byte_index: usize) -> bool {
+    markdown[..byte_index]
+        .chars()
+        .rev()
+        .take_while(|ch| *ch == '\\')
+        .count()
+        % 2
+        == 1
 }
 
 impl Default for NotebookStore {
@@ -236,5 +487,60 @@ mod tests {
         assert_eq!(updated.title, "Updated");
         assert!(store.delete(&entry.id));
         assert!(store.list(Some("default")).is_empty());
+    }
+
+    #[test]
+    fn parses_wiki_links_and_tags() {
+        let links = parse_links("See [[Lithography]] and [[note-1|OPC notes]].");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].target, "Lithography");
+        assert_eq!(links[1].target, "note-1");
+        assert_eq!(links[1].alias.as_deref(), Some("OPC notes"));
+
+        let tags = parse_tags("Study #lithography and #weak-point. Ignore email#a and \\#escaped.");
+        assert_eq!(tags, vec!["lithography", "weak-point"]);
+    }
+
+    #[test]
+    fn entry_view_resolves_links_and_backlinks() {
+        let target = NotebookEntry {
+            id: "target-1".into(),
+            space_id: "default".into(),
+            entry_type: NotebookEntryType::Note,
+            title: "Lithography".into(),
+            markdown: "# Lithography\n\n#process".into(),
+            metadata: None,
+            source_session_id: None,
+            source_message_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let source = NotebookEntry {
+            id: "source-1".into(),
+            space_id: "default".into(),
+            entry_type: NotebookEntryType::Note,
+            title: "OPC".into(),
+            markdown: "OPC is related to [[Lithography|litho]].".into(),
+            metadata: None,
+            source_session_id: None,
+            source_message_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let entries = vec![target.clone(), source.clone()];
+        let target_view = entry_view(target, &entries);
+        let source_view = entry_view(source, &entries);
+
+        assert_eq!(target_view.tags, vec!["process"]);
+        assert_eq!(target_view.backlinks.len(), 1);
+        assert_eq!(target_view.backlinks[0].source_title, "OPC");
+        assert!(
+            target_view.backlinks[0]
+                .snippet
+                .contains("[[Lithography|litho]]")
+        );
+        assert_eq!(source_view.links.len(), 1);
+        assert!(source_view.links[0].resolved);
+        assert_eq!(source_view.links[0].target_id.as_deref(), Some("target-1"));
     }
 }

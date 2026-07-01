@@ -7,11 +7,13 @@ import {
   Edit3,
   FileQuestion,
   FileText,
+  Link2,
   NotebookPen,
   Plus,
   RefreshCw,
   Save,
   Send,
+  Tags,
   Target,
   Trash2,
   UserRound,
@@ -35,6 +37,26 @@ interface NotebookEntry {
   source_message_id?: string | null
   created_at: string
   updated_at: string
+  tags?: string[]
+  links?: NotebookLink[]
+  backlinks?: NotebookBacklink[]
+}
+
+interface NotebookLink {
+  raw: string
+  target: string
+  alias?: string | null
+  target_id?: string | null
+  target_title?: string | null
+  resolved: boolean
+}
+
+interface NotebookBacklink {
+  source_entry_id: string
+  source_title: string
+  raw: string
+  alias?: string | null
+  snippet: string
 }
 
 interface Book {
@@ -599,6 +621,15 @@ function NotebookTab({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium text-gray-900">{entry.title}</span>
                     <span className="mt-0.5 block text-xs text-gray-500">{entry.entry_type.replaceAll('_', ' ')}</span>
+                    {entry.tags && entry.tags.length > 0 && (
+                      <span className="mt-2 flex flex-wrap gap-1">
+                        {entry.tags.slice(0, 3).map((tag) => (
+                          <span key={tag} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
+                            #{tag}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </span>
                   <span
                     role="button"
@@ -669,7 +700,8 @@ function NotebookTab({
                 </div>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto px-8 py-6">
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
               {isEditing ? (
                 <textarea
                   className={`${inputClassName} min-h-[520px] max-w-4xl resize-y font-mono leading-6`}
@@ -681,11 +713,111 @@ function NotebookTab({
                   <MarkdownMessage text={activeEntry.markdown || ' '} onSourceNavigate={onSourceNavigate} />
                 </div>
               )}
+              </div>
+              {!isEditing && (
+                <NotebookRelationsPanel
+                  entry={activeEntry}
+                  onSelectEntry={onSelectEntry}
+                />
+              )}
             </div>
           </>
         )}
       </div>
     </div>
+  )
+}
+
+function NotebookRelationsPanel({
+  entry,
+  onSelectEntry,
+}: {
+  entry: NotebookEntry
+  onSelectEntry: (id: string) => void
+}) {
+  const tags = entry.tags ?? []
+  const links = entry.links ?? []
+  const backlinks = entry.backlinks ?? []
+
+  return (
+    <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-100 bg-white px-4 py-5 xl:block">
+      <div className="space-y-6">
+        <section>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <Tags size={14} />
+            Tags
+          </div>
+          {tags.length === 0 ? (
+            <div className="text-sm text-gray-400">No tags yet</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {tags.map((tag) => (
+                <span key={tag} className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <Link2 size={14} />
+            Links
+          </div>
+          {links.length === 0 ? (
+            <div className="text-sm text-gray-400">No outgoing links</div>
+          ) : (
+            <div className="space-y-2">
+              {links.map((link) => (
+                <button
+                  key={`${link.raw}-${link.target_id ?? link.target}`}
+                  className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
+                    link.resolved
+                      ? 'border-blue-100 bg-blue-50/60 text-blue-800 hover:bg-blue-100'
+                      : 'border-dashed border-gray-200 bg-gray-50 text-gray-500'
+                  }`}
+                  type="button"
+                  disabled={!link.target_id}
+                  onClick={() => link.target_id && onSelectEntry(link.target_id)}
+                >
+                  <span className="block truncate font-medium">
+                    {link.alias || link.target_title || link.target}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs opacity-75">
+                    {link.resolved ? 'resolved note' : 'unresolved link'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <NotebookPen size={14} />
+            Backlinks
+          </div>
+          {backlinks.length === 0 ? (
+            <div className="text-sm text-gray-400">No backlinks yet</div>
+          ) : (
+            <div className="space-y-2">
+              {backlinks.map((backlink) => (
+                <button
+                  key={`${backlink.source_entry_id}-${backlink.raw}`}
+                  className="w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 transition hover:border-blue-100 hover:bg-blue-50"
+                  type="button"
+                  onClick={() => onSelectEntry(backlink.source_entry_id)}
+                >
+                  <span className="block truncate font-medium text-gray-900">{backlink.source_title}</span>
+                  <span className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{backlink.snippet}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </aside>
   )
 }
 
