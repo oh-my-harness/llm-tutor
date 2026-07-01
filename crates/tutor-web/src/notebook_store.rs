@@ -194,7 +194,10 @@ pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
 }
 
 pub fn entry_view(entry: NotebookEntry, entries: &[NotebookEntry]) -> NotebookEntryView {
-    let tags = parse_tags(&entry.markdown);
+    let tags = merge_tags(
+        parse_tags(&entry.markdown),
+        metadata_tags(entry.metadata.as_ref()),
+    );
     let links = parse_links(&entry.markdown)
         .into_iter()
         .map(|link| resolve_link(link, entries))
@@ -272,6 +275,55 @@ pub fn parse_tags(markdown: &str) -> Vec<String> {
         }
         index = next_index.max(index + 1);
     }
+    normalize_tags(tags)
+}
+
+pub fn metadata_tags(metadata: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(metadata) = metadata else {
+        return Vec::new();
+    };
+    let mut tags = Vec::new();
+    if let Some(value) = metadata.get("tags") {
+        collect_metadata_tags(value, &mut tags);
+    }
+    if let Some(value) = metadata.get("tag") {
+        collect_metadata_tags(value, &mut tags);
+    }
+    normalize_tags(tags)
+}
+
+fn collect_metadata_tags(value: &serde_json::Value, tags: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(tag) => {
+            tags.extend(split_tag_string(tag));
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_metadata_tags(item, tags);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn split_tag_string(value: &str) -> Vec<String> {
+    value
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(|tag| tag.trim().trim_start_matches('#').trim())
+        .filter(|tag| !tag.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn merge_tags(markdown_tags: Vec<String>, metadata_tags: Vec<String>) -> Vec<String> {
+    normalize_tags(markdown_tags.into_iter().chain(metadata_tags).collect())
+}
+
+fn normalize_tags(mut tags: Vec<String>) -> Vec<String> {
+    for tag in &mut tags {
+        *tag = tag.trim().trim_start_matches('#').trim().to_string();
+    }
+    tags.retain(|tag| !tag.is_empty());
     tags.sort_by_key(|tag| tag.to_lowercase());
     tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     tags
@@ -499,6 +551,15 @@ mod tests {
 
         let tags = parse_tags("Study #lithography and #weak-point. Ignore email#a and \\#escaped.");
         assert_eq!(tags, vec!["lithography", "weak-point"]);
+
+        let metadata = serde_json::json!({
+            "tags": ["#lithography", "opc weak-point"],
+            "tag": "research",
+        });
+        assert_eq!(
+            metadata_tags(Some(&metadata)),
+            vec!["lithography", "opc", "research", "weak-point"]
+        );
     }
 
     #[test]
@@ -509,7 +570,7 @@ mod tests {
             entry_type: NotebookEntryType::Note,
             title: "Lithography".into(),
             markdown: "# Lithography\n\n#process".into(),
-            metadata: None,
+            metadata: Some(serde_json::json!({ "tags": ["#semiconductor", "process"] })),
             source_session_id: None,
             source_message_id: None,
             created_at: Utc::now(),
@@ -531,7 +592,7 @@ mod tests {
         let target_view = entry_view(target, &entries);
         let source_view = entry_view(source, &entries);
 
-        assert_eq!(target_view.tags, vec!["process"]);
+        assert_eq!(target_view.tags, vec!["process", "semiconductor"]);
         assert_eq!(target_view.backlinks.len(), 1);
         assert_eq!(target_view.backlinks[0].source_title, "OPC");
         assert!(

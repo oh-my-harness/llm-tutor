@@ -289,10 +289,10 @@ retrieval corpus.
 - [x] Parse `[[wiki links]]` from Notebook Markdown.
 - [x] Parse tags from Markdown.
 - [x] Add derived link/tag/backlink view helpers without changing durable Notebook storage.
-- [x] Add backend tests for link parsing, tag parsing, link resolution, and backlinks.
+- [x] Add backend tests for link parsing, tag parsing, metadata tag merge, link resolution, and backlinks.
 - [x] Show outgoing links and backlinks in note detail.
-- [ ] Add unresolved-link click-to-create flow.
-- [ ] Parse tags from note metadata and merge them with Markdown tags.
+- [x] Add unresolved-link click-to-create flow.
+- [x] Parse tags from note metadata and merge them with Markdown tags.
 
 ### Phase 2: Import
 

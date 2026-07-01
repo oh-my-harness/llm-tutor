@@ -262,6 +262,37 @@ export function SpacePage({
     }
   }
 
+  const createNotebookEntryFromLink = async (title: string) => {
+    const cleanTitle = title.trim() || 'Untitled note'
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          space_id: 'default',
+          entry_type: 'note',
+          title: cleanTitle,
+          markdown: `# ${cleanTitle}\n\n`,
+          metadata: {
+            created_from_unresolved_link: true,
+          },
+        }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const entry = data.entry as NotebookEntry
+      setNotebookEntries((items) => [entry, ...items.filter((item) => item.id !== entry.id)])
+      setActiveNotebookId(entry.id)
+      setStatus(`Created linked note: ${entry.title}`)
+      startEditNotebookEntry(entry)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const deleteNotebookEntry = async (entry: NotebookEntry) => {
     if (!window.confirm(`Delete "${entry.title}"?`)) return
     const previous = notebookEntries
@@ -490,6 +521,7 @@ export function SpacePage({
             onEditMarkdownChange={setEditMarkdown}
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
+            onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -549,6 +581,7 @@ function NotebookTab({
   onEditMarkdownChange,
   onSaveEntry,
   onSendToBook,
+  onCreateLinkedEntry,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
@@ -571,6 +604,7 @@ function NotebookTab({
   onEditMarkdownChange: (value: string) => void
   onSaveEntry: (entry: NotebookEntry) => void
   onSendToBook: (entry: NotebookEntry) => void
+  onCreateLinkedEntry: (title: string) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
@@ -718,6 +752,7 @@ function NotebookTab({
                 <NotebookRelationsPanel
                   entry={activeEntry}
                   onSelectEntry={onSelectEntry}
+                  onCreateLinkedEntry={onCreateLinkedEntry}
                 />
               )}
             </div>
@@ -731,9 +766,11 @@ function NotebookTab({
 function NotebookRelationsPanel({
   entry,
   onSelectEntry,
+  onCreateLinkedEntry,
 }: {
   entry: NotebookEntry
   onSelectEntry: (id: string) => void
+  onCreateLinkedEntry: (title: string) => void
 }) {
   const tags = entry.tags ?? []
   const links = entry.links ?? []
@@ -775,17 +812,22 @@ function NotebookRelationsPanel({
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
                     link.resolved
                       ? 'border-blue-100 bg-blue-50/60 text-blue-800 hover:bg-blue-100'
-                      : 'border-dashed border-gray-200 bg-gray-50 text-gray-500'
+                      : 'border-dashed border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-100'
                   }`}
                   type="button"
-                  disabled={!link.target_id}
-                  onClick={() => link.target_id && onSelectEntry(link.target_id)}
+                  onClick={() => {
+                    if (link.target_id) {
+                      onSelectEntry(link.target_id)
+                    } else {
+                      onCreateLinkedEntry(link.target)
+                    }
+                  }}
                 >
                   <span className="block truncate font-medium">
                     {link.alias || link.target_title || link.target}
                   </span>
                   <span className="mt-0.5 block truncate text-xs opacity-75">
-                    {link.resolved ? 'resolved note' : 'unresolved link'}
+                    {link.resolved ? 'resolved note' : 'create note'}
                   </span>
                 </button>
               ))}
