@@ -87,6 +87,11 @@ interface NotebookImportPreview {
   conflict_count: number
 }
 
+interface NotebookImportResult {
+  imported_count: number
+  skipped: NotebookImportSkipped[]
+}
+
 interface Book {
   id: string
   title: string
@@ -136,6 +141,7 @@ export function SpacePage({
   const [editMarkdown, setEditMarkdown] = useState('')
   const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([])
   const [importPreview, setImportPreview] = useState<NotebookImportPreview | null>(null)
+  const [importResult, setImportResult] = useState<NotebookImportResult | null>(null)
   const [editingMemoryPath, setEditingMemoryPath] = useState<string | null>(null)
   const [memoryDraft, setMemoryDraft] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
@@ -325,6 +331,7 @@ export function SpacePage({
     nextFiles.forEach((file) => form.append('file', file))
     setPendingImportFiles(nextFiles)
     setImportPreview(null)
+    setImportResult(null)
     setLoading(true)
     try {
       const res = await fetch('/api/notebook/import/preview', {
@@ -360,7 +367,9 @@ export function SpacePage({
       const imported = (data.entries ?? []) as NotebookEntry[]
       await refreshNotebook()
       if (imported[0]?.id) setActiveNotebookId(imported[0].id)
-      const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0
+      const skippedItems = Array.isArray(data.skipped) ? data.skipped as NotebookImportSkipped[] : []
+      const skipped = skippedItems.length
+      setImportResult({ imported_count: imported.length, skipped: skippedItems })
       setPendingImportFiles([])
       setImportPreview(null)
       setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`)
@@ -371,9 +380,37 @@ export function SpacePage({
     }
   }
 
+  const importNotebookFolder = async (folderPath: string) => {
+    if (!folderPath.trim()) return
+    setPendingImportFiles([])
+    setImportPreview(null)
+    setImportResult(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/import/folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ space_id: 'default', path: folderPath }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const imported = (data.entries ?? []) as NotebookEntry[]
+      await refreshNotebook()
+      if (imported[0]?.id) setActiveNotebookId(imported[0].id)
+      const skippedItems = Array.isArray(data.skipped) ? data.skipped as NotebookImportSkipped[] : []
+      setImportResult({ imported_count: imported.length, skipped: skippedItems })
+      setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'} from folder${skippedItems.length ? `, skipped ${skippedItems.length}` : ''}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const cancelNotebookImport = () => {
     setPendingImportFiles([])
     setImportPreview(null)
+    setImportResult(null)
     setStatus('Import cancelled')
   }
 
@@ -676,7 +713,9 @@ export function SpacePage({
             onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
             importPreview={importPreview}
+            importResult={importResult}
             onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
+            onImportFolder={(folderPath) => void importNotebookFolder(folderPath)}
             onConfirmImport={() => void importNotebookFiles()}
             onCancelImport={cancelNotebookImport}
             onExportEntry={(entry) => void exportNotebookEntry(entry)}
@@ -739,7 +778,9 @@ function NotebookTab({
   onSendToBook,
   onCreateLinkedEntry,
   importPreview,
+  importResult,
   onPreviewImportFiles,
+  onImportFolder,
   onConfirmImport,
   onCancelImport,
   onExportEntry,
@@ -765,7 +806,9 @@ function NotebookTab({
   onSendToBook: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
   importPreview: NotebookImportPreview | null
+  importResult: NotebookImportResult | null
   onPreviewImportFiles: (files: FileList | null) => void
+  onImportFolder: (folderPath: string) => void
   onConfirmImport: () => void
   onCancelImport: () => void
   onExportEntry: (entry: NotebookEntry) => void
@@ -776,7 +819,23 @@ function NotebookTab({
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const [relationsCollapsed, setRelationsCollapsed] = useState(false)
+  const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const chooseNotebookFolder = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Import Obsidian Vault folder',
+      })
+      if (typeof selected === 'string') {
+        onImportFolder(selected)
+      }
+    } catch {
+      window.alert('Folder import is available in the Tauri desktop app. In the web app, zip the vault folder and import the zip file.')
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -789,6 +848,7 @@ function NotebookTab({
             accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
             multiple
             onChange={(event) => {
+              setImportMenuOpen(false)
               setExportMenuOpen(false)
               onPreviewImportFiles(event.currentTarget.files)
               event.currentTarget.value = ''
@@ -804,24 +864,63 @@ function NotebookTab({
               <Plus size={14} />
               New
             </button>
-            <button
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setExportMenuOpen(false)
-                importInputRef.current?.click()
-              }}
-            >
-              <Upload size={14} />
-              Import
-            </button>
+            <div className="relative">
+              <button
+                className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setExportMenuOpen(false)
+                  setImportMenuOpen((value) => !value)
+                }}
+              >
+                <Upload size={14} />
+                Import
+              </button>
+              {importMenuOpen && (
+                <div className="absolute left-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 text-sm shadow-lg shadow-gray-950/10">
+                  <button
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
+                    type="button"
+                    onClick={() => {
+                      setImportMenuOpen(false)
+                      setExportMenuOpen(false)
+                      importInputRef.current?.click()
+                    }}
+                  >
+                    <Upload size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                    <span>
+                      <span className="block font-medium text-gray-900">Files or zip</span>
+                      <span className="block text-xs text-gray-500">Markdown files or zipped vault</span>
+                    </span>
+                  </button>
+                  <button
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
+                    type="button"
+                    onClick={() => {
+                      setImportMenuOpen(false)
+                      setExportMenuOpen(false)
+                      void chooseNotebookFolder()
+                    }}
+                  >
+                    <BookMarked size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                    <span>
+                      <span className="block font-medium text-gray-900">Vault folder</span>
+                      <span className="block text-xs text-gray-500">Desktop only, recursive Markdown import</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="relative">
               <button
                 className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
                 type="button"
                 disabled={loading || entries.length === 0}
-                onClick={() => setExportMenuOpen((value) => !value)}
+                onClick={() => {
+                  setImportMenuOpen(false)
+                  setExportMenuOpen((value) => !value)
+                }}
               >
                 <Download size={14} />
                 Export
@@ -905,6 +1004,21 @@ function NotebookTab({
                 >
                   Cancel
                 </button>
+              </div>
+            </div>
+          )}
+          {importResult && importResult.skipped.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <div className="font-medium">
+                Imported {importResult.imported_count} note{importResult.imported_count === 1 ? '' : 's'}, skipped {importResult.skipped.length}
+              </div>
+              <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
+                {importResult.skipped.map((item, index) => (
+                  <div key={`${item.file_name}-${item.reason}-${index}`} className="rounded-md bg-white/70 px-2 py-1.5">
+                    <div className="truncate font-medium">{item.file_name}</div>
+                    <div className="mt-0.5 text-amber-700">{item.reason}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

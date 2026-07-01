@@ -112,6 +112,13 @@ Import behavior:
 - Store unknown frontmatter fields in metadata.
 - Detect duplicate titles and either keep both with suffixes or ask the user before merge.
 - Record import source metadata.
+- Show skipped-file details after the final import, including file path and reason.
+- Batch-create imported entries so a large import writes the Notebook store once
+  instead of once per note.
+- In the desktop app, support native folder import for Obsidian Vaults by
+  recursively reading Markdown files from the selected directory.
+- Detect Obsidian attachments or embedded asset references that are not imported
+  yet and report that limitation clearly in the import result.
 
 Later import formats:
 
@@ -421,17 +428,26 @@ Backend responsibilities:
 
 - parse uploaded Markdown files or zip bundles,
 - extract frontmatter,
-- create or update Notebook entries,
+- create or update Notebook entries in batches,
 - rebuild link/tag index,
 - generate Markdown or zip exports.
+- report skipped Markdown files and skipped/non-imported Obsidian assets with
+  concrete reasons.
 
 Frontend responsibilities:
 
 - file/folder/zip picker,
 - import preview,
+- final import result with imported and skipped details,
 - conflict resolution UI,
 - export scope selection,
 - download generated archive.
+
+Desktop responsibilities:
+
+- native folder picker for Obsidian Vault import,
+- recursive Markdown discovery under the selected folder,
+- preserve relative source paths from the selected vault root.
 
 Safety rules:
 
@@ -476,6 +492,10 @@ retrieval.
 - [x] Add import preview with duplicate/conflict detection.
 - [x] Add Notebook UI import action.
 - [x] Add tests for Markdown/frontmatter/link preservation.
+- [x] Show skipped-file details in the final import result UI.
+- [x] Add batch Notebook entry creation so import persists once per operation.
+- [x] Add desktop native folder import for Obsidian Vault directories.
+- [x] Report unsupported Obsidian attachments/assets during import.
 
 ### Phase 3: Export
 

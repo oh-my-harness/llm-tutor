@@ -120,23 +120,29 @@ impl NotebookStore {
         if input.markdown.trim().is_empty() {
             return Err(anyhow!("notebook markdown is empty"));
         }
-        let now = Utc::now();
-        let entry = NotebookEntry {
-            id: uuid::Uuid::new_v4().to_string(),
-            space_id: normalize_space_id(input.space_id),
-            entry_type: input.entry_type,
-            title: normalize_title(&input.title),
-            markdown: input.markdown,
-            metadata: input.metadata,
-            source_session_id: clean_optional(input.source_session_id),
-            source_message_id: clean_optional(input.source_message_id),
-            created_at: now,
-            updated_at: now,
-        };
+        let entry = entry_from_input(input, Utc::now());
         let mut items = self.items.lock().unwrap();
         items.push(entry.clone());
         self.save_locked(&items)?;
         Ok(entry)
+    }
+
+    pub fn create_many(&self, inputs: Vec<NotebookEntryInput>) -> Result<Vec<NotebookEntry>> {
+        let now = Utc::now();
+        let mut entries = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            if input.markdown.trim().is_empty() {
+                return Err(anyhow!("notebook markdown is empty"));
+            }
+            entries.push(entry_from_input(input, now));
+        }
+        if entries.is_empty() {
+            return Ok(entries);
+        }
+        let mut items = self.items.lock().unwrap();
+        items.extend(entries.iter().cloned());
+        self.save_locked(&items)?;
+        Ok(entries)
     }
 
     pub fn update(&self, id: &str, input: NotebookEntryUpdate) -> Result<NotebookEntry> {
@@ -182,6 +188,21 @@ impl NotebookStore {
     fn save_locked(&self, items: &[NotebookEntry]) -> Result<()> {
         fs::write(&self.path, serde_json::to_string_pretty(items)?)?;
         Ok(())
+    }
+}
+
+fn entry_from_input(input: NotebookEntryInput, now: DateTime<Utc>) -> NotebookEntry {
+    NotebookEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        space_id: normalize_space_id(input.space_id),
+        entry_type: input.entry_type,
+        title: normalize_title(&input.title),
+        markdown: input.markdown,
+        metadata: input.metadata,
+        source_session_id: clean_optional(input.source_session_id),
+        source_message_id: clean_optional(input.source_message_id),
+        created_at: now,
+        updated_at: now,
     }
 }
 

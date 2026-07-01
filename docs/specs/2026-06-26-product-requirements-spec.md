@@ -322,6 +322,10 @@
 - REQ-806: Chat shall add an Organize mode for Notebook and Space organization workflows. Status: planned.
 - REQ-807: Organize mode shall enable Notebook search/read and proposal-first organization tools by default. Status: planned.
 - REQ-808: Code execution shall be treated as a tool available to suitable modes rather than a standalone user-facing Chat mode. Status: planned.
+- REQ-809: Notebook import shall show skipped-file details after the final import, not only during preview. Each skipped item shall include the original file name or zip path and a human-readable reason. Status: implemented.
+- REQ-810: Notebook zip or folder import shall create entries in a batch and persist the Notebook store once per import operation rather than rewriting the full store after each entry. Status: implemented.
+- REQ-811: The desktop app shall support importing an Obsidian Vault by selecting a local folder through a native directory picker and recursively reading `.md` and `.markdown` files. Status: implemented.
+- REQ-812: Notebook import shall explicitly report Obsidian attachments and embedded assets that are not imported yet, including images and other non-Markdown files referenced by Markdown. Status: implemented.
 
 ## 18. Quiz Bank
 

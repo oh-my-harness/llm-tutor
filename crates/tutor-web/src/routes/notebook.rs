@@ -1,5 +1,5 @@
 use std::io::{Cursor, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{
@@ -51,6 +51,12 @@ struct UpdateNotebookEntryRequest {
     metadata: Option<serde_json::Value>,
     source_session_id: Option<String>,
     source_message_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ImportFolderRequest {
+    space_id: Option<String>,
+    path: String,
 }
 
 async fn list_entries(
@@ -181,30 +187,70 @@ async fn import_entries(
         Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
     };
 
+    import_parsed_entries(state, import)
+}
+
+async fn import_folder(
+    State(state): State<NotebookState>,
+    Json(req): Json<ImportFolderRequest>,
+) -> impl IntoResponse {
+    let root = PathBuf::from(req.path);
+    let import = match import_payloads_from_folder(&root) {
+        Ok(upload) => ParsedImport {
+            space_id: req.space_id,
+            payloads: upload.payloads,
+            skipped: upload.skipped,
+        },
+        Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    };
+
+    import_parsed_entries(state, import)
+}
+
+fn import_parsed_entries(state: NotebookState, import: ParsedImport) -> axum::response::Response {
     if import.payloads.is_empty() && import.skipped.is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "missing file field".into());
     }
 
-    let mut imported = Vec::new();
     let mut skipped = import.skipped;
-
-    for payload in import.payloads {
-        match state.store.create(NotebookEntryInput {
-            space_id: import.space_id.clone(),
-            entry_type: NotebookEntryType::Note,
-            title: payload.title,
-            markdown: payload.markdown,
-            metadata: Some(payload.metadata),
-            source_session_id: None,
-            source_message_id: None,
-        }) {
-            Ok(entry) => imported.push(entry),
-            Err(err) => skipped.push(ImportSkipped {
-                file_name: payload.source_path,
-                reason: err.to_string(),
-            }),
+    let inputs = import
+        .payloads
+        .into_iter()
+        .map(|payload| {
+            (
+                payload.source_path,
+                NotebookEntryInput {
+                    space_id: import.space_id.clone(),
+                    entry_type: NotebookEntryType::Note,
+                    title: payload.title,
+                    markdown: payload.markdown,
+                    metadata: Some(payload.metadata),
+                    source_session_id: None,
+                    source_message_id: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let source_paths = inputs
+        .iter()
+        .map(|(source_path, _)| source_path.clone())
+        .collect::<Vec<_>>();
+    let imported = match state
+        .store
+        .create_many(inputs.into_iter().map(|(_, input)| input).collect())
+    {
+        Ok(entries) => entries,
+        Err(err) => {
+            let reason = err.to_string();
+            for file_name in source_paths {
+                skipped.push(ImportSkipped {
+                    file_name,
+                    reason: reason.clone(),
+                });
+            }
+            Vec::new()
         }
-    }
+    };
 
     if imported.is_empty() && skipped.is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "missing file field".into());
@@ -364,6 +410,10 @@ pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> R
             axum::routing::post(preview_import_entries),
         )
         .route("/api/notebook/import", axum::routing::post(import_entries))
+        .route(
+            "/api/notebook/import/folder",
+            axum::routing::post(import_folder),
+        )
         .with_state(state)
 }
 
@@ -382,6 +432,12 @@ struct ImportPayload {
 #[derive(Debug)]
 struct ParsedImport {
     space_id: Option<String>,
+    payloads: Vec<ImportPayload>,
+    skipped: Vec<ImportSkipped>,
+}
+
+#[derive(Debug)]
+struct ParsedUpload {
     payloads: Vec<ImportPayload>,
     skipped: Vec<ImportSkipped>,
 }
@@ -423,11 +479,16 @@ async fn parse_import_multipart(multipart: &mut Multipart) -> anyhow::Result<Par
                 let file_name = field.file_name().unwrap_or("notebook.md").to_string();
                 let bytes = field.bytes().await?;
                 match import_payloads_from_upload(&file_name, bytes.as_ref()) {
-                    Ok(items) if items.is_empty() => skipped.push(ImportSkipped {
-                        file_name,
-                        reason: "no markdown files found".into(),
-                    }),
-                    Ok(items) => payloads.extend(items),
+                    Ok(upload) if upload.payloads.is_empty() && upload.skipped.is_empty() => {
+                        skipped.push(ImportSkipped {
+                            file_name,
+                            reason: "no markdown files found".into(),
+                        })
+                    }
+                    Ok(upload) => {
+                        payloads.extend(upload.payloads);
+                        skipped.extend(upload.skipped);
+                    }
                     Err(err) => skipped.push(ImportSkipped {
                         file_name,
                         reason: err.to_string(),
@@ -445,10 +506,7 @@ async fn parse_import_multipart(multipart: &mut Multipart) -> anyhow::Result<Par
     })
 }
 
-fn import_payloads_from_upload(
-    file_name: &str,
-    bytes: &[u8],
-) -> anyhow::Result<Vec<ImportPayload>> {
+fn import_payloads_from_upload(file_name: &str, bytes: &[u8]) -> anyhow::Result<ParsedUpload> {
     if file_name.to_lowercase().ends_with(".zip") {
         return import_payloads_from_zip(file_name, bytes);
     }
@@ -458,13 +516,18 @@ fn import_payloads_from_upload(
         anyhow::bail!("unsupported notebook import file type");
     }
     let markdown = decode_utf8(bytes)?;
-    Ok(vec![payload_from_markdown(file_name, markdown)?])
+    let skipped = skipped_asset_references(file_name, &markdown);
+    Ok(ParsedUpload {
+        payloads: vec![payload_from_markdown(file_name, markdown)?],
+        skipped,
+    })
 }
 
-fn import_payloads_from_zip(file_name: &str, bytes: &[u8]) -> anyhow::Result<Vec<ImportPayload>> {
+fn import_payloads_from_zip(file_name: &str, bytes: &[u8]) -> anyhow::Result<ParsedUpload> {
     let reader = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader)?;
     let mut payloads = Vec::new();
+    let mut skipped = Vec::new();
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
         if file.is_dir() {
@@ -472,18 +535,92 @@ fn import_payloads_from_zip(file_name: &str, bytes: &[u8]) -> anyhow::Result<Vec
         }
         let name = file.name().replace('\\', "/");
         if !name.to_lowercase().ends_with(".md") && !name.to_lowercase().ends_with(".markdown") {
+            if should_report_unsupported_asset(&name) {
+                skipped.push(ImportSkipped {
+                    file_name: name,
+                    reason: "Obsidian attachment/assets are not imported yet".into(),
+                });
+            }
             continue;
         }
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         let markdown = decode_utf8(&bytes)?;
+        skipped.extend(skipped_asset_references(&name, &markdown));
         payloads.push(payload_from_markdown(&name, markdown)?);
     }
     payloads.sort_by(|a, b| a.source_path.cmp(&b.source_path));
     if payloads.is_empty() {
         anyhow::bail!("{file_name} contains no markdown files");
     }
-    Ok(payloads)
+    skipped.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    skipped.dedup_by(|a, b| a.file_name == b.file_name && a.reason == b.reason);
+    Ok(ParsedUpload { payloads, skipped })
+}
+
+fn import_payloads_from_folder(root: &Path) -> anyhow::Result<ParsedUpload> {
+    if !root.is_dir() {
+        anyhow::bail!("notebook import folder does not exist or is not a directory");
+    }
+    let mut payloads = Vec::new();
+    let mut skipped = Vec::new();
+    collect_folder_import(root, root, &mut payloads, &mut skipped)?;
+    payloads.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    skipped.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    skipped.dedup_by(|a, b| a.file_name == b.file_name && a.reason == b.reason);
+    if payloads.is_empty() {
+        anyhow::bail!("folder contains no markdown files");
+    }
+    Ok(ParsedUpload { payloads, skipped })
+}
+
+fn collect_folder_import(
+    root: &Path,
+    dir: &Path,
+    payloads: &mut Vec<ImportPayload>,
+    skipped: &mut Vec<ImportSkipped>,
+) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_folder_import(root, &path, payloads, skipped)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let source_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let lower = source_path.to_lowercase();
+        if !lower.ends_with(".md") && !lower.ends_with(".markdown") {
+            if should_report_unsupported_asset(&source_path) {
+                skipped.push(ImportSkipped {
+                    file_name: source_path,
+                    reason: "Obsidian attachment/assets are not imported yet".into(),
+                });
+            }
+            continue;
+        }
+        match std::fs::read(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| decode_utf8(&bytes))
+            .and_then(|markdown| {
+                skipped.extend(skipped_asset_references(&source_path, &markdown));
+                payload_from_markdown(&source_path, markdown)
+            }) {
+            Ok(payload) => payloads.push(payload),
+            Err(err) => skipped.push(ImportSkipped {
+                file_name: source_path,
+                reason: err.to_string(),
+            }),
+        }
+    }
+    Ok(())
 }
 
 fn payload_from_markdown(source_path: &str, markdown: String) -> anyhow::Result<ImportPayload> {
@@ -518,6 +655,94 @@ fn payload_from_markdown(source_path: &str, markdown: String) -> anyhow::Result<
         markdown,
         metadata,
     })
+}
+
+fn skipped_asset_references(source_path: &str, markdown: &str) -> Vec<ImportSkipped> {
+    let mut skipped = Vec::new();
+    for asset in markdown_asset_references(markdown) {
+        skipped.push(ImportSkipped {
+            file_name: format!("{source_path} -> {asset}"),
+            reason: "Referenced Obsidian attachment/assets are not imported yet".into(),
+        });
+    }
+    skipped
+}
+
+fn markdown_asset_references(markdown: &str) -> Vec<String> {
+    let mut assets = Vec::new();
+    let mut index = 0;
+    while let Some(start) = markdown[index..].find("](") {
+        let open = index + start + 2;
+        let Some(close_offset) = markdown[open..].find(')') else {
+            break;
+        };
+        let target = markdown[open..open + close_offset]
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches('"')
+            .trim_matches('\'');
+        if should_report_unsupported_asset(target) {
+            assets.push(target.to_string());
+        }
+        index = open + close_offset + 1;
+    }
+
+    index = 0;
+    while let Some(start) = markdown[index..].find("![[") {
+        let open = index + start + 3;
+        let Some(close_offset) = markdown[open..].find("]]") else {
+            break;
+        };
+        let target = markdown[open..open + close_offset]
+            .split('|')
+            .next()
+            .unwrap_or("")
+            .trim();
+        if should_report_unsupported_asset(target) {
+            assets.push(target.to_string());
+        }
+        index = open + close_offset + 2;
+    }
+
+    assets.sort();
+    assets.dedup();
+    assets
+}
+
+fn should_report_unsupported_asset(path: &str) -> bool {
+    let normalized = path.trim().trim_start_matches("./").to_lowercase();
+    if normalized.is_empty()
+        || normalized.starts_with("http://")
+        || normalized.starts_with("https://")
+        || normalized.starts_with('#')
+        || normalized.starts_with(".obsidian/")
+        || normalized.ends_with(".json")
+        || normalized.ends_with(".css")
+    {
+        return false;
+    }
+    matches!(
+        Path::new(&normalized)
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some(
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "svg"
+                | "bmp"
+                | "pdf"
+                | "mp3"
+                | "mp4"
+                | "mov"
+                | "wav"
+                | "ogg"
+                | "canvas"
+        )
+    )
 }
 
 fn parse_frontmatter(markdown: &str) -> Option<serde_json::Value> {
@@ -963,9 +1188,48 @@ mod tests {
             writer.finish().unwrap();
         }
         let payloads = import_payloads_from_upload("vault.zip", zip_bytes.get_ref()).unwrap();
-        assert_eq!(payloads.len(), 1);
-        assert_eq!(payloads[0].title, "a");
-        assert_eq!(payloads[0].source_path, "notes/a.md");
+        assert_eq!(payloads.payloads.len(), 1);
+        assert_eq!(payloads.payloads[0].title, "a");
+        assert_eq!(payloads.payloads[0].source_path, "notes/a.md");
+        assert_eq!(payloads.skipped.len(), 1);
+        assert_eq!(payloads.skipped[0].file_name, "assets/image.png");
+    }
+
+    #[test]
+    fn imports_markdown_entries_from_folder_and_reports_assets() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("notes").join("week1");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join("topic.md"),
+            "# Topic\n\nSee ![[diagram.png]] and [PDF](../assets/ref.pdf).",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets").join("diagram.png"), b"png").unwrap();
+        std::fs::write(dir.path().join("assets").join("ref.pdf"), b"pdf").unwrap();
+
+        let upload = import_payloads_from_folder(dir.path()).unwrap();
+        assert_eq!(upload.payloads.len(), 1);
+        assert_eq!(upload.payloads[0].source_path, "notes/week1/topic.md");
+        assert!(
+            upload
+                .skipped
+                .iter()
+                .any(|item| item.file_name == "assets/diagram.png")
+        );
+        assert!(
+            upload
+                .skipped
+                .iter()
+                .any(|item| item.file_name == "assets/ref.pdf")
+        );
+        assert!(
+            upload
+                .skipped
+                .iter()
+                .any(|item| item.file_name == "notes/week1/topic.md -> diagram.png")
+        );
     }
 
     fn json_request(method: Method, uri: &str, value: serde_json::Value) -> Request<Body> {
