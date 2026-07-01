@@ -57,6 +57,15 @@ npm run dev
 http://localhost:5173
 ```
 
+桌面版开发模式可以直接在项目根目录运行：
+
+```powershell
+cargo tauri dev
+```
+
+该命令会启动前端 Vite dev server、Tauri 桌面窗口，并拉起本地
+`tutor-web` sidecar。开发桌面版时优先使用这个命令。
+
 ### Web 端配置
 
 打开 Web UI 左侧的 **设置** 页面，至少配置一个 LLM。
