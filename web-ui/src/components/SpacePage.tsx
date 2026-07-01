@@ -795,6 +795,7 @@ function NotebookTab({
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const [relationsCollapsed, setRelationsCollapsed] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -828,38 +829,67 @@ function NotebookTab({
             accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
             multiple
             onChange={(event) => {
+              setExportMenuOpen(false)
               onPreviewImportFiles(event.currentTarget.files)
               event.currentTarget.value = ''
             }}
           />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <button
               className={secondaryButtonClassName}
               type="button"
               disabled={loading}
-              onClick={() => importInputRef.current?.click()}
+              onClick={() => {
+                setExportMenuOpen(false)
+                importInputRef.current?.click()
+              }}
             >
               <Upload size={16} />
               Import
             </button>
-            <button
-              className={secondaryButtonClassName}
-              type="button"
-              disabled={loading || entries.length === 0}
-              onClick={onExportAll}
-            >
-              <Download size={16} />
-              Export
-            </button>
-            <button
-              className={secondaryButtonClassName}
-              type="button"
-              disabled={loading || entries.length === 0}
-              onClick={onExportVault}
-            >
-              <BookMarked size={16} />
-              Vault
-            </button>
+            <div className="relative">
+              <button
+                className={secondaryButtonClassName}
+                type="button"
+                disabled={loading || entries.length === 0}
+                onClick={() => setExportMenuOpen((value) => !value)}
+              >
+                <Download size={16} />
+                Export
+              </button>
+              {exportMenuOpen && (
+                <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 text-sm shadow-lg shadow-gray-950/10">
+                  <button
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
+                    type="button"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      onExportAll()
+                    }}
+                  >
+                    <Download size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                    <span>
+                      <span className="block font-medium text-gray-900">Notebook backup</span>
+                      <span className="block text-xs text-gray-500">For llm-tutor import and backup</span>
+                    </span>
+                  </button>
+                  <button
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
+                    type="button"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      onExportVault()
+                    }}
+                  >
+                    <BookMarked size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                    <span>
+                      <span className="block font-medium text-gray-900">Obsidian vault</span>
+                      <span className="block text-xs text-gray-500">Markdown vault with Obsidian config</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           {importPreview && (
             <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-3 text-xs shadow-sm">
