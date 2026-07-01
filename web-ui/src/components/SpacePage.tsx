@@ -594,8 +594,8 @@ export function SpacePage({
   return (
     <main className="flex h-full min-h-0 bg-white">
       <aside className={`flex shrink-0 flex-col border-r border-gray-200 bg-gray-50 transition-[width] duration-200 ${spaceNavCollapsed ? 'w-16' : 'w-72'}`}>
-        <div className={`${spaceNavCollapsed ? 'px-2 py-4' : 'px-5 py-5'}`}>
-          <div className="flex items-start justify-between gap-3">
+        <div className={`${spaceNavCollapsed ? 'flex justify-center px-2 py-4' : 'px-5 py-5'}`}>
+          <div className={`flex gap-3 ${spaceNavCollapsed ? 'items-center justify-center' : 'items-start justify-between'}`}>
             {!spaceNavCollapsed && (
               <div className="min-w-0">
                 <div className="text-xs font-medium uppercase tracking-wide text-blue-600">Default Space</div>
@@ -603,7 +603,7 @@ export function SpacePage({
               </div>
             )}
             <button
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-blue-700"
+              className={`shrink-0 rounded text-gray-500 hover:bg-white hover:text-blue-700 ${spaceNavCollapsed ? 'p-2' : 'inline-flex h-9 w-9 items-center justify-center rounded-lg'}`}
               type="button"
               title={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
               aria-label={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
