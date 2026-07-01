@@ -11,6 +11,8 @@ checklists.
   milestone context.
 - `2026-06-26-space-workspace-plan.md`: Space, Notebook, Quiz Bank, Student
   Profile, and Book positioning.
+- `2026-07-01-notebook-obsidian-plan.md`: Obsidian-like Notebook direction,
+  including wiki links, backlinks, tags, and required import/export.
 - `2026-06-26-space-memory-implementation-plan.md`: Memory and student-profile
   implementation details.
 - `2026-06-28-source-reference-system-plan.md`: product-level source reference

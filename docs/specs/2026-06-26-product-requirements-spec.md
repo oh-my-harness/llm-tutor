@@ -293,6 +293,16 @@
 - REQ-641: Applying an agent-produced Notebook edit shall require explicit user confirmation. Status: implemented.
 - REQ-642: Applied agent-produced Notebook edits shall update entry metadata and create a Notebook memory event. Status: implemented.
 - REQ-643: Direct Notebook write tools shall be gated by explicit user instruction and product approval flow, not by implicit model choice alone. Status: implemented by exposing only a preview tool to the agent; writes happen through user-confirmed product UI.
+- REQ-780: Notebook shall evolve toward a Markdown-first, Obsidian-like knowledge workspace with connected notes. Status: planned.
+- REQ-781: Notebook shall support wiki-style note links such as `[[Note Title]]` and `[[note-id|alias]]`. Status: planned.
+- REQ-782: Notebook shall parse and display backlinks for notes that reference the current note. Status: planned.
+- REQ-783: Notebook shall parse and filter tags from note Markdown and note metadata. Status: planned.
+- REQ-784: Notebook shall support importing Markdown notes from files, folders, or zip bundles. Status: planned.
+- REQ-785: Notebook import shall preserve Markdown content, frontmatter, unknown metadata, and wiki links where possible. Status: planned.
+- REQ-786: Notebook shall support exporting one note, selected notes, or the full Notebook as Markdown files or a zip bundle. Status: planned.
+- REQ-787: Notebook export shall include stable frontmatter for title, id, type, tags, source metadata, created time, and updated time. Status: planned.
+- REQ-788: Notebook import/export shall be local and portable; exported notes shall remain readable outside this app. Status: planned.
+- REQ-789: Notebook shall support agent-assisted organization proposals such as suggested links, tags, and duplicate-note merges, with explicit user confirmation before writes. Status: planned.
 
 ## 18. Quiz Bank
 
