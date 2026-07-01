@@ -324,6 +324,97 @@ Behavior rules:
 This keeps Chat natural while avoiding two bad extremes: forcing users to always
 pick notes manually, or letting the agent silently invent Notebook context.
 
+### Chat Source Association
+
+Notebook association in the chat composer should share the existing knowledge
+source button with Knowledge Base selection. Do not add a second top-level
+Notebook toggle in the composer.
+
+The shared selector should represent "source association" rather than only
+"knowledge base association":
+
+```text
+No source
+Notebook
+Knowledge Base: <kb name>
+```
+
+Product semantics:
+
+- `No source`: the agent uses conversation context, attachments, explicit `@`
+  mentions, memory, and mode-specific tools only.
+- `Notebook`: the agent may use Notebook as a local plain-text knowledge source.
+- `Knowledge Base`: the agent may use the selected LanceDB-backed RAG knowledge
+  base.
+
+Notebook association is intentionally plain-text only. It must not use
+embeddings, LanceDB, or any future vector index. Notebook remains a Markdown
+workspace, not a RAG corpus.
+
+When Notebook is associated:
+
+- Chat mode may search Notebook when answering questions that could benefit from
+  saved notes.
+- Organize mode should actively use Notebook search and read tools.
+- Quiz mode may use Notebook search as source material when no more specific
+  `@` item or attachment is provided.
+- Research mode may use Notebook as private prior context, but external factual
+  claims still require web search/fetch when appropriate.
+
+The backend should model this separately from `kb_id`:
+
+```ts
+SessionSourceAssociation =
+  | { type: 'none' }
+  | { type: 'notebook'; scope: 'default_space' }
+  | { type: 'knowledge_base'; kbId: string }
+```
+
+For compatibility with the current session model, the first implementation may
+store this as:
+
+```ts
+kb?: string
+notebook_enabled: boolean
+```
+
+Rules:
+
+- `kb` must only mean a real Knowledge Base id.
+- `notebook_enabled` must only mean plain-text Notebook search is available.
+- The UI should prevent selecting both Notebook and Knowledge Base from the same
+  shared source button until a future multi-source design is introduced.
+- Notebook search results should cite navigable Notebook sources such as
+  `notebook:<entry_id>`.
+
+### Chat Modes And Tools
+
+Chat modes should represent task intent and default workflow, not a hard-coded
+tool set.
+
+Recommended composer modes:
+
+- `chat`: ordinary tutoring, explanation, and lightweight Q&A.
+- `deep_solve`: multi-step problem solving.
+- `quiz`: quiz generation from conversation, attachments, associated source, or
+  explicit `@` material.
+- `research`: web/source exploration and report generation.
+- `organize`: Notebook/Space organization, including search, tags, links,
+  deduplication, and edit proposals.
+
+`code_exec` should be demoted from a user-facing mode to a tool available to
+other modes. The model should use it when computation, verification,
+simulation, parsing, or code execution is needed. This prevents a confusing
+"code mode" that is really just one tool, while keeping code execution useful in
+Chat, Deep Solve, Research, Quiz, and Organize workflows.
+
+Organize mode defaults:
+
+- Notebook association should be enabled by default when entering Organize mode.
+- The agent should search Notebook before making claims about saved notes.
+- The agent may propose edits, tags, links, or merges.
+- All writes must remain proposal-first and user-confirmed.
+
 ## 6. Import / Export Architecture
 
 Backend responsibilities:
@@ -351,16 +442,19 @@ Safety rules:
 
 ## 7. Relationship With RAG
 
-Notebook should not automatically become a knowledge base in the first slice.
+Notebook is not a Knowledge Base and should not become a vectorized RAG corpus.
+It remains a Markdown/plain-text workspace.
 
 Recommended order:
 
 1. Notebook links, backlinks, tags, import/export.
 2. Search and `@` references over Notebook content.
-3. Optional Notebook-to-RAG indexing with explicit user action.
+3. Shared chat source association that can select either Notebook plain-text
+   lookup or one LanceDB-backed Knowledge Base.
 
-This keeps personal notes portable and reviewable before turning them into a
-retrieval corpus.
+This keeps personal notes portable, inspectable, and editable while Knowledge
+Base remains the place for embeddings, chunking, LanceDB storage, and RAG
+retrieval.
 
 ## 8. Implementation Phases
 

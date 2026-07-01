@@ -287,7 +287,7 @@
 - REQ-635: Users shall be able to delete Notebook entries. Status: planned.
 - REQ-636: Research mode shall default to saving reports into Notebook rather than directly into Books. Status: planned.
 - REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: implemented.
-- REQ-638: Notebook entries may later be indexed into RAG. Status: planned.
+- REQ-638: Notebook entries shall remain a Markdown/plain-text workspace and shall not be indexed into RAG or vector stores. Status: planned.
 - REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: implemented.
 - REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: implemented as complete Markdown replacement preview.
 - REQ-641: Applying an agent-produced Notebook edit shall require explicit user confirmation. Status: implemented.
@@ -313,6 +313,15 @@
 - REQ-797: If Notebook search is ambiguous, the agent shall ask the user to choose candidate notes or present the candidate list before making strong claims. Status: planned.
 - REQ-798: If users ask to edit, tag, link, or merge Notebook content without `@`, the agent shall search first and ask for target confirmation before creating a write proposal. Status: planned.
 - REQ-799: If Notebook search finds no relevant entries, the agent shall say no relevant Notebook content was found before falling back to general knowledge or other tools. Status: planned.
+- REQ-800: Chat composer shall expose Notebook association through the same source selector as Knowledge Base association. Status: planned.
+- REQ-801: The shared source selector shall support at least No source, Notebook, and one concrete Knowledge Base. Status: planned.
+- REQ-802: Notebook association shall use only plain-text search/read over Notebook Markdown; it shall not use embeddings, LanceDB, or vector indexing. Status: planned.
+- REQ-803: Notebook association shall be modeled separately from Knowledge Base ids; `kb` shall only identify real Knowledge Bases. Status: planned.
+- REQ-804: The UI shall prevent selecting Notebook and Knowledge Base simultaneously from the shared source selector until a multi-source design exists. Status: planned.
+- REQ-805: Notebook search results used by the agent shall include navigable Notebook source ids. Status: planned.
+- REQ-806: Chat shall add an Organize mode for Notebook and Space organization workflows. Status: planned.
+- REQ-807: Organize mode shall enable Notebook search/read and proposal-first organization tools by default. Status: planned.
+- REQ-808: Code execution shall be treated as a tool available to suitable modes rather than a standalone user-facing Chat mode. Status: planned.
 
 ## 18. Quiz Bank
 
