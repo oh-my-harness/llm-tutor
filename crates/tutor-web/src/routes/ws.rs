@@ -26,7 +26,7 @@ use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
-use crate::space_tool::{ProposeNotebookEditTool, ReadSpaceItemTool};
+use crate::space_tool::{ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool};
 
 #[derive(Clone)]
 struct WsState {
@@ -278,6 +278,9 @@ async fn run_tutor_message(
                 quizzes.clone(),
             )))
             .with_product_tool(Arc::new(ProposeNotebookEditTool::new(notebook.clone())));
+        if entry.notebook_enabled || entry.capability == "organize" {
+            router = router.with_product_tool(Arc::new(SearchNotebookTool::new(notebook.clone())));
+        }
         if let Some(search) = web_search_config_for_session(entry.search.clone()) {
             router = router.with_web_search(search);
         }
@@ -311,7 +314,7 @@ async fn run_tutor_message(
 
     match result {
         Ok((answer, streamed)) => {
-            if matches!(entry.capability.as_str(), "chat" | "research") {
+            if matches!(entry.capability.as_str(), "chat" | "research" | "organize") {
                 let category = if entry.capability == "research" {
                     MemoryEventCategory::Research
                 } else {

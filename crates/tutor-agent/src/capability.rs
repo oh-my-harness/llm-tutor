@@ -25,6 +25,8 @@ pub enum Capability {
     Quiz,
     /// Research external/internal sources and synthesize a cited report.
     Research,
+    /// Organize Notebook/Space content through search and preview-only proposals.
+    Organize,
 }
 
 impl FromStr for Capability {
@@ -37,6 +39,7 @@ impl FromStr for Capability {
             "code_exec" => Ok(Self::CodeExec),
             "quiz" => Ok(Self::Quiz),
             "research" => Ok(Self::Research),
+            "organize" => Ok(Self::Organize),
             other => Err(TutorError::UnsupportedCapability(other.into())),
         }
     }
@@ -139,6 +142,7 @@ impl CapabilityRouter {
         match capability {
             Capability::Chat => crate::chat::run_chat_with_messages(self, messages).await,
             Capability::Research => crate::chat::run_research_with_messages(self, messages).await,
+            Capability::Organize => crate::chat::run_organize_with_messages(self, messages).await,
             Capability::DeepSolve => {
                 let question = question_from_messages(&messages);
                 let client = self.make_client();
@@ -173,6 +177,9 @@ impl CapabilityRouter {
             Capability::Chat => crate::chat::run_chat_with_session(self, session, question).await,
             Capability::Research => {
                 crate::chat::run_research_with_session(self, session, question).await
+            }
+            Capability::Organize => {
+                crate::chat::run_organize_with_session(self, session, question).await
             }
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_session(self, session, question).await
@@ -277,6 +284,10 @@ mod tests {
         assert!(matches!(
             Capability::from_str("research").unwrap(),
             Capability::Research
+        ));
+        assert!(matches!(
+            Capability::from_str("organize").unwrap(),
+            Capability::Organize
         ));
         assert!(Capability::from_str("unknown").is_err());
     }

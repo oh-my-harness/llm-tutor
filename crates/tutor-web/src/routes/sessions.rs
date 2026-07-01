@@ -24,6 +24,7 @@ pub struct SessionsState {
 struct CreateSessionRequest {
     capability: String,
     kb: Option<String>,
+    notebook_enabled: Option<bool>,
     llm: Option<CreateLlmConfig>,
     search: Option<CreateSearchConfig>,
 }
@@ -60,6 +61,7 @@ struct UpdateSessionRequest {
     capability: Option<String>,
     name: Option<String>,
     kb: Option<String>,
+    notebook_enabled: Option<bool>,
     llm: Option<CreateLlmConfig>,
     search: Option<CreateSearchConfig>,
 }
@@ -93,7 +95,8 @@ async fn create_session(
         require_approval: config.require_approval.unwrap_or(false),
     });
     let search = req.search.and_then(search_config_from_request);
-    let (kb, embedding) = match knowledge_binding(&state.knowledge, req.kb) {
+    let notebook_enabled = req.notebook_enabled.unwrap_or(false);
+    let (kb, embedding) = match knowledge_binding(&state.knowledge, req.kb, notebook_enabled) {
         Ok(binding) => binding,
         Err(err) => {
             return (
@@ -104,7 +107,14 @@ async fn create_session(
         }
     };
     match pool
-        .create(&req.capability, kb, llm, search, embedding)
+        .create(
+            &req.capability,
+            kb,
+            notebook_enabled,
+            llm,
+            search,
+            embedding,
+        )
         .await
     {
         Ok(id) => (StatusCode::CREATED, Json(CreateSessionResponse { id })).into_response(),
@@ -257,6 +267,7 @@ async fn get_session(
             "id": entry.id,
             "capability": entry.capability,
             "kb": entry.kb,
+            "notebook_enabled": entry.notebook_enabled,
             "history_len": history_len,
             "metadata": {
                 "name": meta.name,
@@ -370,6 +381,25 @@ async fn update_session(
         }
     }
 
+    if let Some(notebook_enabled) = req.notebook_enabled {
+        let _ = pool.ensure_entry(&id).await;
+        if notebook_enabled {
+            if !pool.set_knowledge(&id, None, None) || !pool.set_notebook_enabled(&id, true) {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "session not found" })),
+                )
+                    .into_response();
+            }
+        } else if !pool.set_notebook_enabled(&id, false) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+    }
+
     if let Some(kb) = req.kb {
         let normalized_kb = kb.trim().to_string();
         let (kb, embedding) = if normalized_kb.is_empty() {
@@ -392,6 +422,9 @@ async fn update_session(
                 Json(serde_json::json!({ "error": "session not found" })),
             )
                 .into_response();
+        }
+        if !normalized_kb.is_empty() {
+            let _ = pool.set_notebook_enabled(&id, false);
         }
     }
 
@@ -676,7 +709,12 @@ pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -
 fn knowledge_binding(
     knowledge: &KnowledgeStore,
     kb: Option<String>,
+    notebook_enabled: bool,
 ) -> Result<(Option<String>, Option<tutor_rag::EmbeddingConfig>), anyhow::Error> {
+    if notebook_enabled {
+        return Ok((None, None));
+    }
+
     let Some(kb) = kb
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())

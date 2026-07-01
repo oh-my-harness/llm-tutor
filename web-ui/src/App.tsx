@@ -29,7 +29,7 @@ import {
 } from './settings'
 import type { QuizSession } from './quizTypes'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -80,6 +80,7 @@ interface SessionListResponse {
 interface SessionDetailResponse {
   capability?: Capability
   kb?: string | null
+  notebook_enabled?: boolean
   messages?: Array<{
     role: 'user' | 'assistant'
     text: string
@@ -130,6 +131,7 @@ export default function App() {
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
+  const [selectedNotebookEnabled, setSelectedNotebookEnabled] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(true)
   const [spaceFocusTarget, setSpaceFocusTarget] = useState<Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }> | null>(null)
@@ -356,6 +358,7 @@ export default function App() {
           body: JSON.stringify({
             capability,
             kb,
+            notebook_enabled: selectedNotebookEnabled,
             llm: settingsForSession(llmSettings),
             search: searchForSession(llmSettings),
           }),
@@ -378,7 +381,7 @@ export default function App() {
         const mentionSource = await spaceMentionSourceText(mentions)
         const conversationSource = [quizSourceFromMessages(messages), attachmentSource, mentionSource].filter(Boolean).join('\n\n')
         const hasExplicitLocalSource = attachments.some((attachment) => attachment.text?.trim()) || mentions.length > 0
-        const useKnowledgeBaseForQuiz = Boolean(selectedKnowledgeBaseId && !hasExplicitLocalSource)
+        const useKnowledgeBaseForQuiz = Boolean(selectedKnowledgeBaseId && !selectedNotebookEnabled && !hasExplicitLocalSource)
         if (!useKnowledgeBaseForQuiz && !conversationSource.trim()) {
           throw new Error('当前还没有可用于出题的对话内容。请先提供一段材料，或关联知识库。')
         }
@@ -428,7 +431,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, send, pushStatus, refreshSessions, messages])
+  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, refreshSessions, messages])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -572,13 +575,20 @@ export default function App() {
     if (running) return
 
     setCapability(nextCapability)
+    if (nextCapability === 'organize') {
+      setSelectedNotebookEnabled(true)
+      setSelectedKnowledgeBaseId('')
+    }
     if (!sessionId) return
 
     try {
+      const body = nextCapability === 'organize'
+        ? { capability: nextCapability, notebook_enabled: true, kb: '' }
+        : { capability: nextCapability }
       const res = await fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ capability: nextCapability }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         throw new Error(`failed to update session mode: HTTP ${res.status}`)
@@ -592,16 +602,38 @@ export default function App() {
   const handleKnowledgeBaseChange = useCallback(async (nextKb: string) => {
     if (running) return
     setSelectedKnowledgeBaseId(nextKb)
+    setSelectedNotebookEnabled(false)
     if (!sessionId) return
 
     try {
       const res = await fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kb: nextKb }),
+        body: JSON.stringify({ kb: nextKb, notebook_enabled: false }),
       })
       if (!res.ok) {
         throw new Error(`failed to update session knowledge base: HTTP ${res.status}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+    }
+  }, [running, sessionId])
+
+  const handleNotebookEnabledChange = useCallback(async (enabled: boolean) => {
+    if (running) return
+    setSelectedNotebookEnabled(enabled)
+    if (enabled) setSelectedKnowledgeBaseId('')
+    if (!sessionId) return
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notebook_enabled: enabled, kb: enabled ? '' : undefined }),
+      })
+      if (!res.ok) {
+        throw new Error(`failed to update session source: HTTP ${res.status}`)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -677,6 +709,7 @@ export default function App() {
           setCapability(data.capability)
         }
         setSelectedKnowledgeBaseId(data.kb ?? '')
+        setSelectedNotebookEnabled(Boolean(data.notebook_enabled))
         const title = data.metadata?.name || restored.find((message) => message.role === 'user')?.text
         if (title) {
           upsertRecentSession(setRecentSessions, id, sessionTitleFromMessage(title))
@@ -828,10 +861,12 @@ export default function App() {
                   activeLlmConfigId={llmSettings.activeLlmConfigId}
                   knowledgeBases={knowledgeBases}
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+                  selectedNotebookEnabled={selectedNotebookEnabled}
                   onSend={handleSend}
                   onAskDeepSolveStep={handleAskDeepSolveStep}
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
+                  onNotebookEnabledChange={handleNotebookEnabledChange}
                   onLlmConfigChange={handleLlmConfigChange}
                   onSaveToNotebook={handleSaveToNotebook}
                   onApplyNotebookEdit={handleApplyNotebookEdit}
@@ -1202,6 +1237,7 @@ function capabilityLabel(value: string): string {
   if (value === 'code_exec') return 'Code Exec'
   if (value === 'quiz') return 'Quiz'
   if (value === 'research') return 'Research'
+  if (value === 'organize') return 'Organize'
   return 'Chat'
 }
 
@@ -1344,7 +1380,7 @@ function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
 }
 
 function isCapability(value: string): value is Capability {
-  return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz' || value === 'research'
+  return value === 'chat' || value === 'deep_solve' || value === 'code_exec' || value === 'quiz' || value === 'research' || value === 'organize'
 }
 
 function sourceTargetDetail(target: SourceTarget, reference: SourceReference) {

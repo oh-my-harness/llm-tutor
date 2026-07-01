@@ -73,6 +73,35 @@ pub async fn run_research_with_session(
     .await
 }
 
+pub async fn run_organize_with_messages(
+    router: &CapabilityRouter,
+    messages: Vec<AgentMessage>,
+) -> Result<String> {
+    run_chat_inner(
+        router,
+        "organize",
+        organize_system_prompt(),
+        Some(messages),
+        None,
+    )
+    .await
+}
+
+pub async fn run_organize_with_session(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+) -> Result<String> {
+    run_chat_inner(
+        router,
+        "organize",
+        organize_system_prompt(),
+        Some(vec![user_message(question)]),
+        Some(session),
+    )
+    .await
+}
+
 async fn run_chat_inner(
     router: &CapabilityRouter,
     capability: &'static str,
@@ -383,7 +412,8 @@ fn chat_system_prompt() -> String {
      review, practice, or adapting explanation style. Memory is only learner profile/context; \
      do not treat it as an external factual source. Use write_memory only when the user explicitly \
      asks you to remember something or clearly approves recording a durable preference; never infer \
-     private profile facts or silently write ordinary chat content. Use rag_search to find relevant course material. \
+     private profile facts or silently write ordinary chat content. Use rag_search only when a Knowledge Base is associated. \
+     Use search_notebook when Notebook is associated and saved Markdown notes may be relevant. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, \
      call read_space_item before relying on their content. Do not guess the contents of a referenced Space item. \
      When the user asks you to modify a referenced Notebook entry, call read_space_item first, then call \
@@ -409,7 +439,7 @@ fn research_system_prompt() -> String {
      a durable preference or approves recording it; research findings belong in reports, not memory. \
      Follow this workflow: (1) briefly identify the research question and scope, \
      (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
-     (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call rag_search when a knowledge base is associated, \
+     (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call search_notebook when Notebook is associated, (7) optionally call rag_search when a knowledge base is associated, \
      (7) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
@@ -419,9 +449,23 @@ fn research_system_prompt() -> String {
         .into()
 }
 
+fn organize_system_prompt() -> String {
+    "You are a Notebook and Space organization assistant. Your job is to help the user search, \
+     inspect, clean up, link, tag, deduplicate, and revise saved Notebook content. Notebook is a \
+     plain-text Markdown workspace, not a vector knowledge base. Prefer search_notebook when the \
+     user asks about saved notes, prior notes, Notebook contents, organization, tags, links, or \
+     duplicates. Use read_space_item when the user references an explicit Space item. Before \
+     proposing edits, read the exact Notebook entry. Use propose_notebook_edit for complete \
+     replacement Markdown proposals; never claim an edit has been applied because the product UI \
+     requires explicit user confirmation. You may use code_exec for parsing or verification if it \
+     helps, and web_search only when the user explicitly asks for external/current facts. Keep \
+     organization suggestions concrete and cite the Notebook entries you used."
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{chat_system_prompt, research_system_prompt};
+    use super::{chat_system_prompt, organize_system_prompt, research_system_prompt};
 
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
@@ -449,5 +493,14 @@ mod tests {
         assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
+    }
+
+    #[test]
+    fn organize_prompt_requires_notebook_search_and_preview_writes() {
+        let prompt = organize_system_prompt();
+        assert!(prompt.contains("search_notebook"));
+        assert!(prompt.contains("plain-text Markdown workspace"));
+        assert!(prompt.contains("propose_notebook_edit"));
+        assert!(prompt.contains("requires explicit user confirmation"));
     }
 }

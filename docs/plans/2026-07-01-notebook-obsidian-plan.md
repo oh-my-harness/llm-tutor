@@ -488,6 +488,11 @@ retrieval.
 
 ### Phase 4: Agent-Assisted Organization
 
+- [x] Add Chat composer source association for No source / Notebook / Knowledge Base.
+- [x] Keep Notebook association plain-text only and separate from Knowledge Base ids.
+- [x] Add Organize mode as a Chat workflow.
+- [x] Add `search_notebook` product tool for plain-text Notebook lookup.
+- [x] Demote code execution from visible Chat mode to a tool available inside modes.
 - [ ] Add "suggest links" proposal workflow.
 - [ ] Add "suggest tags" proposal workflow.
 - [ ] Add "merge duplicate notes" proposal workflow.

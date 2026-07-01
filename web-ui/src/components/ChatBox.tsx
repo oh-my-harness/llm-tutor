@@ -24,7 +24,7 @@ import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
+type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
 type SpaceMentionFilter = 'all' | SpaceMention['type']
 
@@ -104,10 +104,12 @@ interface Props {
   activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
+  selectedNotebookEnabled: boolean
   onSend: (text: string, attachments?: ChatAttachment[], mentions?: SpaceMention[]) => void
   onAskDeepSolveStep?: (step: { id: string; title: string; summary?: string }) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
+  onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
   onSaveToNotebook?: (markdown: string) => Promise<void>
   onApplyNotebookEdit?: (proposal: NotebookEditProposal) => Promise<void>
@@ -154,7 +156,15 @@ const modeOptions: Array<{ value: Capability; label: string; description: string
     description: '搜索、阅读并生成带引用的研究报告',
     icon: <SearchCheck size={21} />,
   },
+  {
+    value: 'organize',
+    label: 'Organize',
+    description: 'Search and organize Notebook notes',
+    icon: <FileText size={21} />,
+  },
 ]
+
+const visibleModeOptions = modeOptions.filter((mode) => mode.value !== 'code_exec')
 
 export function ChatBox({
   messages,
@@ -165,10 +175,12 @@ export function ChatBox({
   activeLlmConfigId,
   knowledgeBases,
   selectedKnowledgeBaseId,
+  selectedNotebookEnabled,
   onSend,
   onAskDeepSolveStep,
   onCapabilityChange,
   onKnowledgeBaseChange,
+  onNotebookEnabledChange,
   onLlmConfigChange,
   onSaveToNotebook,
   onApplyNotebookEdit,
@@ -241,8 +253,10 @@ export function ChatBox({
               activeLlmConfigId={activeLlmConfigId}
               knowledgeBases={knowledgeBases}
               selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+              selectedNotebookEnabled={selectedNotebookEnabled}
               onCapabilityChange={onCapabilityChange}
               onKnowledgeBaseChange={onKnowledgeBaseChange}
+              onNotebookEnabledChange={onNotebookEnabledChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
               attachments={attachments}
@@ -342,8 +356,10 @@ export function ChatBox({
               activeLlmConfigId={activeLlmConfigId}
               knowledgeBases={knowledgeBases}
               selectedKnowledgeBaseId={selectedKnowledgeBaseId}
+              selectedNotebookEnabled={selectedNotebookEnabled}
               onCapabilityChange={onCapabilityChange}
               onKnowledgeBaseChange={onKnowledgeBaseChange}
+              onNotebookEnabledChange={onNotebookEnabledChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
               attachments={attachments}
@@ -716,8 +732,10 @@ function Composer({
   activeLlmConfigId,
   knowledgeBases,
   selectedKnowledgeBaseId,
+  selectedNotebookEnabled,
   onCapabilityChange,
   onKnowledgeBaseChange,
+  onNotebookEnabledChange,
   onLlmConfigChange,
   onSend,
   attachments,
@@ -736,8 +754,10 @@ function Composer({
   activeLlmConfigId: string | null
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
+  selectedNotebookEnabled: boolean
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
+  onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
   onSend: () => void
   attachments: ChatAttachment[]
@@ -757,7 +777,9 @@ function Composer({
   const [loadingSpaceMentions, setLoadingSpaceMentions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
-  const activeKnowledge = knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
+  const activeKnowledge = selectedNotebookEnabled
+    ? { id: '__notebook__', name: 'Notebook' }
+    : knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId)
   const activeModel = llmConfigs.find((item) => item.id === activeLlmConfigId) ?? llmConfigs[0] ?? null
   const visibleSpaceMentions = useMemo(
     () => filterSpaceMentions(spaceMentions, spaceMentionFilter),
@@ -775,6 +797,20 @@ function Composer({
       name: item.name,
       description: '关联此知识库进行检索',
       icon: <Database size={21} />,
+    })),
+  ]
+  const sourceOptions = [
+    { ...knowledgeOptions[0]!, type: 'none' as const },
+    {
+      id: '__notebook__',
+      type: 'notebook' as const,
+      name: 'Notebook',
+      description: 'Search Notebook as plain Markdown text',
+      icon: <FileText size={21} />,
+    },
+    ...knowledgeOptions.slice(1).map((item) => ({
+      ...item,
+      type: 'knowledge_base' as const,
     })),
   ]
 
@@ -872,7 +908,7 @@ function Composer({
           />
           {openMenu === 'mode' && (
             <DropdownPanel widthClassName="w-[33rem]">
-              {modeOptions.map((mode) => (
+              {visibleModeOptions.map((mode) => (
                 <DropdownOption
                   key={mode.value}
                   selected={mode.value === capability}
@@ -915,15 +951,25 @@ function Composer({
           />
           {openMenu === 'knowledge' && (
             <DropdownPanel widthClassName="w-[28rem]">
-              {knowledgeOptions.map((item) => (
+              {sourceOptions.map((item) => (
                 <DropdownOption
                   key={item.id || 'none'}
-                  selected={item.id === selectedKnowledgeBaseId}
+                  selected={
+                    item.type === 'notebook'
+                      ? selectedNotebookEnabled
+                      : item.type === 'none'
+                        ? !selectedNotebookEnabled && !selectedKnowledgeBaseId
+                        : !selectedNotebookEnabled && item.id === selectedKnowledgeBaseId
+                  }
                   icon={item.icon}
                   title={item.name}
                   description={item.description}
                   onClick={() => {
-                    onKnowledgeBaseChange(item.id)
+                    if (item.type === 'notebook') {
+                      onNotebookEnabledChange(true)
+                    } else {
+                      onKnowledgeBaseChange(item.id)
+                    }
                     setOpenMenu(null)
                   }}
                 />

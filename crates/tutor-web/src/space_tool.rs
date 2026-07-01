@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
 
-use crate::notebook_store::NotebookStore;
+use crate::notebook_store::{NotebookEntry, NotebookStore, parse_tags};
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, SpaceMentionType, resolve_space_mention_markdown};
 
@@ -19,6 +19,10 @@ pub struct ProposeNotebookEditTool {
     notebook: Arc<NotebookStore>,
 }
 
+pub struct SearchNotebookTool {
+    notebook: Arc<NotebookStore>,
+}
+
 impl ReadSpaceItemTool {
     pub fn new(notebook: Arc<NotebookStore>, quizzes: Arc<QuizStore>) -> Self {
         Self { notebook, quizzes }
@@ -26,6 +30,12 @@ impl ReadSpaceItemTool {
 }
 
 impl ProposeNotebookEditTool {
+    pub fn new(notebook: Arc<NotebookStore>) -> Self {
+        Self { notebook }
+    }
+}
+
+impl SearchNotebookTool {
     pub fn new(notebook: Arc<NotebookStore>) -> Self {
         Self { notebook }
     }
@@ -102,6 +112,92 @@ impl Tool for ReadSpaceItemTool {
                     "question_id": mention.question_id,
                     "title": mention.title,
                     "markdown": markdown,
+                }),
+                terminate: false,
+            })
+        })
+    }
+}
+
+static SEARCH_NOTEBOOK_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
+
+impl Tool for SearchNotebookTool {
+    fn name(&self) -> &str {
+        "search_notebook"
+    }
+
+    fn description(&self) -> &str {
+        "Search the user's Notebook as plain Markdown text. Use this when Notebook is associated or the user asks about saved notes without an explicit @ reference. This does not use embeddings or RAG."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        SEARCH_NOTEBOOK_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Plain-text query to search in Notebook titles, tags, and Markdown."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "description": "Maximum number of Notebook entries to return."
+                    }
+                },
+                "required": ["query"]
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let query = args["query"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ToolError::InvalidArguments("query is required".into()))?;
+            let limit = args["limit"]
+                .as_u64()
+                .map(|value| value.clamp(1, 10) as usize)
+                .unwrap_or(5);
+            let hits = search_notebook_entries(&self.notebook.list(None), query, limit);
+            let text = if hits.is_empty() {
+                format!("No Notebook entries matched query: {query}")
+            } else {
+                hits.iter()
+                    .enumerate()
+                    .map(|(index, hit)| {
+                        format!(
+                            "{}. {} ({})\nID: {}\nTags: {}\nScore: {}\nSnippet: {}",
+                            index + 1,
+                            hit.title,
+                            hit.entry_type,
+                            hit.id,
+                            if hit.tags.is_empty() {
+                                "none".into()
+                            } else {
+                                hit.tags.join(", ")
+                            },
+                            hit.score,
+                            hit.snippet
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            };
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text { text }],
+                details: json!({
+                    "query": query,
+                    "hits": hits,
                 }),
                 terminate: false,
             })
@@ -209,6 +305,91 @@ impl Tool for ProposeNotebookEditTool {
                 terminate: false,
             })
         })
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct NotebookSearchHit {
+    id: String,
+    title: String,
+    entry_type: String,
+    tags: Vec<String>,
+    snippet: String,
+    score: usize,
+}
+
+fn search_notebook_entries(
+    entries: &[NotebookEntry],
+    query: &str,
+    limit: usize,
+) -> Vec<NotebookSearchHit> {
+    let terms = query
+        .split_whitespace()
+        .map(|term| term.trim().to_ascii_lowercase())
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return vec![];
+    }
+
+    let mut hits = entries
+        .iter()
+        .filter_map(|entry| {
+            let tags = parse_tags(&entry.markdown);
+            let haystack = format!(
+                "{}\n{}\n{}",
+                entry.title,
+                tags.join(" "),
+                entry.markdown
+            )
+            .to_ascii_lowercase();
+            let score = terms
+                .iter()
+                .map(|term| haystack.matches(term).count())
+                .sum::<usize>();
+            if score == 0 {
+                return None;
+            }
+            Some(NotebookSearchHit {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                entry_type: format!("{:?}", entry.entry_type).to_ascii_lowercase(),
+                tags,
+                snippet: notebook_snippet(&entry.markdown, &terms),
+                score,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.title.cmp(&b.title)));
+    hits.truncate(limit);
+    hits
+}
+
+fn notebook_snippet(markdown: &str, terms: &[String]) -> String {
+    let normalized = markdown.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = normalized.to_ascii_lowercase();
+    let start = terms
+        .iter()
+        .filter_map(|term| lower.find(term))
+        .min()
+        .unwrap_or(0);
+    let start = normalized
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= start)
+        .last()
+        .unwrap_or(0)
+        .saturating_sub(80);
+    let snippet = normalized
+        .chars()
+        .skip(start)
+        .take(240)
+        .collect::<String>();
+    if normalized.chars().count() > snippet.chars().count() {
+        format!("{snippet}...")
+    } else {
+        snippet
     }
 }
 
@@ -373,5 +554,36 @@ mod tests {
         assert_eq!(result.details["requires_confirmation"], true);
         assert_eq!(result.details["proposed_title"], "Updated mask notes");
         assert_eq!(notebook.get(&entry.id).unwrap().markdown, "Original notes.");
+    }
+
+    #[tokio::test]
+    async fn search_notebook_returns_plain_text_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        let notebook = Arc::new(NotebookStore::new_with_path(
+            dir.path().join("notebook.json"),
+        ));
+        let entry = notebook
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                title: "Lithography notes".into(),
+                markdown: "OPC and mask alignment. #semiconductor".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+        let tool = SearchNotebookTool::new(notebook);
+
+        let result = tool
+            .execute(json!({ "query": "mask", "limit": 3 }), &make_ctx())
+            .await
+            .unwrap();
+
+        assert_eq!(result.details["hits"][0]["id"], entry.id);
+        match &result.content[0] {
+            ContentBlock::Text { text } => assert!(text.contains("mask alignment")),
+            _ => panic!("expected text content"),
+        }
     }
 }

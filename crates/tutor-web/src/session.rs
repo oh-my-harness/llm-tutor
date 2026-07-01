@@ -39,6 +39,7 @@ pub struct SessionEntry {
     pub id: String,
     pub capability: String,
     pub kb: Option<String>,
+    pub notebook_enabled: bool,
     pub llm: Option<LlmSessionConfig>,
     pub search: Option<SearchSessionConfig>,
     pub embedding: Option<tutor_rag::EmbeddingConfig>,
@@ -96,6 +97,8 @@ struct ProductSessionMetadata {
     #[serde(default)]
     kb: Option<String>,
     #[serde(default)]
+    notebook_enabled: bool,
+    #[serde(default)]
     llm: Option<LlmSessionConfig>,
     #[serde(default)]
     search: Option<SearchSessionConfig>,
@@ -131,6 +134,7 @@ impl SessionPool {
         &self,
         capability: &str,
         kb: Option<String>,
+        notebook_enabled: bool,
         llm: Option<LlmSessionConfig>,
         search: Option<SearchSessionConfig>,
         embedding: Option<tutor_rag::EmbeddingConfig>,
@@ -150,6 +154,7 @@ impl SessionPool {
             id: id.clone(),
             capability: capability.to_string(),
             kb: kb.clone(),
+            notebook_enabled,
             llm: llm.clone(),
             search: search.clone(),
             embedding: embedding.clone(),
@@ -161,6 +166,7 @@ impl SessionPool {
             ProductSessionMetadata {
                 capability: capability.to_string(),
                 kb,
+                notebook_enabled,
                 llm,
                 search,
                 embedding,
@@ -188,6 +194,10 @@ impl SessionPool {
                 .map(|value| value.capability.clone())
                 .unwrap_or_else(|| "chat".into()),
             kb: product.as_ref().and_then(|value| value.kb.clone()),
+            notebook_enabled: product
+                .as_ref()
+                .map(|value| value.notebook_enabled)
+                .unwrap_or(false),
             llm: product.as_ref().and_then(|value| value.llm.clone()),
             search: product.as_ref().and_then(|value| value.search.clone()),
             embedding: product.as_ref().and_then(|value| value.embedding.clone()),
@@ -535,14 +545,42 @@ impl SessionPool {
             return false;
         };
 
+        let has_kb = kb.is_some();
         entry.kb = kb;
         entry.embedding = embedding;
+        if has_kb {
+            entry.notebook_enabled = false;
+        }
         let kb = entry.kb.clone();
         let embedding = entry.embedding.clone();
+        let notebook_enabled = entry.notebook_enabled;
         drop(sessions);
         self.update_product_metadata(id, |metadata| {
             metadata.kb = kb;
             metadata.embedding = embedding;
+            metadata.notebook_enabled = notebook_enabled;
+        });
+        true
+    }
+
+    pub fn set_notebook_enabled(&self, id: &str, notebook_enabled: bool) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(entry) = sessions.get_mut(id) else {
+            return false;
+        };
+
+        entry.notebook_enabled = notebook_enabled;
+        if notebook_enabled {
+            entry.kb = None;
+            entry.embedding = None;
+        }
+        drop(sessions);
+        self.update_product_metadata(id, |metadata| {
+            metadata.notebook_enabled = notebook_enabled;
+            if notebook_enabled {
+                metadata.kb = None;
+                metadata.embedding = None;
+            }
         });
         true
     }
@@ -610,6 +648,7 @@ impl SessionPool {
             .or_insert_with(|| ProductSessionMetadata {
                 capability: "chat".into(),
                 kb: None,
+                notebook_enabled: false,
                 llm: None,
                 search: None,
                 embedding: None,
@@ -719,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn session_pool_creates_and_retrieves() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         let entry = pool.get(&id);
         assert!(entry.is_some());
         let entry = entry.unwrap();
@@ -730,7 +769,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_session_persists_messages() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
 
         session
@@ -747,7 +786,7 @@ mod tests {
     async fn runtime_session_persists_trace_entries() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
 
         pool.append_trace(
             &id,
@@ -771,7 +810,7 @@ mod tests {
     async fn message_mentions_survive_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
 
         pool.append_message_mentions(
             &id,
@@ -799,7 +838,7 @@ mod tests {
     async fn message_citations_survive_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
         session
             .append_message(tutor_agent::chat::assistant_message("answer"))
@@ -835,7 +874,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
         let id = pool
-            .create("deep_solve", None, None, None, None)
+            .create("deep_solve", None, false, None, None, None)
             .await
             .unwrap();
 
@@ -907,7 +946,7 @@ mod tests {
     async fn compact_summary_survives_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
         session
             .append_message(tutor_agent::chat::user_message("what is lithography?"))
@@ -935,7 +974,7 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_capability_without_replacing_runtime_session() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         assert!(pool.set_capability(&id, "code_exec"));
 
         let updated = pool.get(&id).unwrap();
@@ -946,7 +985,7 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_knowledge_binding() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
         assert!(pool.set_knowledge(
             &id,
             Some("kb-1".into()),
@@ -973,6 +1012,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_pool_updates_notebook_binding_and_clears_knowledge() {
+        let pool = test_pool();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        assert!(pool.set_knowledge(
+            &id,
+            Some("kb-1".into()),
+            Some(tutor_rag::EmbeddingConfig {
+                provider: "openai".into(),
+                model: "text-embedding-3-small".into(),
+                api_key: "sk-test".into(),
+                base_url: None,
+                embeddings_path: None,
+                dimensions: Some(1536),
+                send_dimensions: false,
+            }),
+        ));
+        assert!(pool.set_notebook_enabled(&id, true));
+
+        let updated = pool.get(&id).unwrap();
+        assert!(updated.notebook_enabled);
+        assert!(updated.kb.is_none());
+        assert!(updated.embedding.is_none());
+    }
+
+    #[tokio::test]
     async fn product_metadata_survives_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
@@ -980,6 +1044,7 @@ mod tests {
             .create(
                 "chat",
                 Some("kb-1".into()),
+                false,
                 Some(LlmSessionConfig {
                     provider: "deepseek".into(),
                     model: "deepseek-v4-flash".into(),
@@ -1021,9 +1086,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn notebook_binding_survives_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("organize", None, true, None, None, None)
+            .await
+            .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let entry = reopened.ensure_entry(&id).await.unwrap();
+
+        assert_eq!(entry.capability, "organize");
+        assert!(entry.notebook_enabled);
+        assert!(entry.kb.is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn list_returns_runtime_sessions() {
         let pool = test_pool();
-        pool.create("chat", None, None, None, None).await.unwrap();
+        pool.create("chat", None, false, None, None, None).await.unwrap();
 
         let sessions = pool.list(Some(10)).await.unwrap();
         assert_eq!(sessions.len(), 1);
@@ -1032,7 +1116,7 @@ mod tests {
     #[tokio::test]
     async fn rename_updates_runtime_metadata() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
 
         pool.rename(&id, Some("Algebra review".into()))
             .await
@@ -1045,7 +1129,7 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_runtime_session() {
         let pool = test_pool();
-        let id = pool.create("chat", None, None, None, None).await.unwrap();
+        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
 
         pool.delete(&id).await.unwrap();
 
