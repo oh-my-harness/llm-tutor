@@ -131,8 +131,6 @@ export function SpacePage({
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
-  const [draftTitle, setDraftTitle] = useState('')
-  const [draftMarkdown, setDraftMarkdown] = useState('')
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editMarkdown, setEditMarkdown] = useState('')
@@ -260,12 +258,8 @@ export function SpacePage({
   }
 
   const createNotebookEntry = async () => {
-    const title = draftTitle.trim() || 'Untitled note'
-    const markdown = draftMarkdown.trim()
-    if (!markdown) {
-      setStatus('Notebook markdown is empty')
-      return
-    }
+    const title = 'Untitled note'
+    const markdown = '# Untitled note\n\n'
     setLoading(true)
     try {
       const res = await fetch('/api/notebook/entries', {
@@ -283,9 +277,8 @@ export function SpacePage({
       const entry = data.entry as NotebookEntry
       setNotebookEntries((items) => [entry, ...items.filter((item) => item.id !== entry.id)])
       setActiveNotebookId(entry.id)
-      setDraftTitle('')
-      setDraftMarkdown('')
       setStatus('Notebook entry created')
+      startEditNotebookEntry(entry)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -667,16 +660,12 @@ export function SpacePage({
           <NotebookTab
             entries={notebookEntries}
             activeEntry={activeNotebookEntry}
-            draftTitle={draftTitle}
-            draftMarkdown={draftMarkdown}
             status={status}
             loading={loading}
             editingEntryId={editingNotebookId}
             editTitle={editTitle}
             editMarkdown={editMarkdown}
             onSelectEntry={setActiveNotebookId}
-            onDraftTitleChange={setDraftTitle}
-            onDraftMarkdownChange={setDraftMarkdown}
             onCreateEntry={() => void createNotebookEntry()}
             onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
             onStartEdit={startEditNotebookEntry}
@@ -734,16 +723,12 @@ export function SpacePage({
 function NotebookTab({
   entries,
   activeEntry,
-  draftTitle,
-  draftMarkdown,
   status,
   loading,
   editingEntryId,
   editTitle,
   editMarkdown,
   onSelectEntry,
-  onDraftTitleChange,
-  onDraftMarkdownChange,
   onCreateEntry,
   onDeleteEntry,
   onStartEdit,
@@ -764,16 +749,12 @@ function NotebookTab({
 }: {
   entries: NotebookEntry[]
   activeEntry: NotebookEntry | null
-  draftTitle: string
-  draftMarkdown: string
   status: string
   loading: boolean
   editingEntryId: string | null
   editTitle: string
   editMarkdown: string
   onSelectEntry: (id: string) => void
-  onDraftTitleChange: (value: string) => void
-  onDraftMarkdownChange: (value: string) => void
   onCreateEntry: () => void
   onDeleteEntry: (entry: NotebookEntry) => void
   onStartEdit: (entry: NotebookEntry) => void
@@ -801,22 +782,10 @@ function NotebookTab({
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
         <div className="space-y-3 border-b border-gray-100 p-4">
-          <input
-            className={inputClassName}
-            value={draftTitle}
-            onChange={(event) => onDraftTitleChange(event.target.value)}
-            placeholder="Note title"
-          />
-          <textarea
-            className={`${inputClassName} min-h-28 resize-none leading-6`}
-            value={draftMarkdown}
-            onChange={(event) => onDraftMarkdownChange(event.target.value)}
-            placeholder="Write Markdown..."
-          />
           <button
             className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
             type="button"
-            disabled={!draftMarkdown.trim()}
+            disabled={loading}
             onClick={onCreateEntry}
           >
             <Plus size={16} />
