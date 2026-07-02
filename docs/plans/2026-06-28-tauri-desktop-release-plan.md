@@ -231,12 +231,24 @@ First Windows artifacts:
 
 macOS artifacts:
 
-- Build on macOS, preferably through GitHub Actions `macos-latest`.
+- Build on macOS through GitHub Actions. The first CI target is
+  `macos-13`/`x86_64-apple-darwin`; Apple Silicon or universal builds can be
+  added later.
 - Publish a `.dmg` for each public desktop release.
 - Start with unsigned artifacts for internal validation if needed.
 - Before broader public distribution, add Developer ID signing, notarization,
   and stapling.
 - Upload macOS artifacts to the same GitHub Release as the Windows installers.
+
+Release automation:
+
+- `.github/workflows/release-desktop.yml` is the preferred release path.
+- Pushing a `v*` tag builds Windows and macOS desktop artifacts and uploads
+  them to the matching GitHub Release.
+- Manual `workflow_dispatch` builds the same artifacts as workflow artifacts
+  without publishing a release, so it can be used to validate packaging changes.
+- Local `scripts/build-desktop.ps1` and `scripts/qa-desktop.ps1` remain the
+  fallback path for debugging Windows release issues.
 
 ## 10. Implementation Phases
 

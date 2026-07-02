@@ -1,0 +1,106 @@
+name: Release desktop artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+            artifact_name: windows-x64
+            artifact_paths: |
+              target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*setup.exe
+          - label: macOS x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            bundles: dmg
+            artifact_name: macos-x64
+            artifact_paths: |
+              target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix web-ui
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+
+      - name: Install Windows bundle tools
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install nsis -y --no-progress
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "2.11.4" --locked
+
+      - name: Build tutor-web sidecar
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          exe=""
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            exe=".exe"
+          fi
+          cargo build --release -p tutor-web --target "${TARGET}"
+          mkdir -p src-tauri/binaries
+          cp "target/${TARGET}/release/tutor-web${exe}" "src-tauri/binaries/tutor-web-${TARGET}${exe}"
+
+      - name: Build Tauri bundle
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: |
+          set -euo pipefail
+          cargo tauri build --target "${TARGET}" --config src-tauri/tauri.release.conf.json --ci --bundles "${BUNDLES}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tutor-agent-${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact_paths }}
+          fail_on_unmatched_files: true
