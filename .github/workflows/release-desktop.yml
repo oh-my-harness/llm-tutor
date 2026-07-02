@@ -72,7 +72,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          key: desktop-${{ matrix.target }}
+          shared-key: desktop-${{ runner.os }}-${{ matrix.target }}
+          key: release-${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Install Windows build dependencies
         if: runner.os == 'Windows'
