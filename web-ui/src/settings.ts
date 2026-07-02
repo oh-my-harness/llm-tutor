@@ -1,3 +1,5 @@
+import type { UiLanguage } from './i18n'
+
 export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
 export type SearchProvider =
@@ -44,6 +46,7 @@ export interface SearchConfig {
 }
 
 export interface LlmSettings {
+  language: UiLanguage
   provider: LlmProvider
   model: string
   apiKey: string
@@ -62,6 +65,7 @@ export interface LlmSettings {
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000
 
 export const defaultLlmSettings: LlmSettings = {
+  language: 'zh-CN',
   provider: 'openai',
   model: 'deepseek-v4-flash',
   apiKey: '',
@@ -318,6 +322,7 @@ function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
       : normalizeLlmProvider((parsed as { provider?: unknown }).provider),
     budgetLimitUsd: Number(parsed.budgetLimitUsd ?? defaultLlmSettings.budgetLimitUsd),
     requireApproval: Boolean(parsed.requireApproval),
+    language: normalizeUiLanguage((parsed as { language?: unknown }).language),
     llmConfigs,
     activeLlmConfigId,
     embeddingConfigs,
@@ -325,6 +330,10 @@ function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
     searchConfigs,
     activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
   }
+}
+
+function normalizeUiLanguage(value: unknown): UiLanguage {
+  return value === 'en-US' ? 'en-US' : 'zh-CN'
 }
 
 function hasSettingsPayload(value: unknown): boolean {

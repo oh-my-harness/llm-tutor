@@ -18,6 +18,7 @@ import {
   llmProviderPreset,
   searchProviderPreset,
 } from '../settings'
+import { useI18n, type TranslationKey, type UiLanguage } from '../i18n'
 import type {
   EmbeddingModelConfig,
   LlmModelConfig,
@@ -52,15 +53,25 @@ type ConfigTestState = {
   message: string
 }
 
-const settingsTabs: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
-  { key: 'appearance', label: '外观', icon: Palette },
-  { key: 'llm', label: 'LLM', icon: Brain },
-  { key: 'embedding', label: '嵌入模型', icon: Database },
-  { key: 'search', label: 'Search', icon: Globe2 },
-  { key: 'governance', label: '能力', icon: SlidersHorizontal },
+const settingsTabs: Array<{
+  key: SettingsTab
+  labelKey:
+    | 'settings.tabs.appearance'
+    | 'settings.tabs.llm'
+    | 'settings.tabs.embedding'
+    | 'settings.tabs.search'
+    | 'settings.tabs.governance'
+  icon: LucideIcon
+}> = [
+  { key: 'appearance', labelKey: 'settings.tabs.appearance', icon: Palette },
+  { key: 'llm', labelKey: 'settings.tabs.llm', icon: Brain },
+  { key: 'embedding', labelKey: 'settings.tabs.embedding', icon: Database },
+  { key: 'search', labelKey: 'settings.tabs.search', icon: Globe2 },
+  { key: 'governance', labelKey: 'settings.tabs.governance', icon: SlidersHorizontal },
 ]
 
 export function SettingsPage({ settings, onChange }: Props) {
+  const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
   const [dataDir, setDataDir] = useState<string | null>(null)
@@ -82,6 +93,10 @@ export function SettingsPage({ settings, onChange }: Props) {
 
   const update = <K extends keyof LlmSettings>(key: K, value: LlmSettings[K]) => {
     onChange({ ...settings, [key]: value })
+  }
+
+  const setLanguage = (language: UiLanguage) => {
+    onChange({ ...settings, language })
   }
 
   const activeLlmConfig =
@@ -328,8 +343,8 @@ export function SettingsPage({ settings, onChange }: Props) {
     <main className="flex min-h-0 flex-1 bg-gray-50">
       <aside className="hidden w-64 shrink-0 border-r border-gray-200 bg-white px-4 py-6 md:block">
         <div className="mb-8 px-2">
-          <h2 className="text-xl font-semibold text-gray-900">设置</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-600">配置模型服务、知识库索引和运行能力。</p>
+          <h2 className="text-xl font-semibold text-gray-900">{t('settings.title')}</h2>
+          <p className="mt-2 text-sm leading-6 text-gray-600">{t('settings.subtitle')}</p>
         </div>
 
         <nav className="space-y-1">
@@ -346,7 +361,7 @@ export function SettingsPage({ settings, onChange }: Props) {
                 onClick={() => setActiveTab(tab.key)}
               >
                 <Icon size={18} />
-                <span>{tab.label}</span>
+                <span>{t(tab.labelKey)}</span>
               </button>
             )
           })}
@@ -368,35 +383,57 @@ export function SettingsPage({ settings, onChange }: Props) {
               >
                 {settingsTabs.map((tab) => (
                   <option key={tab.key} value={tab.key}>
-                    {tab.label}
+                    {t(tab.labelKey)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">{settingsTabs.find((tab) => tab.key === activeTab)?.label}</h2>
-              <p className="mt-1 text-sm text-gray-600">{tabDescription(activeTab)}</p>
+              <h2 className="text-xl font-semibold text-gray-900">
+                {t(settingsTabs.find((tab) => tab.key === activeTab)?.labelKey ?? 'settings.tabs.llm')}
+              </h2>
+              <p className="mt-1 text-sm text-gray-600">{tabDescription(activeTab, t)}</p>
             </div>
-            <span className="ml-auto text-sm text-gray-500">所有更改已保存</span>
+            <span className="ml-auto text-sm text-gray-500">{t('settings.saved')}</span>
           </div>
 
           {activeTab === 'appearance' && (
             <SettingsPanel
               icon={Palette}
-              title="界面外观"
-              description="这些设置会作为后续主题和语言配置的入口。"
+              title={t('settings.appearance.title')}
+              description={t('settings.appearance.description')}
             >
               <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                 <div>
-                  <div className="text-sm font-medium text-gray-900">界面语言</div>
-                  <div className="mt-1 text-sm text-gray-500">当前使用中文界面。</div>
+                  <div className="text-sm font-medium text-gray-900">{t('settings.language.title')}</div>
+                  <div className="mt-1 text-sm text-gray-500">
+                    {settings.language === 'en-US'
+                      ? t('settings.language.description.en')
+                      : t('settings.language.description.zh')}
+                  </div>
                 </div>
                 <div className="inline-flex rounded-md border border-gray-300 bg-gray-50 p-1 text-sm">
-                  <button type="button" className="px-3 py-1 text-gray-500">
-                    English
+                  <button
+                    type="button"
+                    className={`px-3 py-1 ${
+                      settings.language === 'en-US'
+                        ? 'rounded bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500'
+                    }`}
+                    onClick={() => setLanguage('en-US')}
+                  >
+                    {t('settings.language.english')}
                   </button>
-                  <button type="button" className="rounded bg-white px-3 py-1 text-gray-900 shadow-sm">
-                    中文
+                  <button
+                    type="button"
+                    className={`px-3 py-1 ${
+                      settings.language === 'zh-CN'
+                        ? 'rounded bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500'
+                    }`}
+                    onClick={() => setLanguage('zh-CN')}
+                  >
+                    {t('settings.language.chinese')}
                   </button>
                 </div>
               </div>
@@ -818,12 +855,15 @@ export function SettingsPage({ settings, onChange }: Props) {
   )
 }
 
-function tabDescription(tab: SettingsTab) {
-  if (tab === 'appearance') return '调整界面语言和视觉偏好。'
-  if (tab === 'llm') return '配置对话模型服务，可新增多个服务配置。'
-  if (tab === 'embedding') return '配置知识库检索使用的嵌入模型。'
-  if (tab === 'search') return '配置 agent web_search 工具使用的搜索服务。'
-  return '配置预算和工具执行策略。'
+function tabDescription(tab: SettingsTab, t: (key: TranslationKey) => string) {
+  const keyByTab: Record<SettingsTab, TranslationKey> = {
+    appearance: 'settings.appearance.description',
+    llm: 'settings.llm.description',
+    embedding: 'settings.embedding.description',
+    search: 'settings.search.description',
+    governance: 'settings.governance.description',
+  }
+  return t(keyByTab[tab])
 }
 
 function EmptyConfig({ label, onAdd }: { label: string; onAdd: () => void }) {

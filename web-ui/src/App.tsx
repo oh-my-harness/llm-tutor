@@ -28,6 +28,7 @@ import {
   settingsForSession,
 } from './settings'
 import type { QuizSession } from './quizTypes'
+import { I18nProvider, translate, type TranslationKey } from './i18n'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
@@ -928,8 +929,10 @@ export default function App() {
   }, [handleSelectSession, pushStatus])
 
   const chatIsEmpty = view === 'chat' && messages.length === 0 && !streamingText && !sessionId
+  const t = (key: TranslationKey) => translate(llmSettings.language, key)
 
   return (
+    <I18nProvider language={llmSettings.language}>
     <div className="flex h-screen bg-gray-50">
       <Sidebar
         activeView={view}
@@ -947,8 +950,8 @@ export default function App() {
           <>
             <header className="flex items-center gap-4 bg-white px-6 py-3">
               <div>
-                <h1 className="text-lg font-semibold text-gray-900">聊天</h1>
-                <p className="text-xs text-gray-500">Ask questions, run code, and inspect traces.</p>
+                <h1 className="text-lg font-semibold text-gray-900">{t('chat.title')}</h1>
+                <p className="text-xs text-gray-500">{t('chat.subtitle')}</p>
               </div>
               <div className="ml-auto">
                 <BudgetPanel spent={budgetSpent} limit={llmSettings.budgetLimitUsd} warning={budgetWarning} />
@@ -1037,6 +1040,7 @@ export default function App() {
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />
     </div>
+    </I18nProvider>
   )
 }
 

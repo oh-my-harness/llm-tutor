@@ -17,6 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { useI18n } from '../i18n'
 
 export type AppView =
   | 'chat'
@@ -46,16 +47,23 @@ interface Props {
 
 const navItems: Array<{
   key: AppView
-  label: string
+  labelKey:
+    | 'nav.chat'
+    | 'nav.tutor'
+    | 'nav.writing'
+    | 'nav.books'
+    | 'nav.knowledge'
+    | 'nav.space'
+    | 'nav.memory'
   icon: typeof MessageSquare
 }> = [
-  { key: 'chat', label: '聊天', icon: MessageSquare },
-  { key: 'tutor', label: '辅导机器人', icon: Bot },
-  { key: 'writing', label: '智能写作', icon: PencilLine },
-  { key: 'books', label: '书籍', icon: Library },
-  { key: 'knowledge', label: '知识库', icon: BookOpen },
-  { key: 'space', label: '空间', icon: Grid2X2 },
-  { key: 'memory', label: '记忆', icon: Brain },
+  { key: 'chat', labelKey: 'nav.chat', icon: MessageSquare },
+  { key: 'tutor', labelKey: 'nav.tutor', icon: Bot },
+  { key: 'writing', labelKey: 'nav.writing', icon: PencilLine },
+  { key: 'books', labelKey: 'nav.books', icon: Library },
+  { key: 'knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+  { key: 'space', labelKey: 'nav.space', icon: Grid2X2 },
+  { key: 'memory', labelKey: 'nav.memory', icon: Brain },
 ]
 
 export function Sidebar({
@@ -68,6 +76,7 @@ export function Sidebar({
   onDeleteSession,
   onToggleCollapsed,
 }: Props) {
+  const { t } = useI18n()
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
 
@@ -108,13 +117,13 @@ export function Sidebar({
           </div>
           {!collapsed && <div>
             <div className="text-lg font-semibold text-gray-900">Tutor Agent</div>
-            <div className="text-xs text-gray-500">AI learning workspace</div>
+            <div className="text-xs text-gray-500">{t('app.subtitle')}</div>
           </div>}
         </button>
         {!collapsed && (
           <button
             className="rounded p-2 text-gray-500 hover:bg-gray-100"
-            title="Collapse sidebar"
+            title={t('nav.collapse')}
             onClick={onToggleCollapsed}
           >
             <PanelLeftClose size={18} />
@@ -125,7 +134,7 @@ export function Sidebar({
       {collapsed && (
         <button
           className="mx-auto mb-2 rounded p-2 text-gray-500 hover:bg-gray-100"
-          title="Expand sidebar"
+          title={t('nav.expand')}
           onClick={onToggleCollapsed}
         >
           <PanelLeftOpen size={18} />
@@ -136,10 +145,11 @@ export function Sidebar({
         {navItems.map((item) => {
           const Icon = item.icon
           const active = activeView === item.key
+          const label = t(item.labelKey)
           return (
             <button
               key={item.key}
-              title={item.label}
+              title={label}
               className={`flex w-full items-center rounded-lg py-2.5 text-left text-sm ${
                 collapsed ? 'justify-center px-2' : 'gap-3 px-3'
               } ${
@@ -150,7 +160,7 @@ export function Sidebar({
               onClick={() => onNavigate(item.key)}
             >
               <Icon size={19} />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && <span>{label}</span>}
             </button>
           )
         })}
@@ -162,11 +172,11 @@ export function Sidebar({
         ) : (
           <>
         <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-gray-500">
-          最近
+          {t('nav.recent')}
         </div>
         <div className="space-y-1">
           {recentSessions.length === 0 ? (
-            <div className="rounded-lg px-3 py-2 text-sm text-gray-400">暂无历史会话</div>
+            <div className="rounded-lg px-3 py-2 text-sm text-gray-400">{t('nav.noRecent')}</div>
           ) : (
             recentSessions.map((session) => {
               const editing = editingSessionId === session.id
@@ -225,7 +235,7 @@ export function Sidebar({
 
       <div className={`border-t border-gray-200 ${collapsed ? 'p-2' : 'p-3'}`}>
         <button
-          title="设置"
+          title={t('nav.settings')}
           className={`flex w-full items-center rounded-lg py-2.5 text-left text-sm ${
             collapsed ? 'justify-center px-2' : 'gap-3 px-3'
           } ${
@@ -236,7 +246,7 @@ export function Sidebar({
           onClick={() => onNavigate('settings')}
         >
           <Settings size={19} />
-          {!collapsed && <span>设置</span>}
+          {!collapsed && <span>{t('nav.settings')}</span>}
         </button>
         {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v0.1.0</div>}
       </div>

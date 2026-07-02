@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import type { LlmModelConfig } from '../settings'
 import type { QuizSession } from '../quizTypes'
+import { useI18n, type TranslationKey } from '../i18n'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
@@ -64,13 +65,13 @@ export interface SpaceMention {
 
 const spaceMentionFilterOptions: Array<{
   value: SpaceMentionFilter
-  label: string
+  labelKey: TranslationKey
   icon: ReactNode
 }> = [
-  { value: 'all', label: '全部', icon: <AtSign size={14} /> },
-  { value: 'notebook_entry', label: '笔记', icon: <FileText size={14} /> },
-  { value: 'quiz_session', label: '测验', icon: <SearchCheck size={14} /> },
-  { value: 'quiz_question', label: '题目', icon: <FileQuestion size={14} /> },
+  { value: 'all', labelKey: 'mention.filter.all', icon: <AtSign size={14} /> },
+  { value: 'notebook_entry', labelKey: 'mention.filter.notes', icon: <FileText size={14} /> },
+  { value: 'quiz_session', labelKey: 'mention.filter.quizzes', icon: <SearchCheck size={14} /> },
+  { value: 'quiz_question', labelKey: 'mention.filter.questions', icon: <FileQuestion size={14} /> },
 ]
 
 export interface NotebookEditProposal {
@@ -134,41 +135,46 @@ export interface ContextStats {
   source: 'provider' | 'estimate'
 }
 
-const modeOptions: Array<{ value: Capability; label: string; description: string; icon: ReactNode }> = [
+const modeOptions: Array<{
+  value: Capability
+  labelKey: TranslationKey
+  descriptionKey: TranslationKey
+  icon: ReactNode
+}> = [
   {
     value: 'chat',
-    label: '聊天',
-    description: '灵活对话，可使用任意工具',
+    labelKey: 'cap.chat',
+    descriptionKey: 'cap.chat.description',
     icon: <MessageSquare size={21} />,
   },
   {
     value: 'deep_solve',
-    label: '解题',
-    description: '多步推理与问题求解',
+    labelKey: 'cap.deepSolve',
+    descriptionKey: 'cap.deepSolve.description',
     icon: <Brain size={21} />,
   },
   {
     value: 'code_exec',
-    label: '代码',
-    description: '运行代码并验证结果',
+    labelKey: 'cap.codeExec',
+    descriptionKey: 'cap.codeExec.description',
     icon: <Code2 size={21} />,
   },
   {
     value: 'quiz',
-    label: 'Quiz',
-    description: '基于对话或知识库生成测验',
+    labelKey: 'cap.quiz',
+    descriptionKey: 'cap.quiz.description',
     icon: <FileQuestion size={21} />,
   },
   {
     value: 'research',
-    label: '研究',
-    description: '搜索、阅读并生成带引用的研究报告',
+    labelKey: 'cap.research',
+    descriptionKey: 'cap.research.description',
     icon: <SearchCheck size={21} />,
   },
   {
     value: 'organize',
-    label: 'Organize',
-    description: 'Search and organize Notebook notes',
+    labelKey: 'cap.organize',
+    descriptionKey: 'cap.organize.description',
     icon: <FileText size={21} />,
   },
 ]
@@ -890,6 +896,7 @@ function Composer({
   running: boolean
   variant: 'center' | 'bottom'
 }) {
+  const { t } = useI18n()
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [readingAttachments, setReadingAttachments] = useState(false)
   const [spaceQuery, setSpaceQuery] = useState('')
@@ -909,14 +916,14 @@ function Composer({
   const knowledgeOptions = [
     {
       id: '',
-      name: '不关联知识库',
-      description: '仅使用当前对话上下文',
+      name: t('chat.knowledge.none'),
+      description: t('chat.knowledge.none.description'),
       icon: <Database size={21} />,
     },
     ...knowledgeBases.map((item) => ({
       id: item.id,
       name: item.name,
-      description: '关联此知识库进行检索',
+      description: t('chat.knowledge.use.description'),
       icon: <Database size={21} />,
     })),
   ]
@@ -926,7 +933,7 @@ function Composer({
       id: '__notebook__',
       type: 'notebook' as const,
       name: 'Notebook',
-      description: 'Search Notebook as plain Markdown text',
+      description: t('chat.notebook.description'),
       icon: <FileText size={21} />,
     },
     ...knowledgeOptions.slice(1).map((item) => ({
@@ -1003,7 +1010,7 @@ function Composer({
             onSend()
           }
         }}
-        placeholder="今天我能帮您什么？"
+        placeholder={t('chat.input.placeholder')}
       />
       {attachments.length > 0 && (
         <div className="border-t border-blue-50 px-4 py-2">
@@ -1024,7 +1031,7 @@ function Composer({
           <ToolbarButton
             active={openMenu === 'mode'}
             icon={activeMode.icon}
-            label={activeMode.label}
+            label={t(activeMode.labelKey)}
             onClick={() => toggleMenu('mode')}
           />
           {openMenu === 'mode' && (
@@ -1034,8 +1041,8 @@ function Composer({
                   key={mode.value}
                   selected={mode.value === capability}
                   icon={mode.icon}
-                  title={mode.label}
-                  description={mode.description}
+                  title={t(mode.labelKey)}
+                  description={t(mode.descriptionKey)}
                   onClick={() => {
                     onCapabilityChange(mode.value)
                     setOpenMenu(null)
@@ -1053,7 +1060,7 @@ function Composer({
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip size={18} />
-          附件
+          {t('chat.attachments')}
         </button>
         <input
           ref={fileInputRef}
@@ -1067,7 +1074,7 @@ function Composer({
           <ToolbarButton
             active={openMenu === 'knowledge'}
             icon={<Database size={18} />}
-            label={activeKnowledge?.name ?? '不关联知识库'}
+            label={activeKnowledge?.name ?? t('chat.knowledge.none')}
             onClick={() => toggleMenu('knowledge')}
           />
           {openMenu === 'knowledge' && (
@@ -1103,7 +1110,7 @@ function Composer({
           <ToolbarButton
             active={openMenu === 'space'}
             icon={<AtSign size={18} />}
-            label={mentions.length > 0 ? `Space ${mentions.length}` : 'Space'}
+            label={mentions.length > 0 ? `${t('nav.space')} ${mentions.length}` : t('nav.space')}
             onClick={() => toggleMenu('space')}
           />
           {openMenu === 'space' && (
@@ -1125,7 +1132,7 @@ function Composer({
                       onClick={() => setSpaceMentionFilter(option.value)}
                     >
                       {option.icon}
-                      {option.label}
+                      {t(option.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -1133,17 +1140,17 @@ function Composer({
                   className="h-9 w-full rounded-xl border border-blue-100 px-3 text-sm outline-none focus:border-blue-300"
                   value={spaceQuery}
                   onChange={(event) => setSpaceQuery(event.target.value)}
-                  placeholder="Search notebook and quiz..."
+                  placeholder={t('chat.space.searchPlaceholder')}
                   autoFocus
                 />
                 {loadingSpaceMentions && (
-                  <div className="px-1 text-xs text-blue-500">Updating...</div>
+                  <div className="px-1 text-xs text-blue-500">{t('chat.space.updating')}</div>
                 )}
               </div>
               <div className="min-h-0 overflow-y-auto py-2">
                 {visibleSpaceMentions.length === 0 ? (
                   <div className="px-5 py-4 text-sm text-gray-500">
-                    No matching {spaceMentionFilterLabel(spaceMentionFilter)}.
+                    {t('chat.space.noMatching')}
                   </div>
                 ) : (
                   visibleSpaceMentions.map((mention) => (
@@ -1169,7 +1176,7 @@ function Composer({
           <ToolbarButton
             active={openMenu === 'model'}
             icon={<Brain size={16} />}
-            label={activeModel?.model ?? '选择模型'}
+            label={activeModel?.model ?? t('chat.model.select')}
             onClick={() => toggleMenu('model')}
           />
           {openMenu === 'model' && (
@@ -1178,8 +1185,8 @@ function Composer({
                 <DropdownOption
                   selected
                   icon={<Brain size={21} />}
-                  title="暂无模型配置"
-                  description="请先到设置中添加 LLM 配置"
+                  title={t('chat.model.none')}
+                  description={t('chat.model.configureFirst')}
                   onClick={() => setOpenMenu(null)}
                 />
               ) : (
@@ -1208,7 +1215,7 @@ function Composer({
           onClick={running ? onStop : onSend}
           disabled={disabled || (!running && !input.trim() && attachments.filter((attachment) => !attachment.error).length === 0 && mentions.length === 0)}
           type="button"
-          title={running ? '停止生成' : '发送'}
+          title={running ? t('chat.stop') : t('chat.send')}
         >
           {running ? <Square size={15} /> : <ArrowUp size={20} />}
         </button>
@@ -1417,13 +1424,6 @@ function spaceMentionTypeLabel(mention: SpaceMention) {
   if (mention.type === 'notebook_entry') return 'Note'
   if (mention.type === 'quiz_question') return 'Question'
   return 'Quiz'
-}
-
-function spaceMentionFilterLabel(filter: SpaceMentionFilter) {
-  if (filter === 'notebook_entry') return 'notes'
-  if (filter === 'quiz_question') return 'questions'
-  if (filter === 'quiz_session') return 'quizzes'
-  return 'Space items'
 }
 
 function filterSpaceMentions(mentions: SpaceMention[], filter: SpaceMentionFilter) {
