@@ -331,6 +331,13 @@
 - REQ-815: Notebook import from Markdown or Obsidian Vault folders shall prefer the source file name stem as the entry title, while preserving `frontmatter.title` as metadata, subtitle, or alias. Status: implemented.
 - REQ-816: Notebook file-backed storage shall preserve imported relative folder paths where possible. Status: implemented.
 - REQ-817: Notebook create, edit, rename, delete, import, export, and agent-applied edit flows shall update Markdown files and the Notebook index consistently. Status: partially implemented; create, edit, delete, import, export, and agent-applied edits are covered, while explicit path rename/link-update workflows remain planned.
+- REQ-818: Agent autonomous Notebook/Vault exploration shall be available only when the chat source selector is associated with Notebook. Status: planned.
+- REQ-819: When Notebook is not associated and the user has not explicitly `@` mentioned a Notebook entry, the agent shall not silently search or read Notebook content. Status: planned.
+- REQ-820: Explicit `@` Notebook references shall still allow reading the referenced entry through `read_space_item`, even when Notebook is not the associated source. Status: planned.
+- REQ-821: Notebook/Vault maintenance capabilities such as edit proposals, link suggestions, tag cleanup, move/rename proposals, duplicate review, merge proposals, and new-note proposals shall be enabled only in Organize mode. Status: planned.
+- REQ-822: Non-Organize modes may answer from explicitly referenced or associated Notebook content, but shall not initiate Notebook maintenance proposals unless the session is switched to Organize mode. Status: planned.
+- REQ-823: Notebook exploration tools shall be vault-aware and return stable ids together with paths, titles, entry types, tags, snippets, and link/backlink metadata where available. Status: planned.
+- REQ-824: Notebook maintenance tools shall remain proposal-only; applying changes shall require user confirmation and shall execute through product Notebook APIs, not direct agent file-system writes. Status: planned.
 
 ## 18. Quiz Bank
 

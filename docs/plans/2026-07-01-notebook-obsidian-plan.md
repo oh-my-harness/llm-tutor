@@ -296,16 +296,34 @@ Write behavior:
 Potential future tools:
 
 ```text
+list_notebook_tree
 read_notebook_note
 search_notebook
-propose_notebook_edit
-propose_notebook_links
-propose_notebook_tags
-propose_notebook_merge
+propose_notebook_change
 ```
 
 `read_space_item` can remain the initial boundary. Add more specific Notebook
 tools only when the generic Space tool becomes awkward.
+
+Tool availability rules:
+
+- Notebook exploration tools are available only when the chat source selector is
+  set to Notebook, or when the user explicitly references Notebook content with
+  `@`.
+- Explicit `@` references allow the agent to read the mentioned artifact through
+  `read_space_item`; they do not grant permission to explore the whole Vault.
+- Notebook maintenance tools are available only in Organize mode.
+- Chat, Quiz, Research, and Deep Solve may answer from explicitly referenced or
+  associated Notebook content, but they should not propose Notebook maintenance
+  operations unless the session is in Organize mode.
+- Applying Notebook changes remains product-owned and user-confirmed. The agent
+  must never write directly to the Vault or bypass Notebook APIs.
+
+Exploration capability means the agent can inspect the Vault without changing
+it: list the tree, search paths/titles/tags/frontmatter/body/wiki links, read
+selected notes, and inspect links/backlinks. Maintenance capability means the
+agent can propose changes: edits, links, tags, moves, renames, merges, splits,
+or new notes.
 
 ### Chat-Triggered Organization
 
@@ -373,8 +391,11 @@ Behavior rules:
 
 - If the user explicitly references an artifact with `@`, use `read_space_item`
   for that exact artifact.
+- If Notebook is not associated in the chat source selector, do not search or
+  read unrelated Notebook entries autonomously.
 - If the user asks about "my notes", "Notebook", "previously saved", or a topic
-  likely stored in Notebook, call `search_notebook` before answering.
+  likely stored in Notebook, call `search_notebook` before answering only when
+  Notebook is associated.
 - If search returns one or a few high-confidence candidates, read the relevant
   note(s) and answer with Notebook citations.
 - If search returns ambiguous candidates, ask the user to choose or present the
@@ -423,6 +444,8 @@ When Notebook is associated:
   `@` item or attachment is provided.
 - Research mode may use Notebook as private prior context, but external factual
   claims still require web search/fetch when appropriate.
+- The agent may autonomously explore Notebook as a plain-text Vault, but it
+  should cite navigable Notebook sources when using discovered notes.
 
 The backend should model this separately from `kb_id`:
 
@@ -475,8 +498,18 @@ Organize mode defaults:
 
 - Notebook association should be enabled by default when entering Organize mode.
 - The agent should search Notebook before making claims about saved notes.
-- The agent may propose edits, tags, links, or merges.
+- The agent may propose edits, tags, links, moves, renames, merges, splits, or
+  new notes.
 - All writes must remain proposal-first and user-confirmed.
+
+Maintenance mode boundary:
+
+- Notebook maintenance proposal tools are only registered in Organize mode.
+- If a user asks for maintenance from another mode, the assistant should explain
+  that Notebook maintenance requires Organize mode and offer to continue there.
+- Read-only Notebook exploration can still happen outside Organize mode when
+  Notebook is associated, but only for answering, quiz generation, or research
+  grounding.
 
 ## 6. Import / Export Architecture
 
