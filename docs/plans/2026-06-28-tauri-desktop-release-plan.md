@@ -54,6 +54,7 @@ first release.
 ### In Scope
 
 - Windows desktop release first.
+- macOS desktop artifacts for every future public desktop release.
 - Tauri project added to the repository.
 - Existing `web-ui` bundled into the desktop app.
 - `tutor-web` built as a sidecar binary.
@@ -72,7 +73,7 @@ first release.
 - Auto update.
 - System keychain storage for API keys.
 - Rewriting all backend routes as Tauri commands.
-- macOS / Linux release packaging.
+- Linux release packaging.
 
 ## 4. Data Directory
 
@@ -227,6 +228,15 @@ First Windows artifacts:
 
 - portable `.exe` or zipped app folder for quick testing,
 - installer if Tauri bundler setup is stable.
+
+macOS artifacts:
+
+- Build on macOS, preferably through GitHub Actions `macos-latest`.
+- Publish a `.dmg` for each public desktop release.
+- Start with unsigned artifacts for internal validation if needed.
+- Before broader public distribution, add Developer ID signing, notarization,
+  and stapling.
+- Upload macOS artifacts to the same GitHub Release as the Windows installers.
 
 ## 10. Implementation Phases
 

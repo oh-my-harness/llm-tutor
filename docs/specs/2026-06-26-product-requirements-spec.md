@@ -534,6 +534,7 @@
 - REQ-567: The release process shall support reproducible builds through scripts or CI. Status: planned.
 - REQ-568: The app shall preserve the local-first storage model in the desktop release. Status: planned.
 - REQ-569: Desktop packaging details shall be tracked in `docs/plans/2026-06-28-tauri-desktop-release-plan.md`. Status: planned.
+- REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: planned.
 
 ## 30. Acceptance Baseline
 
