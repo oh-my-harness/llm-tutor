@@ -3,12 +3,15 @@ import {
   AlertTriangle,
   BookMarked,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   Edit3,
   FileQuestion,
   FileText,
+  Folder,
+  FolderOpen,
   Link2,
   Network,
   NotebookPen,
@@ -850,6 +853,32 @@ function NotebookTab({
   const [relationsCollapsed, setRelationsCollapsed] = useState(false)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const notebookTree = useMemo(() => buildNotebookTree(entries), [entries])
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  const folderPaths = useMemo(() => collectNotebookFolderPaths(notebookTree), [notebookTree])
+  const knownFolderPathsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    setExpandedFolders((current) => {
+      const next = new Set(current)
+      const known = knownFolderPathsRef.current
+      for (const folderPath of folderPaths) {
+        if (known.size === 0 || !known.has(folderPath)) next.add(folderPath)
+      }
+      knownFolderPathsRef.current = new Set(folderPaths)
+      return next
+    })
+  }, [folderPaths])
+
+  const toggleFolder = useCallback((folderPath: string) => {
+    setExpandedFolders((current) => {
+      const next = new Set(current)
+      if (next.has(folderPath)) next.delete(folderPath)
+      else next.add(folderPath)
+      return next
+    })
+  }, [])
+
   const wikiLinkResolver = useCallback((target: string): SourceReference | undefined => {
     if (!activeEntry) return undefined
     const normalized = target.trim().toLowerCase()
@@ -1086,44 +1115,15 @@ function NotebookTab({
           {entries.length === 0 ? (
             <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No notebook entries yet</div>
           ) : (
-            <div className="space-y-2">
-              {entries.map((entry) => (
-                <button
-                  key={entry.id}
-                  className={`group flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm ${
-                    activeEntry?.id === entry.id ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
-                  }`}
-                  type="button"
-                  onClick={() => onSelectEntry(entry.id)}
-                >
-                  <FileText size={17} className="mt-0.5 shrink-0 text-blue-600" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-gray-900">{entry.title}</span>
-                    <span className="mt-0.5 block text-xs text-gray-500">{entry.entry_type.replaceAll('_', ' ')}</span>
-                    {entry.tags && entry.tags.length > 0 && (
-                      <span className="mt-2 flex flex-wrap gap-1">
-                        {entry.tags.slice(0, 3).map((tag) => (
-                          <span key={tag} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
-                            #{tag}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onDeleteEntry(entry)
-                    }}
-                  >
-                    <Trash2 size={15} />
-                  </span>
-                </button>
-              ))}
-            </div>
+            <NotebookFileTree
+              nodes={notebookTree}
+              activeEntryId={activeEntry?.id ?? null}
+              expandedFolders={expandedFolders}
+              depth={0}
+              onToggleFolder={toggleFolder}
+              onSelectEntry={onSelectEntry}
+              onDeleteEntry={onDeleteEntry}
+            />
           )}
         </div>
       </aside>
@@ -1387,6 +1387,123 @@ function NotebookRelationsPanel({
         </section>
       </div>
     </aside>
+  )
+}
+
+type NotebookTreeNode =
+  | {
+      type: 'folder'
+      name: string
+      path: string
+      children: NotebookTreeNode[]
+    }
+  | {
+      type: 'entry'
+      name: string
+      path: string
+      entry: NotebookEntry
+    }
+
+function NotebookFileTree({
+  nodes,
+  activeEntryId,
+  expandedFolders,
+  depth,
+  onToggleFolder,
+  onSelectEntry,
+  onDeleteEntry,
+}: {
+  nodes: NotebookTreeNode[]
+  activeEntryId: string | null
+  expandedFolders: Set<string>
+  depth: number
+  onToggleFolder: (folderPath: string) => void
+  onSelectEntry: (id: string) => void
+  onDeleteEntry: (entry: NotebookEntry) => void
+}) {
+  return (
+    <div className={depth === 0 ? 'space-y-0.5' : 'space-y-0.5'}>
+      {nodes.map((node) => {
+        if (node.type === 'folder') {
+          const expanded = expandedFolders.has(node.path)
+          return (
+            <div key={node.path}>
+              <button
+                className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-gray-700 hover:bg-white"
+                style={{ paddingLeft: `${8 + depth * 14}px` }}
+                type="button"
+                onClick={() => onToggleFolder(node.path)}
+              >
+                <ChevronDown
+                  size={14}
+                  className={`shrink-0 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`}
+                />
+                {expanded ? (
+                  <FolderOpen size={16} className="shrink-0 text-blue-500" />
+                ) : (
+                  <Folder size={16} className="shrink-0 text-gray-500" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+              </button>
+              {expanded && (
+                <NotebookFileTree
+                  nodes={node.children}
+                  activeEntryId={activeEntryId}
+                  expandedFolders={expandedFolders}
+                  depth={depth + 1}
+                  onToggleFolder={onToggleFolder}
+                  onSelectEntry={onSelectEntry}
+                  onDeleteEntry={onDeleteEntry}
+                />
+              )}
+            </div>
+          )
+        }
+
+        const entry = node.entry
+        const active = activeEntryId === entry.id
+        return (
+          <button
+            key={entry.id}
+            className={`group flex w-full items-start gap-2 rounded-md py-2 pr-2 text-left text-sm ${
+              active ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
+            }`}
+            style={{ paddingLeft: `${28 + depth * 14}px` }}
+            type="button"
+            title={entry.path ?? entry.title}
+            onClick={() => onSelectEntry(entry.id)}
+          >
+            <FileText size={16} className="mt-0.5 shrink-0 text-blue-600" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-gray-900">{entry.title}</span>
+              <span className="mt-0.5 block truncate text-xs text-gray-500">
+                {entry.path ?? entry.entry_type.replaceAll('_', ' ')}
+              </span>
+              {entry.tags && entry.tags.length > 0 && (
+                <span className="mt-1.5 flex flex-wrap gap-1">
+                  {entry.tags.slice(0, 3).map((tag) => (
+                    <span key={tag} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
+                      #{tag}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+              onClick={(event) => {
+                event.stopPropagation()
+                onDeleteEntry(entry)
+              }}
+            >
+              <Trash2 size={15} />
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1987,6 +2104,75 @@ function memoryFileLabel(path: string) {
     'L3/teaching_strategy.md': 'Teaching strategy',
   }
   return labels[path] ?? path
+}
+
+function buildNotebookTree(entries: NotebookEntry[]): NotebookTreeNode[] {
+  const root: NotebookTreeNode[] = []
+  const folders = new Map<string, Extract<NotebookTreeNode, { type: 'folder' }>>()
+
+  const ensureFolder = (segments: string[]) => {
+    let children = root
+    let currentPath = ''
+    for (const segment of segments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment
+      let folder = folders.get(currentPath)
+      if (!folder) {
+        folder = { type: 'folder', name: segment, path: currentPath, children: [] }
+        folders.set(currentPath, folder)
+        children.push(folder)
+        sortNotebookTreeNodes(children)
+      }
+      children = folder.children
+    }
+    return children
+  }
+
+  for (const entry of entries) {
+    const segments = notebookEntryPathSegments(entry)
+    const fileName = segments.pop() ?? `${entry.title || 'Untitled note'}.md`
+    const children = ensureFolder(segments)
+    children.push({
+      type: 'entry',
+      name: fileName,
+      path: [...segments, fileName].join('/'),
+      entry,
+    })
+    sortNotebookTreeNodes(children)
+  }
+
+  sortNotebookTreeNodes(root)
+  return root
+}
+
+function collectNotebookFolderPaths(nodes: NotebookTreeNode[]) {
+  const paths: string[] = []
+  const visit = (items: NotebookTreeNode[]) => {
+    for (const item of items) {
+      if (item.type === 'folder') {
+        paths.push(item.path)
+        visit(item.children)
+      }
+    }
+  }
+  visit(nodes)
+  return paths
+}
+
+function notebookEntryPathSegments(entry: NotebookEntry) {
+  const rawPath = (entry.path || `${entry.title || 'Untitled note'}.md`).replace(/\\/g, '/')
+  const segments = rawPath
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== '.' && segment !== '..')
+  if (segments.length === 0) return [`${entry.title || 'Untitled note'}.md`]
+  return segments
+}
+
+function sortNotebookTreeNodes(nodes: NotebookTreeNode[]) {
+  nodes.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+  })
 }
 
 function subtitleFor(tab: SpaceTab) {
