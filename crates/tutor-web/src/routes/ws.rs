@@ -26,7 +26,9 @@ use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
-use crate::space_tool::{ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool};
+use crate::space_tool::{
+    ListNotebookTreeTool, ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool,
+};
 
 #[derive(Clone)]
 struct WsState {
@@ -276,10 +278,15 @@ async fn run_tutor_message(
             .with_product_tool(Arc::new(ReadSpaceItemTool::new(
                 notebook.clone(),
                 quizzes.clone(),
-            )))
-            .with_product_tool(Arc::new(ProposeNotebookEditTool::new(notebook.clone())));
-        if entry.notebook_enabled || entry.capability == "organize" {
-            router = router.with_product_tool(Arc::new(SearchNotebookTool::new(notebook.clone())));
+            )));
+        if entry.notebook_enabled {
+            router = router
+                .with_product_tool(Arc::new(ListNotebookTreeTool::new(notebook.clone())))
+                .with_product_tool(Arc::new(SearchNotebookTool::new(notebook.clone())));
+        }
+        if entry.capability == "organize" {
+            router =
+                router.with_product_tool(Arc::new(ProposeNotebookEditTool::new(notebook.clone())));
         }
         if let Some(search) = web_search_config_for_session(entry.search.clone()) {
             router = router.with_web_search(search);
@@ -425,13 +432,19 @@ fn resolve_message_content_with_space_mentions(
             continue;
         };
         resolved_count += 1;
+        let path = mention
+            .metadata
+            .get("path")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         blocks.push(format!(
-            "- id: {}; item_type: {}; target_id: {}; question_id: {}; title: {}",
+            "- id: {}; item_type: {}; target_id: {}; question_id: {}; title: {}; path: {}",
             resolved_id,
             mention_type_name(&mention.mention_type),
             mention.target_id.as_deref().unwrap_or(""),
             mention.question_id.as_deref().unwrap_or(""),
-            mention.title
+            mention.title,
+            path
         ));
     }
 

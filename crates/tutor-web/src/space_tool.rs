@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
 
-use crate::notebook_store::{NotebookEntry, NotebookStore, parse_tags};
+use crate::notebook_store::{NotebookEntrySummary, NotebookStore};
 use crate::quiz_store::QuizStore;
 use crate::routes::space::{SpaceMention, SpaceMentionType, resolve_space_mention_markdown};
 
@@ -19,6 +19,10 @@ pub struct ProposeNotebookEditTool {
     notebook: Arc<NotebookStore>,
 }
 
+pub struct ListNotebookTreeTool {
+    notebook: Arc<NotebookStore>,
+}
+
 pub struct SearchNotebookTool {
     notebook: Arc<NotebookStore>,
 }
@@ -30,6 +34,12 @@ impl ReadSpaceItemTool {
 }
 
 impl ProposeNotebookEditTool {
+    pub fn new(notebook: Arc<NotebookStore>) -> Self {
+        Self { notebook }
+    }
+}
+
+impl ListNotebookTreeTool {
     pub fn new(notebook: Arc<NotebookStore>) -> Self {
         Self { notebook }
     }
@@ -119,8 +129,7 @@ impl Tool for ReadSpaceItemTool {
     }
 }
 
-static SEARCH_NOTEBOOK_SCHEMA: std::sync::OnceLock<serde_json::Value> =
-    std::sync::OnceLock::new();
+static SEARCH_NOTEBOOK_SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
 
 impl Tool for SearchNotebookTool {
     fn name(&self) -> &str {
@@ -128,7 +137,7 @@ impl Tool for SearchNotebookTool {
     }
 
     fn description(&self) -> &str {
-        "Search the user's Notebook as plain Markdown text. Use this when Notebook is associated or the user asks about saved notes without an explicit @ reference. This does not use embeddings or RAG."
+        "Search the user's associated Notebook/Vault as plain Markdown text. Use this only when Notebook is associated. This searches paths, titles, tags, links, metadata, and Markdown. This does not use embeddings or RAG."
     }
 
     fn parameters_schema(&self) -> &serde_json::Value {
@@ -138,7 +147,7 @@ impl Tool for SearchNotebookTool {
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Plain-text query to search in Notebook titles, tags, and Markdown."
+                        "description": "Plain-text query to search in Notebook paths, titles, tags, links, metadata, and Markdown."
                     },
                     "limit": {
                         "type": "integer",
@@ -167,7 +176,8 @@ impl Tool for SearchNotebookTool {
                 .as_u64()
                 .map(|value| value.clamp(1, 10) as usize)
                 .unwrap_or(5);
-            let hits = search_notebook_entries(&self.notebook.list(None), query, limit);
+            let summaries = self.notebook.list_summaries(None);
+            let hits = search_notebook_entries(&summaries, query, limit);
             let text = if hits.is_empty() {
                 format!("No Notebook entries matched query: {query}")
             } else {
@@ -175,16 +185,19 @@ impl Tool for SearchNotebookTool {
                     .enumerate()
                     .map(|(index, hit)| {
                         format!(
-                            "{}. {} ({})\nID: {}\nTags: {}\nScore: {}\nSnippet: {}",
+                            "{}. {} ({})\nID: {}\nPath: {}\nTags: {}\nLinks: {}\nBacklinks: {}\nScore: {}\nSnippet: {}",
                             index + 1,
                             hit.title,
                             hit.entry_type,
                             hit.id,
+                            hit.path.as_deref().unwrap_or(""),
                             if hit.tags.is_empty() {
                                 "none".into()
                             } else {
                                 hit.tags.join(", ")
                             },
+                            hit.links.len(),
+                            hit.backlinks.len(),
                             hit.score,
                             hit.snippet
                         )
@@ -198,6 +211,112 @@ impl Tool for SearchNotebookTool {
                 details: json!({
                     "query": query,
                     "hits": hits,
+                }),
+                terminate: false,
+            })
+        })
+    }
+}
+
+static LIST_NOTEBOOK_TREE_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
+
+impl Tool for ListNotebookTreeTool {
+    fn name(&self) -> &str {
+        "list_notebook_tree"
+    }
+
+    fn description(&self) -> &str {
+        "List the associated Notebook/Vault folder tree without reading full note bodies. Use this only when Notebook is associated and you need to explore available notes or folders."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        LIST_NOTEBOOK_TREE_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "description": "Maximum number of note entries to return."
+                    }
+                }
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let limit = args["limit"]
+                .as_u64()
+                .map(|value| value.clamp(1, 200) as usize)
+                .unwrap_or(100);
+            let folders = self.notebook.list_folders();
+            let entries = self
+                .notebook
+                .list_summaries(None)
+                .into_iter()
+                .take(limit)
+                .map(|summary| {
+                    json!({
+                        "id": summary.entry.id,
+                        "title": summary.entry.title,
+                        "path": summary.entry.path,
+                        "entry_type": format!("{:?}", summary.entry.entry_type).to_ascii_lowercase(),
+                        "tags": summary.tags,
+                        "links_count": summary.links.len(),
+                        "backlinks_count": summary.backlinks.len(),
+                        "updated_at": summary.entry.updated_at,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let text = if entries.is_empty() && folders.is_empty() {
+                "Notebook/Vault is empty.".to_string()
+            } else {
+                let folder_text = if folders.is_empty() {
+                    "Folders: none".to_string()
+                } else {
+                    format!(
+                        "Folders:\n{}",
+                        folders
+                            .iter()
+                            .map(|folder| format!("- {folder}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                };
+                let entry_text = if entries.is_empty() {
+                    "Notes: none".to_string()
+                } else {
+                    let lines = entries
+                        .iter()
+                        .enumerate()
+                        .map(|(index, entry)| {
+                            format!(
+                                "{}. {} | {} | {}",
+                                index + 1,
+                                entry["path"].as_str().unwrap_or(""),
+                                entry["title"].as_str().unwrap_or("Untitled"),
+                                entry["id"].as_str().unwrap_or("")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!("Notes:\n{lines}")
+                };
+                format!("{folder_text}\n\n{entry_text}")
+            };
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text { text }],
+                details: json!({
+                    "folders": folders,
+                    "entries": entries,
                 }),
                 terminate: false,
             })
@@ -377,14 +496,17 @@ impl Tool for ProposeNotebookEditTool {
 struct NotebookSearchHit {
     id: String,
     title: String,
+    path: Option<String>,
     entry_type: String,
     tags: Vec<String>,
+    links: Vec<String>,
+    backlinks: Vec<String>,
     snippet: String,
     score: usize,
 }
 
 fn search_notebook_entries(
-    entries: &[NotebookEntry],
+    entries: &[NotebookEntrySummary],
     query: &str,
     limit: usize,
 ) -> Vec<NotebookSearchHit> {
@@ -399,12 +521,36 @@ fn search_notebook_entries(
 
     let mut hits = entries
         .iter()
-        .filter_map(|entry| {
-            let tags = parse_tags(&entry.markdown);
+        .filter_map(|summary| {
+            let entry = &summary.entry;
+            let metadata = entry
+                .metadata
+                .as_ref()
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let links = summary
+                .links
+                .iter()
+                .map(|link| {
+                    link.alias
+                        .as_ref()
+                        .map(|alias| format!("{} {}", link.target, alias))
+                        .unwrap_or_else(|| link.target.clone())
+                })
+                .collect::<Vec<_>>();
+            let backlinks = summary
+                .backlinks
+                .iter()
+                .map(|backlink| backlink.source_title.clone())
+                .collect::<Vec<_>>();
             let haystack = format!(
-                "{}\n{}\n{}",
+                "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                entry.path.as_deref().unwrap_or_default(),
                 entry.title,
-                tags.join(" "),
+                summary.tags.join(" "),
+                links.join(" "),
+                backlinks.join(" "),
+                metadata,
                 entry.markdown
             )
             .to_ascii_lowercase();
@@ -418,8 +564,11 @@ fn search_notebook_entries(
             Some(NotebookSearchHit {
                 id: entry.id.clone(),
                 title: entry.title.clone(),
+                path: entry.path.clone(),
                 entry_type: format!("{:?}", entry.entry_type).to_ascii_lowercase(),
-                tags,
+                tags: summary.tags.clone(),
+                links,
+                backlinks,
                 snippet: notebook_snippet(&entry.markdown, &terms),
                 score,
             })
@@ -446,11 +595,7 @@ fn notebook_snippet(markdown: &str, terms: &[String]) -> String {
         .last()
         .unwrap_or(0)
         .saturating_sub(80);
-    let snippet = normalized
-        .chars()
-        .skip(start)
-        .take(240)
-        .collect::<String>();
+    let snippet = normalized.chars().skip(start).take(240).collect::<String>();
     if normalized.chars().count() > snippet.chars().count() {
         format!("{snippet}...")
     } else {
@@ -549,9 +694,7 @@ mod tests {
     #[tokio::test]
     async fn read_space_item_returns_notebook_markdown() {
         let dir = tempfile::tempdir().unwrap();
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let quizzes = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let entry = notebook
             .create(NotebookEntryInput {
@@ -588,9 +731,7 @@ mod tests {
     #[tokio::test]
     async fn propose_notebook_edit_returns_preview_without_writing() {
         let dir = tempfile::tempdir().unwrap();
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let entry = notebook
             .create(NotebookEntryInput {
                 space_id: None,
@@ -627,7 +768,10 @@ mod tests {
 
         assert_eq!(result.details["requires_confirmation"], true);
         assert_eq!(result.details["proposal_kind"], "links");
-        assert_eq!(result.details["suggested_links"][0]["target"], "Mask Alignment");
+        assert_eq!(
+            result.details["suggested_links"][0]["target"],
+            "Mask Alignment"
+        );
         assert_eq!(result.details["suggested_tags"][0]["tag"], "semiconductor");
         assert_eq!(result.details["proposed_title"], "Updated mask notes");
         assert_eq!(notebook.get(&entry.id).unwrap().markdown, "Original notes.");
@@ -636,17 +780,18 @@ mod tests {
     #[tokio::test]
     async fn search_notebook_returns_plain_text_hits() {
         let dir = tempfile::tempdir().unwrap();
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let entry = notebook
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::Note,
-                path: None,
+                path: Some("concepts/Lithography.md".into()),
                 title: "Lithography notes".into(),
-                markdown: "OPC and mask alignment. #semiconductor".into(),
-                metadata: None,
+                markdown: "OPC and mask alignment. #semiconductor\n\nSee [[Mask Alignment]]."
+                    .into(),
+                metadata: Some(json!({
+                    "aliases": ["optical lithography"]
+                })),
                 source_session_id: None,
                 source_message_id: None,
             })
@@ -659,8 +804,54 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.details["hits"][0]["id"], entry.id);
+        assert_eq!(result.details["hits"][0]["path"], "concepts/Lithography.md");
         match &result.content[0] {
-            ContentBlock::Text { text } => assert!(text.contains("mask alignment")),
+            ContentBlock::Text { text } => {
+                assert!(text.contains("concepts/Lithography.md"));
+                assert!(text.contains("mask alignment"));
+            }
+            _ => panic!("expected text content"),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_notebook_tree_returns_folders_and_entry_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
+        notebook.create_folder("concepts/lithography").unwrap();
+        let entry = notebook
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                path: Some("concepts/lithography/TCC.md".into()),
+                title: "TCC".into(),
+                markdown: "Transmission cross coefficient.".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+        let tool = ListNotebookTreeTool::new(notebook);
+
+        let result = tool
+            .execute(json!({ "limit": 20 }), &make_ctx())
+            .await
+            .unwrap();
+
+        assert!(
+            result.details["folders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item == "concepts/lithography")
+        );
+        assert_eq!(result.details["entries"][0]["id"], entry.id);
+        assert_eq!(
+            result.details["entries"][0]["path"],
+            "concepts/lithography/TCC.md"
+        );
+        match &result.content[0] {
+            ContentBlock::Text { text } => assert!(text.contains("concepts/lithography/TCC.md")),
             _ => panic!("expected text content"),
         }
     }

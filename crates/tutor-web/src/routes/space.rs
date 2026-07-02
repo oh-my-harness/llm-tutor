@@ -268,6 +268,7 @@ fn mention_for_notebook_entry(entry: &NotebookEntry) -> SpaceMention {
         preview: first_text_line(&entry.markdown),
         metadata: serde_json::json!({
             "entry_type": entry.entry_type,
+            "path": entry.path,
             "space_id": entry.space_id,
             "updated_at": entry.updated_at,
             "source_session_id": entry.source_session_id,
@@ -331,10 +332,18 @@ fn question_from_mention_id(id: &str) -> Option<&str> {
 }
 
 fn notebook_markdown(entry: &NotebookEntry) -> String {
+    let path = entry.path.as_deref().unwrap_or("");
+    let path_line = if path.is_empty() {
+        String::new()
+    } else {
+        format!("Path: {path}\n")
+    };
     format!(
-        "# {}\n\nType: {}\n\n{}",
+        "# {}\n\nType: {}\n{}ID: {}\n\n{}",
         entry.title,
         entry_type_label(entry),
+        path_line,
+        entry.id,
         entry.markdown
     )
 }
