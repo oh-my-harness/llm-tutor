@@ -96,6 +96,10 @@ interface NotebookImportResult {
   skipped: NotebookImportSkipped[]
 }
 
+interface NotebookFolder {
+  path: string
+}
+
 interface Book {
   id: string
   title: string
@@ -138,6 +142,7 @@ export function SpacePage({
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
+  const [notebookFolders, setNotebookFolders] = useState<string[]>([])
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [activeNotebookDetail, setActiveNotebookDetail] = useState<NotebookEntry | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
@@ -198,6 +203,7 @@ export function SpacePage({
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
+      setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
       setNotebookEntries(entries)
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
       setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
@@ -294,9 +300,10 @@ export function SpacePage({
     else void refreshMemory()
   }
 
-  const createNotebookEntry = async () => {
+  const createNotebookEntry = async (folderPath?: string) => {
     const title = 'Untitled note'
     const markdown = '# Untitled note\n\n'
+    const path = folderPath ? `${folderPath.replace(/\/+$/, '')}/${title}.md` : undefined
     setLoading(true)
     try {
       const res = await fetch('/api/notebook/entries', {
@@ -306,6 +313,7 @@ export function SpacePage({
           space_id: 'default',
           entry_type: 'note',
           title,
+          path,
           markdown,
         }),
       })
@@ -316,6 +324,28 @@ export function SpacePage({
       setActiveNotebookId(entry.id)
       setStatus('Notebook entry created')
       startEditNotebookEntry(entry)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const createNotebookFolder = async (parentPath?: string) => {
+    const name = window.prompt('Folder name')
+    if (!name?.trim()) return
+    const path = parentPath ? `${parentPath.replace(/\/+$/, '')}/${name.trim()}` : name.trim()
+    setLoading(true)
+    try {
+      const res = await fetch('/api/notebook/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+      setStatus(`Created folder: ${(data.folder as NotebookFolder | undefined)?.path ?? path}`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -728,6 +758,7 @@ export function SpacePage({
         {activeTab === 'notebook' && (
           <NotebookTab
             entries={notebookEntries}
+            folders={notebookFolders}
             activeEntry={activeNotebookEntry}
             status={status}
             loading={loading}
@@ -735,7 +766,8 @@ export function SpacePage({
             editTitle={editTitle}
             editMarkdown={editMarkdown}
             onSelectEntry={setActiveNotebookId}
-            onCreateEntry={() => void createNotebookEntry()}
+            onCreateEntry={(folderPath) => void createNotebookEntry(folderPath)}
+            onCreateFolder={(parentPath) => void createNotebookFolder(parentPath)}
             onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
             onStartEdit={startEditNotebookEntry}
             onCancelEdit={cancelEditNotebookEntry}
@@ -793,6 +825,7 @@ export function SpacePage({
 
 function NotebookTab({
   entries,
+  folders,
   activeEntry,
   status,
   loading,
@@ -801,6 +834,7 @@ function NotebookTab({
   editMarkdown,
   onSelectEntry,
   onCreateEntry,
+  onCreateFolder,
   onDeleteEntry,
   onStartEdit,
   onCancelEdit,
@@ -821,6 +855,7 @@ function NotebookTab({
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
+  folders: string[]
   activeEntry: NotebookEntry | null
   status: string
   loading: boolean
@@ -828,7 +863,8 @@ function NotebookTab({
   editTitle: string
   editMarkdown: string
   onSelectEntry: (id: string) => void
-  onCreateEntry: () => void
+  onCreateEntry: (folderPath?: string) => void
+  onCreateFolder: (parentPath?: string) => void
   onDeleteEntry: (entry: NotebookEntry) => void
   onStartEdit: (entry: NotebookEntry) => void
   onCancelEdit: () => void
@@ -853,7 +889,7 @@ function NotebookTab({
   const [relationsCollapsed, setRelationsCollapsed] = useState(false)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const notebookTree = useMemo(() => buildNotebookTree(entries), [entries])
+  const notebookTree = useMemo(() => buildNotebookTree(entries, folders), [entries, folders])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const folderPaths = useMemo(() => collectNotebookFolderPaths(notebookTree), [notebookTree])
   const knownFolderPathsRef = useRef<Set<string>>(new Set())
@@ -940,15 +976,24 @@ function NotebookTab({
               event.currentTarget.value = ''
             }}
           />
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-4 gap-1.5">
             <button
               className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
               type="button"
               disabled={loading}
-              onClick={onCreateEntry}
+              onClick={() => onCreateEntry()}
             >
               <Plus size={14} />
               New
+            </button>
+            <button
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
+              type="button"
+              disabled={loading}
+              onClick={() => onCreateFolder()}
+            >
+              <Folder size={14} />
+              Folder
             </button>
             <div className="relative">
               <button
@@ -1122,6 +1167,8 @@ function NotebookTab({
               depth={0}
               onToggleFolder={toggleFolder}
               onSelectEntry={onSelectEntry}
+              onCreateEntry={onCreateEntry}
+              onCreateFolder={onCreateFolder}
               onDeleteEntry={onDeleteEntry}
             />
           )}
@@ -1411,6 +1458,8 @@ function NotebookFileTree({
   depth,
   onToggleFolder,
   onSelectEntry,
+  onCreateEntry,
+  onCreateFolder,
   onDeleteEntry,
 }: {
   nodes: NotebookTreeNode[]
@@ -1419,6 +1468,8 @@ function NotebookFileTree({
   depth: number
   onToggleFolder: (folderPath: string) => void
   onSelectEntry: (id: string) => void
+  onCreateEntry: (folderPath?: string) => void
+  onCreateFolder: (parentPath?: string) => void
   onDeleteEntry: (entry: NotebookEntry) => void
 }) {
   return (
@@ -1428,23 +1479,39 @@ function NotebookFileTree({
           const expanded = expandedFolders.has(node.path)
           return (
             <div key={node.path}>
-              <button
-                className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-gray-700 hover:bg-white"
+              <div
+                className="group flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm text-gray-700 hover:bg-white"
                 style={{ paddingLeft: `${8 + depth * 14}px` }}
-                type="button"
-                onClick={() => onToggleFolder(node.path)}
               >
-                <ChevronDown
-                  size={14}
-                  className={`shrink-0 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`}
-                />
-                {expanded ? (
-                  <FolderOpen size={16} className="shrink-0 text-blue-500" />
-                ) : (
-                  <Folder size={16} className="shrink-0 text-gray-500" />
-                )}
-                <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
-              </button>
+                <button className="flex min-w-0 flex-1 items-center gap-1.5 text-left" type="button" onClick={() => onToggleFolder(node.path)}>
+                  <ChevronDown
+                    size={14}
+                    className={`shrink-0 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`}
+                  />
+                  {expanded ? (
+                    <FolderOpen size={16} className="shrink-0 text-blue-500" />
+                  ) : (
+                    <Folder size={16} className="shrink-0 text-gray-500" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+                </button>
+                <button
+                  className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
+                  type="button"
+                  title="New file here"
+                  onClick={() => onCreateEntry(node.path)}
+                >
+                  <FileText size={14} />
+                </button>
+                <button
+                  className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
+                  type="button"
+                  title="New folder here"
+                  onClick={() => onCreateFolder(node.path)}
+                >
+                  <Folder size={14} />
+                </button>
+              </div>
               {expanded && (
                 <NotebookFileTree
                   nodes={node.children}
@@ -1453,6 +1520,8 @@ function NotebookFileTree({
                   depth={depth + 1}
                   onToggleFolder={onToggleFolder}
                   onSelectEntry={onSelectEntry}
+                  onCreateEntry={onCreateEntry}
+                  onCreateFolder={onCreateFolder}
                   onDeleteEntry={onDeleteEntry}
                 />
               )}
@@ -2106,7 +2175,7 @@ function memoryFileLabel(path: string) {
   return labels[path] ?? path
 }
 
-function buildNotebookTree(entries: NotebookEntry[]): NotebookTreeNode[] {
+function buildNotebookTree(entries: NotebookEntry[], folderPaths: string[]): NotebookTreeNode[] {
   const root: NotebookTreeNode[] = []
   const folders = new Map<string, Extract<NotebookTreeNode, { type: 'folder' }>>()
 
@@ -2125,6 +2194,10 @@ function buildNotebookTree(entries: NotebookEntry[]): NotebookTreeNode[] {
       children = folder.children
     }
     return children
+  }
+
+  for (const folderPath of folderPaths) {
+    ensureFolder(notebookPathSegments(folderPath))
   }
 
   for (const entry of entries) {
@@ -2160,11 +2233,16 @@ function collectNotebookFolderPaths(nodes: NotebookTreeNode[]) {
 
 function notebookEntryPathSegments(entry: NotebookEntry) {
   const rawPath = (entry.path || `${entry.title || 'Untitled note'}.md`).replace(/\\/g, '/')
+  return notebookPathSegments(rawPath, `${entry.title || 'Untitled note'}.md`)
+}
+
+function notebookPathSegments(path: string, fallback = '') {
+  const rawPath = (path || fallback).replace(/\\/g, '/')
   const segments = rawPath
     .split('/')
     .map((segment) => segment.trim())
     .filter((segment) => segment && segment !== '.' && segment !== '..')
-  if (segments.length === 0) return [`${entry.title || 'Untitled note'}.md`]
+  if (segments.length === 0) return fallback ? [fallback] : []
   return segments
 }
 

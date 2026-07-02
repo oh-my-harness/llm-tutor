@@ -75,6 +75,14 @@ pub struct NotebookStore {
     index_path: PathBuf,
     vault_root: PathBuf,
     items: Mutex<Vec<NotebookEntry>>,
+    folders: Mutex<HashSet<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NotebookIndex {
+    entries: Vec<NotebookIndexEntry>,
+    #[serde(default)]
+    folders: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,11 +108,13 @@ impl NotebookStore {
         let index_path = path.join("index.json");
         let vault_root = path.join("vault");
         fs::create_dir_all(&vault_root).expect("failed to create notebook vault directory");
-        let items = load_file_backed_entries(&index_path, &vault_root).unwrap_or_default();
+        let (items, folders) =
+            load_file_backed_entries(&index_path, &vault_root).unwrap_or_default();
         Self {
             index_path,
             vault_root,
             items: Mutex::new(items),
+            folders: Mutex::new(folders.into_iter().collect()),
         }
     }
 
@@ -150,6 +160,30 @@ impl NotebookStore {
         Some(entry_view(entry, &entries))
     }
 
+    pub fn list_folders(&self) -> Vec<String> {
+        let mut folders = self
+            .folders
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        folders.sort_by_key(|folder| folder.to_lowercase());
+        folders
+    }
+
+    pub fn create_folder(&self, path: &str) -> Result<String> {
+        let Some(folder) = normalize_folder_path(path) else {
+            return Err(anyhow!("notebook folder path is empty"));
+        };
+        fs::create_dir_all(self.vault_root.join(&folder))?;
+        let items = self.items.lock().unwrap();
+        let mut folders = self.folders.lock().unwrap();
+        folders.insert(folder.clone());
+        self.save_locked(&items, &folders)?;
+        Ok(folder)
+    }
+
     pub fn create(&self, input: NotebookEntryInput) -> Result<NotebookEntry> {
         if input.markdown.trim().is_empty() {
             return Err(anyhow!("notebook markdown is empty"));
@@ -158,7 +192,9 @@ impl NotebookStore {
         let mut used_paths = used_entry_paths(&items);
         let entry = entry_from_input(input, Utc::now(), &mut used_paths);
         items.push(entry.clone());
-        self.save_locked(&items)?;
+        let mut folders = self.folders.lock().unwrap();
+        add_parent_folders(&entry, &mut folders);
+        self.save_locked(&items, &folders)?;
         Ok(entry)
     }
 
@@ -177,7 +213,11 @@ impl NotebookStore {
             return Ok(entries);
         }
         items.extend(entries.iter().cloned());
-        self.save_locked(&items)?;
+        let mut folders = self.folders.lock().unwrap();
+        for entry in &entries {
+            add_parent_folders(entry, &mut folders);
+        }
+        self.save_locked(&items, &folders)?;
         Ok(entries)
     }
 
@@ -217,7 +257,8 @@ impl NotebookStore {
         }
         entry.updated_at = Utc::now();
         let updated = entry.clone();
-        self.save_locked(&items)?;
+        let folders = self.folders.lock().unwrap();
+        self.save_locked(&items, &folders)?;
         Ok(updated)
     }
 
@@ -228,7 +269,8 @@ impl NotebookStore {
         items.retain(|item| item.id != id);
         let deleted = items.len() != before;
         if deleted {
-            let _ = self.save_locked(&items);
+            let folders = self.folders.lock().unwrap();
+            let _ = self.save_locked(&items, &folders);
             if let Some(entry) = removed.and_then(|entry| entry.path) {
                 let _ = fs::remove_file(self.vault_root.join(entry));
             }
@@ -236,7 +278,7 @@ impl NotebookStore {
         deleted
     }
 
-    fn save_locked(&self, items: &[NotebookEntry]) -> Result<()> {
+    fn save_locked(&self, items: &[NotebookEntry], folders: &HashSet<String>) -> Result<()> {
         fs::create_dir_all(&self.vault_root)?;
         if let Some(parent) = self.index_path.parent() {
             fs::create_dir_all(parent)?;
@@ -254,7 +296,15 @@ impl NotebookStore {
             fs::write(markdown_path, &entry.markdown)?;
             index.push(NotebookIndexEntry::from_entry(entry, path));
         }
-        fs::write(&self.index_path, serde_json::to_string_pretty(&index)?)?;
+        let mut folders = folders.iter().cloned().collect::<Vec<_>>();
+        folders.sort_by_key(|folder| folder.to_lowercase());
+        fs::write(
+            &self.index_path,
+            serde_json::to_string_pretty(&NotebookIndex {
+                entries: index,
+                folders,
+            })?,
+        )?;
         Ok(())
     }
 }
@@ -314,18 +364,31 @@ fn entry_from_input(
     }
 }
 
-fn load_file_backed_entries(index_path: &Path, vault_root: &Path) -> Result<Vec<NotebookEntry>> {
+fn load_file_backed_entries(
+    index_path: &Path,
+    vault_root: &Path,
+) -> Result<(Vec<NotebookEntry>, Vec<String>)> {
     if !index_path.exists() {
         return Err(anyhow!("notebook index not found"));
     }
     let text = fs::read_to_string(index_path)?;
-    let index = serde_json::from_str::<Vec<NotebookIndexEntry>>(&text)?;
-    let mut entries = Vec::with_capacity(index.len());
-    for item in index {
+    let index = parse_notebook_index(&text)?;
+    let mut entries = Vec::with_capacity(index.entries.len());
+    for item in index.entries {
         let markdown = fs::read_to_string(vault_root.join(&item.path)).unwrap_or_default();
         entries.push(item.into_entry(markdown));
     }
-    Ok(entries)
+    Ok((entries, normalize_folder_paths(index.folders)))
+}
+
+fn parse_notebook_index(text: &str) -> Result<NotebookIndex> {
+    if let Ok(index) = serde_json::from_str::<NotebookIndex>(text) {
+        return Ok(index);
+    }
+    Ok(NotebookIndex {
+        entries: serde_json::from_str::<Vec<NotebookIndexEntry>>(text)?,
+        folders: Vec::new(),
+    })
 }
 
 pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
@@ -733,6 +796,49 @@ fn normalize_note_path(path: &str) -> Option<String> {
     Some(normalized)
 }
 
+fn normalize_folder_path(path: &str) -> Option<String> {
+    let parts = path
+        .replace('\\', "/")
+        .split('/')
+        .map(safe_file_stem)
+        .filter(|part| !part.is_empty() && part != "." && part != "..")
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
+    }
+}
+
+fn normalize_folder_paths(paths: Vec<String>) -> Vec<String> {
+    let mut folders = paths
+        .iter()
+        .filter_map(|path| normalize_folder_path(path))
+        .collect::<Vec<_>>();
+    folders.sort_by_key(|folder| folder.to_lowercase());
+    folders.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    folders
+}
+
+fn add_parent_folders(entry: &NotebookEntry, folders: &mut HashSet<String>) {
+    let Some(path) = entry.path.as_ref() else {
+        return;
+    };
+    let normalized = path.replace('\\', "/");
+    let mut parts = normalized.split('/').collect::<Vec<_>>();
+    parts.pop();
+    let mut current = Vec::new();
+    for part in parts {
+        if part.trim().is_empty() {
+            continue;
+        }
+        current.push(part);
+        if let Some(folder) = normalize_folder_path(&current.join("/")) {
+            folders.insert(folder);
+        }
+    }
+}
+
 fn safe_markdown_file_name(title: &str) -> String {
     format!("{}.md", safe_file_stem(title))
 }
@@ -803,7 +909,8 @@ mod tests {
     fn notebook_store_persists_markdown_files_and_index() {
         let dir = tempfile::tempdir().unwrap();
         let notebook_root = dir.path().join("notebook");
-        let store = NotebookStore::new_with_path(notebook_root);
+        let store = NotebookStore::new_with_path(notebook_root.clone());
+        assert_eq!(store.create_folder("empty/folder").unwrap(), "empty/folder");
         let entry = store
             .create(NotebookEntryInput {
                 space_id: None,
@@ -849,6 +956,10 @@ mod tests {
         let loaded = reloaded.get(&entry.id).unwrap();
         assert_eq!(loaded.path.as_deref(), Some("notes/TCC.md"));
         assert!(loaded.markdown.contains("Updated"));
+        assert_eq!(
+            reloaded.list_folders(),
+            vec!["empty/folder".to_string(), "notes".to_string()]
+        );
 
         assert!(reloaded.delete(&entry.id));
         assert!(!note_path.exists());

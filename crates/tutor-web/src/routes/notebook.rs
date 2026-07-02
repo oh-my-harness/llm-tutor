@@ -38,6 +38,7 @@ struct CreateNotebookEntryRequest {
     space_id: Option<String>,
     entry_type: Option<NotebookEntryType>,
     title: String,
+    path: Option<String>,
     markdown: String,
     metadata: Option<serde_json::Value>,
     source_session_id: Option<String>,
@@ -59,6 +60,11 @@ struct ImportFolderRequest {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct CreateNotebookFolderRequest {
+    path: String,
+}
+
 async fn list_entries(
     State(state): State<NotebookState>,
     Query(query): Query<ListNotebookQuery>,
@@ -66,7 +72,10 @@ async fn list_entries(
     let space_id = query.space_id.as_deref();
     (
         StatusCode::OK,
-        Json(serde_json::json!({ "entries": state.store.list_summaries(space_id) })),
+        Json(serde_json::json!({
+            "entries": state.store.list_summaries(space_id),
+            "folders": state.store.list_folders(),
+        })),
     )
 }
 
@@ -90,7 +99,7 @@ async fn create_entry(
         space_id: req.space_id,
         entry_type: req.entry_type.unwrap_or(NotebookEntryType::Note),
         title: req.title,
-        path: None,
+        path: req.path,
         markdown: req.markdown,
         metadata: req.metadata,
         source_session_id: req.source_session_id,
@@ -114,6 +123,23 @@ async fn create_entry(
             )
                 .into_response()
         }
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    }
+}
+
+async fn create_folder(
+    State(state): State<NotebookState>,
+    Json(req): Json<CreateNotebookFolderRequest>,
+) -> impl IntoResponse {
+    match state.store.create_folder(&req.path) {
+        Ok(path) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "folder": { "path": path },
+                "folders": state.store.list_folders(),
+            })),
+        )
+            .into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
@@ -413,6 +439,7 @@ pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> R
             axum::routing::post(preview_import_entries),
         )
         .route("/api/notebook/import", axum::routing::post(import_entries))
+        .route("/api/notebook/folders", axum::routing::post(create_folder))
         .route(
             "/api/notebook/import/folder",
             axum::routing::post(import_folder),
@@ -989,9 +1016,23 @@ mod tests {
             .clone()
             .oneshot(json_request(
                 Method::POST,
+                "/api/notebook/folders",
+                serde_json::json!({ "path": "concepts/lithography" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        assert_eq!(body["folder"]["path"], "concepts/lithography");
+
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                Method::POST,
                 "/api/notebook/entries",
                 serde_json::json!({
                     "title": "Report",
+                    "path": "concepts/lithography/Report.md",
                     "entry_type": "research_report",
                     "markdown": "# Report"
                 }),
@@ -1016,6 +1057,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(body["folders"][0], "concepts");
+        assert_eq!(body["folders"][1], "concepts/lithography");
 
         let response = app
             .clone()
