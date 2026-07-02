@@ -90,6 +90,7 @@ async fn create_entry(
         space_id: req.space_id,
         entry_type: req.entry_type.unwrap_or(NotebookEntryType::Note),
         title: req.title,
+        path: None,
         markdown: req.markdown,
         metadata: req.metadata,
         source_session_id: req.source_session_id,
@@ -217,12 +218,14 @@ fn import_parsed_entries(state: NotebookState, import: ParsedImport) -> axum::re
         .payloads
         .into_iter()
         .map(|payload| {
+            let source_path = payload.source_path.clone();
             (
-                payload.source_path,
+                source_path.clone(),
                 NotebookEntryInput {
                     space_id: import.space_id.clone(),
                     entry_type: NotebookEntryType::Note,
                     title: payload.title,
+                    path: Some(source_path),
                     markdown: payload.markdown,
                     metadata: Some(payload.metadata),
                     source_session_id: None,
@@ -330,7 +333,7 @@ async fn export_entry(
         return error_response(StatusCode::NOT_FOUND, "notebook entry not found".into());
     };
     let markdown = export_markdown(&entry);
-    markdown_response(safe_markdown_file_name(&entry.entry.title), markdown)
+    markdown_response(single_export_file_name(&entry.entry), markdown)
 }
 
 async fn export_entries_zip(
@@ -628,14 +631,7 @@ fn payload_from_markdown(source_path: &str, markdown: String) -> anyhow::Result<
         anyhow::bail!("markdown file is empty");
     }
     let frontmatter = parse_frontmatter(&markdown);
-    let title = frontmatter
-        .as_ref()
-        .and_then(|value| value.get("title"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| title_from_path(source_path));
+    let title = title_from_path(source_path);
     let mut metadata = serde_json::json!({
         "import": {
             "source_path": source_path,
@@ -828,10 +824,7 @@ fn export_zip(entries: &[crate::notebook_store::NotebookEntryView]) -> anyhow::R
         .compression_method(zip::CompressionMethod::Deflated);
     let mut used_names = Vec::new();
     for entry in entries {
-        let file_name = unique_file_name(
-            &safe_markdown_file_name(&entry.entry.title),
-            &mut used_names,
-        );
+        let file_name = unique_file_name(&entry_export_path(&entry.entry), &mut used_names);
         writer.start_file(file_name, options)?;
         std::io::Write::write_all(&mut writer, export_markdown(entry).as_bytes())?;
     }
@@ -861,10 +854,7 @@ fn export_obsidian_vault(
     )?;
 
     for entry in entries {
-        let file_name = unique_file_name(
-            &safe_markdown_file_name(&entry.entry.title),
-            &mut used_names,
-        );
+        let file_name = unique_file_name(&entry_export_path(&entry.entry), &mut used_names);
         writer.start_file(file_name, options)?;
         std::io::Write::write_all(&mut writer, export_markdown(entry).as_bytes())?;
     }
@@ -903,6 +893,42 @@ fn bytes_response(
 
 fn safe_markdown_file_name(title: &str) -> String {
     format!("{}.md", safe_file_stem(title))
+}
+
+fn entry_export_path(entry: &crate::notebook_store::NotebookEntry) -> String {
+    entry
+        .path
+        .as_deref()
+        .and_then(normalize_export_path)
+        .unwrap_or_else(|| safe_markdown_file_name(&entry.title))
+}
+
+fn single_export_file_name(entry: &crate::notebook_store::NotebookEntry) -> String {
+    entry_export_path(entry)
+        .rsplit('/')
+        .next()
+        .map(ToOwned::to_owned)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| safe_markdown_file_name(&entry.title))
+}
+
+fn normalize_export_path(path: &str) -> Option<String> {
+    let parts = path
+        .replace('\\', "/")
+        .split('/')
+        .map(safe_file_stem)
+        .filter(|part| !part.is_empty() && part != "." && part != "..")
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let mut normalized = parts.join("/");
+    if !normalized.to_lowercase().ends_with(".md")
+        && !normalized.to_lowercase().ends_with(".markdown")
+    {
+        normalized.push_str(".md");
+    }
+    Some(normalized)
 }
 
 fn safe_file_stem(title: &str) -> String {
@@ -1052,7 +1078,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = response_json(response).await;
         assert_eq!(body["entries"].as_array().unwrap().len(), 1);
-        assert_eq!(body["entries"][0]["title"], "Imported OPC");
+        assert_eq!(body["entries"][0]["title"], "opc");
+        assert_eq!(body["entries"][0]["path"], "opc.md");
         assert_eq!(body["skipped"].as_array().unwrap().len(), 0);
 
         let response = app
@@ -1084,6 +1111,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: Some("default".into()),
                 entry_type: NotebookEntryType::Note,
+                path: None,
                 title: "Imported OPC".into(),
                 markdown: "# Imported OPC\n\nExisting.".into(),
                 metadata: None,
@@ -1110,10 +1138,11 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
-        assert_eq!(body["conflict_count"], 1);
+        assert_eq!(body["conflict_count"], 0);
+        assert_eq!(body["items"][0]["title"], "opc");
         assert_eq!(
             body["items"][0]["duplicate_title_entry_id"],
-            serde_json::json!(existing.id)
+            serde_json::Value::Null
         );
 
         let response = app
@@ -1173,7 +1202,7 @@ mod tests {
     fn parses_markdown_frontmatter_and_zip_imports() {
         let markdown = "---\r\ntitle: Process Notes\ntags: lithography opc\r\n---\r\n# Body";
         let payload = payload_from_markdown("folder/process.md", markdown.into()).unwrap();
-        assert_eq!(payload.title, "Process Notes");
+        assert_eq!(payload.title, "process");
         assert_eq!(payload.metadata["frontmatter"]["tags"], "lithography opc");
 
         let mut zip_bytes = Cursor::new(Vec::new());

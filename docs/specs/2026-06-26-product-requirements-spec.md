@@ -326,12 +326,12 @@
 - REQ-810: Notebook zip or folder import shall create entries in a batch and persist the Notebook store once per import operation rather than rewriting the full store after each entry. Status: implemented.
 - REQ-811: The desktop app shall support importing an Obsidian Vault by selecting a local folder through a native directory picker and recursively reading `.md` and `.markdown` files. Status: implemented.
 - REQ-812: Notebook import shall explicitly report Obsidian attachments and embedded assets that are not imported yet, including images and other non-Markdown files referenced by Markdown. Status: implemented.
-- REQ-813: Notebook persistence shall migrate from a single JSON blob to a file-backed vault directory where note bodies are stored as individual Markdown files. Status: planned.
-- REQ-814: Notebook shall keep a lightweight index file for stable ids, relative paths, entry types, source mappings, timestamps, and product metadata that should not be stored only in Markdown body text. Status: planned.
-- REQ-815: Notebook import from Markdown or Obsidian Vault folders shall prefer the source file name stem as the entry title, while preserving `frontmatter.title` as metadata, subtitle, or alias. Status: planned.
-- REQ-816: Notebook file-backed storage shall preserve imported relative folder paths where possible. Status: planned.
-- REQ-817: Notebook create, edit, rename, delete, import, export, and agent-applied edit flows shall update Markdown files and the Notebook index consistently. Status: planned.
-- REQ-818: The app shall provide a migration path from existing `notebook_entries.json` data to the file-backed Notebook vault layout. Status: planned.
+- REQ-813: Notebook persistence shall migrate from a single JSON blob to a file-backed vault directory where note bodies are stored as individual Markdown files. Status: implemented.
+- REQ-814: Notebook shall keep a lightweight index file for stable ids, relative paths, entry types, source mappings, timestamps, and product metadata that should not be stored only in Markdown body text. Status: implemented.
+- REQ-815: Notebook import from Markdown or Obsidian Vault folders shall prefer the source file name stem as the entry title, while preserving `frontmatter.title` as metadata, subtitle, or alias. Status: implemented.
+- REQ-816: Notebook file-backed storage shall preserve imported relative folder paths where possible. Status: implemented.
+- REQ-817: Notebook create, edit, rename, delete, import, export, and agent-applied edit flows shall update Markdown files and the Notebook index consistently. Status: partially implemented; create, edit, delete, import, export, and agent-applied edits are covered, while explicit path rename/link-update workflows remain planned.
+- REQ-818: The app shall provide a migration path from existing `notebook_entries.json` data to the file-backed Notebook vault layout. Status: implemented.
 
 ## 18. Quiz Bank
 

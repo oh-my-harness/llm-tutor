@@ -538,6 +538,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::Note,
+                path: None,
                 title: "Mask notes".into(),
                 markdown: "Alignment marks are used during lithography.".into(),
                 metadata: None,

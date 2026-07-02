@@ -39,6 +39,7 @@ interface NotebookEntry {
   space_id: string
   entry_type: 'note' | 'research_report' | 'chat_answer' | 'source_snippet' | 'quiz_summary' | 'deep_solve_result'
   title: string
+  path?: string | null
   markdown: string
   metadata?: Record<string, unknown> | null
   source_session_id?: string | null

@@ -786,6 +786,7 @@ mod tests {
                 space_id: None,
                 entry_type: crate::notebook_store::NotebookEntryType::ResearchReport,
                 title: "OPC report".into(),
+                path: None,
                 markdown: "OPC corrects lithography mask patterns before wafer exposure.".into(),
                 metadata: None,
                 source_session_id: None,

@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,8 @@ pub struct NotebookEntry {
     pub space_id: String,
     pub entry_type: NotebookEntryType,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub markdown: String,
     pub metadata: Option<serde_json::Value>,
     pub source_session_id: Option<String>,
@@ -69,8 +72,23 @@ pub struct NotebookEntrySummary {
 }
 
 pub struct NotebookStore {
-    path: PathBuf,
+    index_path: PathBuf,
+    vault_root: PathBuf,
     items: Mutex<Vec<NotebookEntry>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NotebookIndexEntry {
+    id: String,
+    space_id: String,
+    entry_type: NotebookEntryType,
+    title: String,
+    path: String,
+    metadata: Option<serde_json::Value>,
+    source_session_id: Option<String>,
+    source_message_id: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl NotebookStore {
@@ -79,15 +97,23 @@ impl NotebookStore {
     }
 
     pub fn new_with_path(path: PathBuf) -> Self {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("failed to create notebook store directory");
-        }
-        let items = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Vec<NotebookEntry>>(&text).ok())
-            .unwrap_or_default();
+        let legacy_path = path;
+        let base_dir = legacy_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("notebook");
+        let index_path = base_dir.join("index.json");
+        let vault_root = base_dir.join("vault");
+        fs::create_dir_all(&vault_root).expect("failed to create notebook vault directory");
+        let items = load_file_backed_entries(&index_path, &vault_root).unwrap_or_else(|_| {
+            load_legacy_entries(&legacy_path)
+                .map(|entries| migrate_legacy_entries(entries, &index_path, &vault_root))
+                .unwrap_or_default()
+        });
         Self {
-            path,
+            index_path,
+            vault_root,
             items: Mutex::new(items),
         }
     }
@@ -138,8 +164,9 @@ impl NotebookStore {
         if input.markdown.trim().is_empty() {
             return Err(anyhow!("notebook markdown is empty"));
         }
-        let entry = entry_from_input(input, Utc::now());
         let mut items = self.items.lock().unwrap();
+        let mut used_paths = used_entry_paths(&items);
+        let entry = entry_from_input(input, Utc::now(), &mut used_paths);
         items.push(entry.clone());
         self.save_locked(&items)?;
         Ok(entry)
@@ -148,16 +175,17 @@ impl NotebookStore {
     pub fn create_many(&self, inputs: Vec<NotebookEntryInput>) -> Result<Vec<NotebookEntry>> {
         let now = Utc::now();
         let mut entries = Vec::with_capacity(inputs.len());
+        let mut items = self.items.lock().unwrap();
+        let mut used_paths = used_entry_paths(&items);
         for input in inputs {
             if input.markdown.trim().is_empty() {
                 return Err(anyhow!("notebook markdown is empty"));
             }
-            entries.push(entry_from_input(input, now));
+            entries.push(entry_from_input(input, now, &mut used_paths));
         }
         if entries.is_empty() {
             return Ok(entries);
         }
-        let mut items = self.items.lock().unwrap();
         items.extend(entries.iter().cloned());
         self.save_locked(&items)?;
         Ok(entries)
@@ -165,11 +193,22 @@ impl NotebookStore {
 
     pub fn update(&self, id: &str, input: NotebookEntryUpdate) -> Result<NotebookEntry> {
         let mut items = self.items.lock().unwrap();
-        let Some(entry) = items.iter_mut().find(|item| item.id == id) else {
+        let Some(entry_index) = items.iter().position(|item| item.id == id) else {
             return Err(anyhow!("notebook entry not found"));
         };
+        let needs_path = items[entry_index].path.is_none();
+        let mut used_paths = if needs_path {
+            Some(used_entry_paths_excluding(&items, id))
+        } else {
+            None
+        };
+        let entry = &mut items[entry_index];
         if let Some(title) = input.title {
             entry.title = normalize_title(&title);
+            if entry.path.is_none() {
+                let used_paths = used_paths.get_or_insert_with(HashSet::new);
+                entry.path = Some(unique_note_path(&entry.title, None, used_paths));
+            }
         }
         if let Some(markdown) = input.markdown {
             if markdown.trim().is_empty() {
@@ -195,26 +234,87 @@ impl NotebookStore {
     pub fn delete(&self, id: &str) -> bool {
         let mut items = self.items.lock().unwrap();
         let before = items.len();
+        let removed = items.iter().find(|item| item.id == id).cloned();
         items.retain(|item| item.id != id);
         let deleted = items.len() != before;
         if deleted {
             let _ = self.save_locked(&items);
+            if let Some(entry) = removed.and_then(|entry| entry.path) {
+                let _ = fs::remove_file(self.vault_root.join(entry));
+            }
         }
         deleted
     }
 
     fn save_locked(&self, items: &[NotebookEntry]) -> Result<()> {
-        fs::write(&self.path, serde_json::to_string_pretty(items)?)?;
+        fs::create_dir_all(&self.vault_root)?;
+        if let Some(parent) = self.index_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut index = Vec::with_capacity(items.len());
+        for entry in items {
+            let path = entry
+                .path
+                .clone()
+                .unwrap_or_else(|| safe_markdown_file_name(&entry.title));
+            let markdown_path = self.vault_root.join(&path);
+            if let Some(parent) = markdown_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(markdown_path, &entry.markdown)?;
+            index.push(NotebookIndexEntry::from_entry(entry, path));
+        }
+        fs::write(&self.index_path, serde_json::to_string_pretty(&index)?)?;
         Ok(())
     }
 }
 
-fn entry_from_input(input: NotebookEntryInput, now: DateTime<Utc>) -> NotebookEntry {
+impl NotebookIndexEntry {
+    fn from_entry(entry: &NotebookEntry, path: String) -> Self {
+        Self {
+            id: entry.id.clone(),
+            space_id: entry.space_id.clone(),
+            entry_type: entry.entry_type.clone(),
+            title: entry.title.clone(),
+            path,
+            metadata: entry.metadata.clone(),
+            source_session_id: entry.source_session_id.clone(),
+            source_message_id: entry.source_message_id.clone(),
+            created_at: entry.created_at,
+            updated_at: entry.updated_at,
+        }
+    }
+
+    fn into_entry(self, markdown: String) -> NotebookEntry {
+        NotebookEntry {
+            id: self.id,
+            space_id: self.space_id,
+            entry_type: self.entry_type,
+            title: self.title,
+            path: Some(self.path),
+            markdown,
+            metadata: self.metadata,
+            source_session_id: self.source_session_id,
+            source_message_id: self.source_message_id,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+fn entry_from_input(
+    input: NotebookEntryInput,
+    now: DateTime<Utc>,
+    used_paths: &mut HashSet<String>,
+) -> NotebookEntry {
+    let title = normalize_title(&input.title);
+    let path = unique_note_path(&title, input.path.as_deref(), used_paths);
     NotebookEntry {
         id: uuid::Uuid::new_v4().to_string(),
         space_id: normalize_space_id(input.space_id),
         entry_type: input.entry_type,
-        title: normalize_title(&input.title),
+        title,
+        path: Some(path),
         markdown: input.markdown,
         metadata: input.metadata,
         source_session_id: clean_optional(input.source_session_id),
@@ -222,6 +322,79 @@ fn entry_from_input(input: NotebookEntryInput, now: DateTime<Utc>) -> NotebookEn
         created_at: now,
         updated_at: now,
     }
+}
+
+fn load_file_backed_entries(index_path: &Path, vault_root: &Path) -> Result<Vec<NotebookEntry>> {
+    if !index_path.exists() {
+        return Err(anyhow!("notebook index not found"));
+    }
+    let text = fs::read_to_string(index_path)?;
+    let index = serde_json::from_str::<Vec<NotebookIndexEntry>>(&text)?;
+    let mut entries = Vec::with_capacity(index.len());
+    for item in index {
+        let markdown = fs::read_to_string(vault_root.join(&item.path)).unwrap_or_default();
+        entries.push(item.into_entry(markdown));
+    }
+    Ok(entries)
+}
+
+fn load_legacy_entries(path: &Path) -> Option<Vec<NotebookEntry>> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Vec<NotebookEntry>>(&text).ok())
+}
+
+fn migrate_legacy_entries(
+    mut entries: Vec<NotebookEntry>,
+    index_path: &Path,
+    vault_root: &Path,
+) -> Vec<NotebookEntry> {
+    let mut used_paths = HashSet::new();
+    for entry in &mut entries {
+        if entry.path.is_none() {
+            let imported_path = entry
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("import"))
+                .and_then(|import| import.get("source_path"))
+                .and_then(|value| value.as_str());
+            entry.path = Some(unique_note_path(
+                &entry.title,
+                imported_path,
+                &mut used_paths,
+            ));
+        } else if let Some(path) = entry.path.clone() {
+            used_paths.insert(path.to_lowercase());
+        }
+    }
+    let _ = save_entries_to_paths(&entries, index_path, vault_root);
+    entries
+}
+
+fn save_entries_to_paths(
+    entries: &[NotebookEntry],
+    index_path: &Path,
+    vault_root: &Path,
+) -> Result<()> {
+    fs::create_dir_all(vault_root)?;
+    if let Some(parent) = index_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut index = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let path = entry
+            .path
+            .clone()
+            .unwrap_or_else(|| safe_markdown_file_name(&entry.title));
+        let markdown_path = vault_root.join(&path);
+        if let Some(parent) = markdown_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(markdown_path, &entry.markdown)?;
+        index.push(NotebookIndexEntry::from_entry(entry, path));
+    }
+    fs::write(index_path, serde_json::to_string_pretty(&index)?)?;
+    Ok(())
 }
 
 pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
@@ -515,6 +688,7 @@ pub struct NotebookEntryInput {
     pub space_id: Option<String>,
     pub entry_type: NotebookEntryType,
     pub title: String,
+    pub path: Option<String>,
     pub markdown: String,
     pub metadata: Option<serde_json::Value>,
     pub source_session_id: Option<String>,
@@ -551,6 +725,102 @@ fn normalize_title(title: &str) -> String {
     }
 }
 
+fn used_entry_paths(items: &[NotebookEntry]) -> HashSet<String> {
+    items
+        .iter()
+        .filter_map(|entry| entry.path.as_ref())
+        .map(|path| path.to_lowercase())
+        .collect()
+}
+
+fn used_entry_paths_excluding(items: &[NotebookEntry], excluded_id: &str) -> HashSet<String> {
+    items
+        .iter()
+        .filter(|entry| entry.id != excluded_id)
+        .filter_map(|entry| entry.path.as_ref())
+        .map(|path| path.to_lowercase())
+        .collect()
+}
+
+fn unique_note_path(
+    title: &str,
+    preferred_path: Option<&str>,
+    used_paths: &mut HashSet<String>,
+) -> String {
+    let base = preferred_path
+        .and_then(normalize_note_path)
+        .unwrap_or_else(|| safe_markdown_file_name(title));
+    let mut candidate = base.clone();
+    if !used_paths.contains(&candidate.to_lowercase()) {
+        used_paths.insert(candidate.to_lowercase());
+        return candidate;
+    }
+    let extension = Path::new(&base)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("md");
+    let parent = Path::new(&base)
+        .parent()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let stem = Path::new(&base)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("note");
+    for index in 2.. {
+        let file_name = format!("{stem}-{index}.{extension}");
+        candidate = if parent.is_empty() {
+            file_name
+        } else {
+            format!("{}/{}", parent.replace('\\', "/"), file_name)
+        };
+        if !used_paths.contains(&candidate.to_lowercase()) {
+            used_paths.insert(candidate.to_lowercase());
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn normalize_note_path(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for part in path.replace('\\', "/").split('/') {
+        let part = safe_file_stem(part);
+        if !part.is_empty() && part != "." && part != ".." {
+            parts.push(part);
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let mut normalized = parts.join("/");
+    if !normalized.to_lowercase().ends_with(".md")
+        && !normalized.to_lowercase().ends_with(".markdown")
+    {
+        normalized.push_str(".md");
+    }
+    Some(normalized)
+}
+
+fn safe_markdown_file_name(title: &str) -> String {
+    format!("{}.md", safe_file_stem(title))
+}
+
+fn safe_file_stem(title: &str) -> String {
+    let name = title
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            ch if ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    if name.is_empty() { "note".into() } else { name }
+}
+
 fn clean_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -569,6 +839,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::ResearchReport,
+                path: None,
                 title: " Report ".into(),
                 markdown: "# Report".into(),
                 metadata: None,
@@ -595,6 +866,97 @@ mod tests {
         assert_eq!(updated.title, "Updated");
         assert!(store.delete(&entry.id));
         assert!(store.list(Some("default")).is_empty());
+    }
+
+    #[test]
+    fn notebook_store_persists_markdown_files_and_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("notebook_entries.json");
+        let store = NotebookStore::new_with_path(legacy_path);
+        let entry = store
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                path: Some("notes/TCC.md".into()),
+                title: "TCC".into(),
+                markdown: "# TCC".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+
+        let index_path = dir.path().join("notebook").join("index.json");
+        let note_path = dir
+            .path()
+            .join("notebook")
+            .join("vault")
+            .join("notes")
+            .join("TCC.md");
+        assert!(index_path.exists());
+        assert_eq!(std::fs::read_to_string(&note_path).unwrap(), "# TCC");
+
+        store
+            .update(
+                &entry.id,
+                NotebookEntryUpdate {
+                    title: None,
+                    markdown: Some("# TCC\n\nUpdated".into()),
+                    metadata: None,
+                    source_session_id: None,
+                    source_message_id: None,
+                },
+            )
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&note_path)
+                .unwrap()
+                .contains("Updated")
+        );
+
+        let reloaded = NotebookStore::new_with_path(dir.path().join("notebook_entries.json"));
+        let loaded = reloaded.get(&entry.id).unwrap();
+        assert_eq!(loaded.path.as_deref(), Some("notes/TCC.md"));
+        assert!(loaded.markdown.contains("Updated"));
+
+        assert!(reloaded.delete(&entry.id));
+        assert!(!note_path.exists());
+    }
+
+    #[test]
+    fn notebook_store_migrates_legacy_json_to_vault_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("notebook_entries.json");
+        let now = Utc::now();
+        let legacy = vec![NotebookEntry {
+            id: "legacy-1".into(),
+            space_id: "default".into(),
+            entry_type: NotebookEntryType::Note,
+            title: "Legacy Note".into(),
+            path: None,
+            markdown: "# Legacy".into(),
+            metadata: None,
+            source_session_id: None,
+            source_message_id: None,
+            created_at: now,
+            updated_at: now,
+        }];
+        std::fs::write(&legacy_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let store = NotebookStore::new_with_path(legacy_path);
+        let migrated = store.get("legacy-1").unwrap();
+        assert_eq!(migrated.path.as_deref(), Some("Legacy Note.md"));
+        assert_eq!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join("notebook")
+                    .join("vault")
+                    .join("Legacy Note.md")
+            )
+            .unwrap(),
+            "# Legacy"
+        );
+        assert!(dir.path().join("notebook").join("index.json").exists());
     }
 
     #[test]
@@ -625,6 +987,7 @@ mod tests {
             space_id: "default".into(),
             entry_type: NotebookEntryType::Note,
             title: "Lithography".into(),
+            path: None,
             markdown: "# Lithography\n\n#process".into(),
             metadata: Some(serde_json::json!({ "tags": ["#semiconductor", "process"] })),
             source_session_id: None,
@@ -637,6 +1000,7 @@ mod tests {
             space_id: "default".into(),
             entry_type: NotebookEntryType::Note,
             title: "OPC".into(),
+            path: None,
             markdown: "OPC is related to [[Lithography|litho]].".into(),
             metadata: None,
             source_session_id: None,
@@ -651,9 +1015,11 @@ mod tests {
         assert_eq!(target_view.tags, vec!["process", "semiconductor"]);
         assert_eq!(target_view.backlinks.len(), 1);
         assert_eq!(target_view.backlinks[0].source_title, "OPC");
-        assert!(target_view.backlinks[0]
-            .snippet
-            .contains("[[Lithography|litho]]"));
+        assert!(
+            target_view.backlinks[0]
+                .snippet
+                .contains("[[Lithography|litho]]")
+        );
         assert_eq!(source_view.links.len(), 1);
         assert!(source_view.links[0].resolved);
         assert_eq!(source_view.links[0].target_id.as_deref(), Some("target-1"));

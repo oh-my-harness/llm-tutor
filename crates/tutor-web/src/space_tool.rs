@@ -557,6 +557,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::Note,
+                path: None,
                 title: "Mask notes".into(),
                 markdown: "Alignment marks matter.".into(),
                 metadata: None,
@@ -594,6 +595,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::Note,
+                path: None,
                 title: "Mask notes".into(),
                 markdown: "Original notes.".into(),
                 metadata: None,
@@ -641,6 +643,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::Note,
+                path: None,
                 title: "Lithography notes".into(),
                 markdown: "OPC and mask alignment. #semiconductor".into(),
                 metadata: None,

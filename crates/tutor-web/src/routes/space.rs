@@ -469,6 +469,7 @@ mod tests {
             .create(NotebookEntryInput {
                 space_id: None,
                 entry_type: NotebookEntryType::ResearchReport,
+                path: None,
                 title: "Lithography notes".into(),
                 markdown: "# Lithography\n\nPhotoresist and mask alignment.".into(),
                 metadata: None,

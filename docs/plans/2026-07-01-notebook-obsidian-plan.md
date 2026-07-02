@@ -587,13 +587,19 @@ blunt.
 - [x] Add unresolved link review.
 - [x] Add Obsidian-compatible vault export.
 - [x] Evaluate file-backed vault mode.
+- [x] Implement the first file-backed vault storage slice.
+- [x] Store note bodies as individual Markdown files under `notebook/vault/`.
+- [x] Store Notebook ids, paths, types, source metadata, and timestamps in
+  `notebook/index.json`.
+- [x] Migrate existing `notebook_entries.json` data into the vault layout on
+  store startup.
+- [x] Prefer imported source file-name stems over `frontmatter.title` for entry
+  titles.
+- [x] Preserve imported relative folder paths in entry paths and zip exports.
 
-File-backed vault mode evaluation: keep JSON-backed `NotebookEntry` as the
-product source of truth for now. Markdown import/export gives portability
-without introducing file watcher conflicts, rename ambiguity, cross-platform
-path edge cases, or partial-write recovery problems. Revisit file-backed mode
-only after Notebook editing, links, imports, exports, and agent proposals are
-stable.
+File-backed vault mode first implementation is now active. The remaining gaps
+are external file watching, attachment storage, link updates on path rename,
+and a richer conflict-resolution UI for path collisions.
 
 ## 9. Open Questions
 
