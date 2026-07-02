@@ -154,7 +154,29 @@ Later export formats:
 
 ## 3. Data Model Direction
 
-Keep the existing `NotebookEntry` as the durable record for the next slice:
+The Notebook storage target is a file-backed vault directory, not a single JSON
+blob. Markdown note files should become the durable source of truth for note
+content, while JSON is kept only as a lightweight index and product metadata
+store.
+
+Target layout:
+
+```text
+notebook/
+  index.json
+  vault/
+    TCC.md
+    FindOptics.md
+    folder/
+      Nested Note.md
+```
+
+`vault/` stores user-authored Markdown files. `index.json` stores stable ids,
+relative paths, entry types, product source metadata, timestamps, and other
+fields that do not naturally belong in Markdown frontmatter.
+
+Keep the existing `NotebookEntry` API shape while migrating the persistence
+backend:
 
 ```ts
 NotebookEntry {
@@ -162,6 +184,7 @@ NotebookEntry {
   spaceId?: string
   type: 'note' | 'research_report' | 'chat_excerpt' | 'quiz_summary' | 'source_snippet' | 'deep_solve_result'
   title: string
+  path?: string
   markdown: string
   tags: string[]
   metadata: Record<string, unknown>
@@ -188,8 +211,42 @@ NotebookLinkIndex {
 The link index can be rebuilt from note Markdown. It should not become the
 primary source of truth.
 
-For v0.1, keep JSON storage. When notebook relationships, assets, and import
-history grow, consider SQLite or a file-backed vault mode.
+### Title and Path Semantics
+
+For imported Markdown and Obsidian vault notes, the note title used by Tutor
+Agent should prefer the file name stem, not `frontmatter.title`.
+
+Example:
+
+```text
+TCC.md
+---
+title: TCC (Transmission Cross Coefficient)
+---
+```
+
+The entry title should be `TCC`. The frontmatter title should be preserved in
+metadata and may be shown as an optional display subtitle or alias. This keeps
+`[[TCC]]`, exported filenames, Obsidian compatibility, and local file paths
+stable.
+
+### Migration Direction
+
+Current implementation stores all Notebook entries in `notebook_entries.json`.
+This is acceptable only as a transitional implementation. The next Notebook
+storage slice should:
+
+- write each note body to an individual `.md` file under `notebook/vault/`,
+- keep an `index.json` for ids, relative paths, source mappings, entry types,
+  timestamps, and non-Markdown product metadata,
+- preserve imported relative folder paths,
+- use file-name stems as imported note titles by default,
+- preserve frontmatter and unknown metadata without letting frontmatter title
+  overwrite the imported file-name identity,
+- update the index and Markdown file together for create, edit, rename, delete,
+  import, export, and agent-applied edit flows,
+- provide a migration path from existing `notebook_entries.json` data into the
+  vault directory layout.
 
 ## 4. UI Direction
 
