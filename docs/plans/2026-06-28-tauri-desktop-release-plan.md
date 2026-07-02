@@ -247,6 +247,13 @@ Release automation:
   them to the matching GitHub Release.
 - Manual `workflow_dispatch` builds the same artifacts as workflow artifacts
   without publishing a release, so it can be used to validate packaging changes.
+- The workflow requires a repository secret named `PRIVATE_DEPS_TOKEN` when
+  workspace dependencies are private. Use a fine-grained GitHub token or GitHub
+  App token with read access to private dependency repositories such as
+  `oh-my-harness/llm-api-adapter` and any private runtime repositories.
+- Cargo is configured with `CARGO_NET_GIT_FETCH_WITH_CLI=true` so git dependency
+  fetches use the token configured by the workflow instead of failing with an
+  ambiguous `revision not found` error.
 - Local `scripts/build-desktop.ps1` and `scripts/qa-desktop.ps1` remain the
   fallback path for debugging Windows release issues.
 

@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   build:
@@ -39,6 +40,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure private Git dependencies
+        shell: bash
+        env:
+          PRIVATE_DEPS_TOKEN: ${{ secrets.PRIVATE_DEPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_DEPS_TOKEN:-}" ]]; then
+            echo "::error title=Missing PRIVATE_DEPS_TOKEN::Create a repository secret named PRIVATE_DEPS_TOKEN with read access to private git dependencies such as oh-my-harness/llm-api-adapter."
+            exit 1
+          fi
+          echo "::add-mask::${PRIVATE_DEPS_TOKEN}"
+          git config --global url."https://x-access-token:${PRIVATE_DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
