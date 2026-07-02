@@ -4463,7 +4463,7 @@ dependencies = [
 
 [[package]]
 name = "llm-tutor-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tauri",
  "tauri-build",
@@ -7955,7 +7955,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7982,7 +7982,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-rag"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -7999,7 +7999,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-tools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8018,7 +8018,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
