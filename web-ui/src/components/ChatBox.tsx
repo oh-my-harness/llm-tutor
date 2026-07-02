@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Code2,
   Database,
+  Edit3,
   FileText,
   FileQuestion,
   SearchCheck,
@@ -16,6 +17,7 @@ import {
   Paperclip,
   Sparkles,
   Circle,
+  Square,
   X,
 } from 'lucide-react'
 import type { LlmModelConfig } from '../settings'
@@ -110,6 +112,8 @@ interface Props {
   selectedKnowledgeBaseId: string
   selectedNotebookEnabled: boolean
   onSend: (text: string, attachments?: ChatAttachment[], mentions?: SpaceMention[]) => void
+  onStop?: () => void
+  onEditUserMessage?: (messageIndex: number, nextText: string) => void
   onAskDeepSolveStep?: (step: { id: string; title: string; summary?: string }) => void
   onCapabilityChange: (capability: Capability) => void
   onKnowledgeBaseChange: (id: string) => void
@@ -121,6 +125,7 @@ interface Props {
   onQuizFinish?: (quizId: string) => Promise<void>
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
   disabled: boolean
+  running?: boolean
 }
 
 export interface ContextStats {
@@ -181,6 +186,8 @@ export function ChatBox({
   selectedKnowledgeBaseId,
   selectedNotebookEnabled,
   onSend,
+  onStop,
+  onEditUserMessage,
   onAskDeepSolveStep,
   onCapabilityChange,
   onKnowledgeBaseChange,
@@ -192,8 +199,11 @@ export function ChatBox({
   onQuizFinish,
   onSourceNavigate,
   disabled,
+  running = false,
 }: Props) {
   const [input, setInput] = useState('')
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null)
+  const [editingMessageText, setEditingMessageText] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [mentions, setMentions] = useState<SpaceMention[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -202,11 +212,28 @@ export function ChatBox({
 
   const handleSend = () => {
     const readyAttachments = attachments.filter((attachment) => !attachment.error)
-    if ((!input.trim() && readyAttachments.length === 0 && mentions.length === 0) || disabled) return
+    if ((!input.trim() && readyAttachments.length === 0 && mentions.length === 0) || disabled || running) return
     onSend(input.trim(), readyAttachments, mentions)
     setInput('')
     setAttachments([])
     setMentions([])
+  }
+
+  const startEditUserMessage = (index: number, text: string) => {
+    if (running) return
+    setEditingMessageIndex(index)
+    setEditingMessageText(text)
+  }
+
+  const cancelEditUserMessage = () => {
+    setEditingMessageIndex(null)
+    setEditingMessageText('')
+  }
+
+  const submitEditUserMessage = () => {
+    if (editingMessageIndex === null || !editingMessageText.trim() || !onEditUserMessage || running) return
+    onEditUserMessage(editingMessageIndex, editingMessageText.trim())
+    cancelEditUserMessage()
   }
 
   const handleAddAttachments = (items: ChatAttachment[]) => {
@@ -263,6 +290,7 @@ export function ChatBox({
               onNotebookEnabledChange={onNotebookEnabledChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
+              onStop={onStop}
               attachments={attachments}
               onAddAttachments={handleAddAttachments}
               onRemoveAttachment={handleRemoveAttachment}
@@ -270,6 +298,7 @@ export function ChatBox({
               onAddMention={handleAddMention}
               onRemoveMention={handleRemoveMention}
               disabled={disabled}
+              running={running}
               variant="center"
             />
           </div>
@@ -333,7 +362,47 @@ export function ChatBox({
                   )
                 ) : (
                   <>
-                    <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
+                    {editingMessageIndex === i ? (
+                      <div className="space-y-2">
+                        <textarea
+                          className="min-h-24 w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-400"
+                          value={editingMessageText}
+                          onChange={(event) => setEditingMessageText(event.target.value)}
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                            type="button"
+                            onClick={cancelEditUserMessage}
+                          >
+                            取消
+                          </button>
+                          <button
+                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-gray-200"
+                            type="button"
+                            disabled={!editingMessageText.trim()}
+                            onClick={submitEditUserMessage}
+                          >
+                            重新发送
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group/user-message relative">
+                        <pre className="whitespace-pre-wrap pr-8 font-sans text-sm">{msg.text}</pre>
+                        {onEditUserMessage && !running && (
+                          <button
+                            className="absolute right-0 top-0 hidden h-7 w-7 items-center justify-center rounded-md text-blue-700 hover:bg-blue-100 group-hover/user-message:flex"
+                            type="button"
+                            title="编辑并重新生成"
+                            onClick={() => startEditUserMessage(i, msg.text)}
+                          >
+                            <Edit3 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {msg.attachments && msg.attachments.length > 0 && (
                       <AttachmentSummary attachments={msg.attachments} />
                     )}
@@ -366,6 +435,7 @@ export function ChatBox({
               onNotebookEnabledChange={onNotebookEnabledChange}
               onLlmConfigChange={onLlmConfigChange}
               onSend={handleSend}
+              onStop={onStop}
               attachments={attachments}
               onAddAttachments={handleAddAttachments}
               onRemoveAttachment={handleRemoveAttachment}
@@ -373,6 +443,7 @@ export function ChatBox({
               onAddMention={handleAddMention}
               onRemoveMention={handleRemoveMention}
               disabled={disabled}
+              running={running}
               variant="bottom"
             />
           </div>
@@ -784,6 +855,7 @@ function Composer({
   onNotebookEnabledChange,
   onLlmConfigChange,
   onSend,
+  onStop,
   attachments,
   onAddAttachments,
   onRemoveAttachment,
@@ -791,6 +863,7 @@ function Composer({
   onAddMention,
   onRemoveMention,
   disabled,
+  running,
   variant,
 }: {
   input: string
@@ -806,6 +879,7 @@ function Composer({
   onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
   onSend: () => void
+  onStop?: () => void
   attachments: ChatAttachment[]
   onAddAttachments: (attachments: ChatAttachment[]) => void
   onRemoveAttachment: (id: string) => void
@@ -813,6 +887,7 @@ function Composer({
   onAddMention: (mention: SpaceMention) => void
   onRemoveMention: (id: string) => void
   disabled: boolean
+  running: boolean
   variant: 'center' | 'bottom'
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
@@ -861,7 +936,7 @@ function Composer({
   ]
 
   const toggleMenu = (menu: OpenMenu) => {
-    if (disabled) return
+    if (disabled || running) return
     setOpenMenu((current) => (current === menu ? null : menu))
   }
 
@@ -974,7 +1049,7 @@ function Composer({
         <button
           className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
           type="button"
-          disabled={disabled || readingAttachments}
+          disabled={disabled || running || readingAttachments}
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip size={18} />
@@ -1127,13 +1202,15 @@ function Composer({
         </div>
 
         <button
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
-          onClick={onSend}
-          disabled={disabled || (!input.trim() && attachments.filter((attachment) => !attachment.error).length === 0 && mentions.length === 0)}
+          className={`flex h-9 w-9 items-center justify-center rounded-full text-white disabled:bg-gray-200 disabled:text-gray-400 ${
+            running ? 'bg-gray-900 hover:bg-gray-800' : 'bg-blue-600 hover:bg-blue-700'
+          }`}
+          onClick={running ? onStop : onSend}
+          disabled={disabled || (!running && !input.trim() && attachments.filter((attachment) => !attachment.error).length === 0 && mentions.length === 0)}
           type="button"
-          title="发送"
+          title={running ? '停止生成' : '发送'}
         >
-          <ArrowUp size={20} />
+          {running ? <Square size={15} /> : <ArrowUp size={20} />}
         </button>
       </div>
     </div>

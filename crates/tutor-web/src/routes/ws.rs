@@ -20,6 +20,7 @@ use serde::Deserialize;
 use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
+use tokio_util::sync::CancellationToken;
 
 use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::notebook_store::NotebookStore;
@@ -91,6 +92,8 @@ enum ClientMessage {
         content: String,
         mentions: Option<Vec<SpaceMention>>,
     },
+    #[serde(rename = "stop")]
+    Stop,
     #[serde(rename = "approval_response")]
     ApprovalResponse { request_id: String, approved: bool },
 }
@@ -126,17 +129,40 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
         }
     });
 
+    let mut active_cancel: Option<CancellationToken> = None;
+    let mut active_task: Option<tokio::task::JoinHandle<()>> = None;
+
     while let Some(Ok(msg)) = ws_stream.next().await {
+        if active_task.as_ref().is_some_and(|task| task.is_finished()) {
+            if let Some(task) = active_task.take() {
+                let _ = task.await;
+            }
+            active_cancel = None;
+        }
         match msg {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 match parsed {
                     Ok(ClientMessage::Message { content, mentions }) => {
+                        if active_task.is_some() {
+                            let _ = entry
+                                .stream
+                                .status(
+                                    "error",
+                                    serde_json::json!({
+                                        "message": "agent is already running"
+                                    }),
+                                )
+                                .await;
+                            continue;
+                        }
                         let active_entry = pool
                             .ensure_entry(&session_id)
                             .await
                             .unwrap_or_else(|| entry.clone());
-                        run_tutor_message(
+                        let cancel = CancellationToken::new();
+                        active_cancel = Some(cancel.clone());
+                        active_task = Some(tokio::spawn(run_tutor_message(
                             pool.clone(),
                             state.memory.clone(),
                             state.notebook.clone(),
@@ -145,8 +171,13 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                             active_entry,
                             content,
                             mentions.unwrap_or_default(),
-                        )
-                        .await;
+                            cancel,
+                        )));
+                    }
+                    Ok(ClientMessage::Stop) => {
+                        if let Some(cancel) = active_cancel.take() {
+                            cancel.cancel();
+                        }
                     }
                     Ok(ClientMessage::ApprovalResponse {
                         request_id,
@@ -181,6 +212,12 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
         }
     }
 
+    if let Some(cancel) = active_cancel {
+        cancel.cancel();
+    }
+    if let Some(task) = active_task {
+        task.abort();
+    }
     send_task.abort();
 }
 
@@ -212,6 +249,7 @@ async fn run_tutor_message(
     entry: SessionEntry,
     content: String,
     mentions: Vec<SpaceMention>,
+    cancel: CancellationToken,
 ) {
     let history_len = pool.history_len(&entry.id).await + 1;
     let user_message_index = next_user_message_index(&pool, &entry.id).await;
@@ -238,7 +276,7 @@ async fn run_tutor_message(
         )
         .await;
 
-    let result: tutor_agent::Result<(String, bool)> = async {
+    let work = async {
         let capability: Capability = entry.capability.parse()?;
         let runtime_session = pool
             .open_runtime_session(&entry.id)
@@ -316,8 +354,24 @@ async fn run_tutor_message(
             .run_with_session(capability, runtime_session, &resolved_content.content)
             .await?;
         Ok((answer, streamed_content.load(Ordering::SeqCst)))
-    }
-    .await;
+    };
+
+    let result: tutor_agent::Result<(String, bool)> = tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = entry
+                .stream
+                .status(
+                    "stopped",
+                    serde_json::json!({
+                        "capability": entry.capability,
+                    }),
+                )
+                .await;
+            let _ = entry.stream.content("", false).await;
+            return;
+        }
+        result = work => result,
+    };
 
     match result {
         Ok((answer, streamed)) => {

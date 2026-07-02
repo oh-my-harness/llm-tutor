@@ -120,6 +120,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
   const streamingRef = useRef('')
+  const pendingSessionSendRef = useRef<{ sessionId: string; content: string; mentions: SpaceMention[] } | null>(null)
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
   const pendingCitationsRef = useRef<Citation[]>([])
   const pendingDeepSolveRef = useRef<DeepSolveTraceEntry[]>([])
@@ -183,16 +184,20 @@ export default function App() {
           const citations = pendingCitationsRef.current
           const deepSolve = pendingDeepSolveRef.current
           const notebookEditProposal = pendingNotebookEditProposalRef.current
-          setMessages((prev) => [
-            ...dropTrailingTransientStatus(prev),
-            {
-              role: 'assistant',
-              text: finalText,
-              citations,
-              deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
-              notebookEditProposal,
-            },
-          ])
+          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal) {
+            setMessages((prev) => [
+              ...dropTrailingTransientStatus(prev),
+              {
+                role: 'assistant',
+                text: finalText,
+                citations,
+                deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
+                notebookEditProposal,
+              },
+            ])
+          } else {
+            setMessages((prev) => dropTrailingTransientStatus(prev))
+          }
           pendingCitationsRef.current = []
           pendingDeepSolveRef.current = []
           pendingNotebookEditProposalRef.current = undefined
@@ -245,6 +250,13 @@ export default function App() {
               detail: typeof payload.history_len === 'number' ? `${payload.history_len} context messages` : undefined,
             })
           }
+        } else if (kind === 'stopped') {
+          pushStatus({
+            kind: 'done',
+            label: 'Stopped',
+            detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
+          })
+          setRunning(false)
         } else if (kind === 'approval_request') {
           pushStatus({
             kind: 'tool',
@@ -302,6 +314,14 @@ export default function App() {
       return ''
     })
   }, [])
+
+  useEffect(() => {
+    const pending = pendingSessionSendRef.current
+    if (!pending || pending.sessionId !== sessionId) return
+    pendingSessionSendRef.current = null
+    send({ type: 'message', content: pending.content, mentions: pending.mentions })
+    void refreshSessions()
+  }, [sessionId, send, refreshSessions])
 
   const persistSettings = useCallback((nextSettings: typeof llmSettings) => {
     saveLlmSettings(nextSettings)
@@ -432,6 +452,63 @@ export default function App() {
       setRunning(false)
     }
   }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, refreshSessions, messages])
+
+  const handleStopGeneration = useCallback(() => {
+    if (!running) return
+    send({ type: 'stop' })
+    pushStatus({ kind: 'tool', label: 'Stopping', detail: capabilityLabel(capability) })
+  }, [capability, pushStatus, running, send])
+
+  const handleEditUserMessage = useCallback(async (messageIndex: number, nextText: string) => {
+    if (running || !nextText.trim()) return
+    try {
+      const priorMessages = messages
+        .slice(0, messageIndex)
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          capability,
+          kb: selectedKnowledgeBaseId || null,
+          notebook_enabled: selectedNotebookEnabled,
+          llm: settingsForSession(llmSettings),
+          search: searchForSession(llmSettings),
+        }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(errorMessage(data, res.status))
+      }
+      const nextSessionId = data.id as string
+      for (const message of priorMessages) {
+        await persistPlainMessage(
+          nextSessionId,
+          message.role === 'user' ? message.text : undefined,
+          message.role === 'assistant' ? message.text : undefined,
+        )
+      }
+
+      setSessionId(nextSessionId)
+      upsertRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
+      setMessages([...priorMessages, { role: 'user', text: nextText }])
+      setTraceEntries([])
+      setLatestUsage(null)
+      setStreamingText('')
+      streamingRef.current = ''
+      pendingCitationsRef.current = []
+      pendingDeepSolveRef.current = []
+      pendingNotebookEditProposalRef.current = undefined
+      setRunning(true)
+      pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
+      pendingSessionSendRef.current = { sessionId: nextSessionId, content: nextText, mentions: [] }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Error', detail: message })
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
+      setRunning(false)
+    }
+  }, [capability, llmSettings, messages, pushStatus, running, selectedKnowledgeBaseId, selectedNotebookEnabled])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -867,6 +944,8 @@ export default function App() {
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   selectedNotebookEnabled={selectedNotebookEnabled}
                   onSend={handleSend}
+                  onStop={handleStopGeneration}
+                  onEditUserMessage={handleEditUserMessage}
                   onAskDeepSolveStep={handleAskDeepSolveStep}
                   onCapabilityChange={handleCapabilityChange}
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
@@ -877,7 +956,8 @@ export default function App() {
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   onSourceNavigate={handleSourceNavigate}
-                  disabled={running}
+                  disabled={false}
+                  running={running}
                 />
               </main>
               {!chatIsEmpty && (
@@ -1468,6 +1548,21 @@ async function persistQuizMessage(sessionId: string, user: string, assistant: st
       user,
       assistant,
       quiz_id: quizId,
+    }),
+  })
+  const data = await safeJson(res)
+  if (!res.ok) {
+    throw new Error(errorMessage(data, res.status))
+  }
+}
+
+async function persistPlainMessage(sessionId: string, user?: string, assistant?: string) {
+  const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user,
+      assistant,
     }),
   })
   const data = await safeJson(res)
