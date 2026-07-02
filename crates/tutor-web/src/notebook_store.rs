@@ -93,24 +93,14 @@ struct NotebookIndexEntry {
 
 impl NotebookStore {
     pub fn new() -> Self {
-        Self::new_with_path(default_root().join("notebook_entries.json"))
+        Self::new_with_path(default_root().join("notebook"))
     }
 
     pub fn new_with_path(path: PathBuf) -> Self {
-        let legacy_path = path;
-        let base_dir = legacy_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("notebook");
-        let index_path = base_dir.join("index.json");
-        let vault_root = base_dir.join("vault");
+        let index_path = path.join("index.json");
+        let vault_root = path.join("vault");
         fs::create_dir_all(&vault_root).expect("failed to create notebook vault directory");
-        let items = load_file_backed_entries(&index_path, &vault_root).unwrap_or_else(|_| {
-            load_legacy_entries(&legacy_path)
-                .map(|entries| migrate_legacy_entries(entries, &index_path, &vault_root))
-                .unwrap_or_default()
-        });
+        let items = load_file_backed_entries(&index_path, &vault_root).unwrap_or_default();
         Self {
             index_path,
             vault_root,
@@ -336,65 +326,6 @@ fn load_file_backed_entries(index_path: &Path, vault_root: &Path) -> Result<Vec<
         entries.push(item.into_entry(markdown));
     }
     Ok(entries)
-}
-
-fn load_legacy_entries(path: &Path) -> Option<Vec<NotebookEntry>> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Vec<NotebookEntry>>(&text).ok())
-}
-
-fn migrate_legacy_entries(
-    mut entries: Vec<NotebookEntry>,
-    index_path: &Path,
-    vault_root: &Path,
-) -> Vec<NotebookEntry> {
-    let mut used_paths = HashSet::new();
-    for entry in &mut entries {
-        if entry.path.is_none() {
-            let imported_path = entry
-                .metadata
-                .as_ref()
-                .and_then(|metadata| metadata.get("import"))
-                .and_then(|import| import.get("source_path"))
-                .and_then(|value| value.as_str());
-            entry.path = Some(unique_note_path(
-                &entry.title,
-                imported_path,
-                &mut used_paths,
-            ));
-        } else if let Some(path) = entry.path.clone() {
-            used_paths.insert(path.to_lowercase());
-        }
-    }
-    let _ = save_entries_to_paths(&entries, index_path, vault_root);
-    entries
-}
-
-fn save_entries_to_paths(
-    entries: &[NotebookEntry],
-    index_path: &Path,
-    vault_root: &Path,
-) -> Result<()> {
-    fs::create_dir_all(vault_root)?;
-    if let Some(parent) = index_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut index = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let path = entry
-            .path
-            .clone()
-            .unwrap_or_else(|| safe_markdown_file_name(&entry.title));
-        let markdown_path = vault_root.join(&path);
-        if let Some(parent) = markdown_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(markdown_path, &entry.markdown)?;
-        index.push(NotebookIndexEntry::from_entry(entry, path));
-    }
-    fs::write(index_path, serde_json::to_string_pretty(&index)?)?;
-    Ok(())
 }
 
 pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
@@ -834,7 +765,7 @@ mod tests {
     #[test]
     fn notebook_store_creates_updates_and_deletes_entry() {
         let dir = tempfile::tempdir().unwrap();
-        let store = NotebookStore::new_with_path(dir.path().join("notebook.json"));
+        let store = NotebookStore::new_with_path(dir.path().join("notebook"));
         let entry = store
             .create(NotebookEntryInput {
                 space_id: None,
@@ -871,8 +802,8 @@ mod tests {
     #[test]
     fn notebook_store_persists_markdown_files_and_index() {
         let dir = tempfile::tempdir().unwrap();
-        let legacy_path = dir.path().join("notebook_entries.json");
-        let store = NotebookStore::new_with_path(legacy_path);
+        let notebook_root = dir.path().join("notebook");
+        let store = NotebookStore::new_with_path(notebook_root);
         let entry = store
             .create(NotebookEntryInput {
                 space_id: None,
@@ -914,49 +845,13 @@ mod tests {
                 .contains("Updated")
         );
 
-        let reloaded = NotebookStore::new_with_path(dir.path().join("notebook_entries.json"));
+        let reloaded = NotebookStore::new_with_path(dir.path().join("notebook"));
         let loaded = reloaded.get(&entry.id).unwrap();
         assert_eq!(loaded.path.as_deref(), Some("notes/TCC.md"));
         assert!(loaded.markdown.contains("Updated"));
 
         assert!(reloaded.delete(&entry.id));
         assert!(!note_path.exists());
-    }
-
-    #[test]
-    fn notebook_store_migrates_legacy_json_to_vault_layout() {
-        let dir = tempfile::tempdir().unwrap();
-        let legacy_path = dir.path().join("notebook_entries.json");
-        let now = Utc::now();
-        let legacy = vec![NotebookEntry {
-            id: "legacy-1".into(),
-            space_id: "default".into(),
-            entry_type: NotebookEntryType::Note,
-            title: "Legacy Note".into(),
-            path: None,
-            markdown: "# Legacy".into(),
-            metadata: None,
-            source_session_id: None,
-            source_message_id: None,
-            created_at: now,
-            updated_at: now,
-        }];
-        std::fs::write(&legacy_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
-
-        let store = NotebookStore::new_with_path(legacy_path);
-        let migrated = store.get("legacy-1").unwrap();
-        assert_eq!(migrated.path.as_deref(), Some("Legacy Note.md"));
-        assert_eq!(
-            std::fs::read_to_string(
-                dir.path()
-                    .join("notebook")
-                    .join("vault")
-                    .join("Legacy Note.md")
-            )
-            .unwrap(),
-            "# Legacy"
-        );
-        assert!(dir.path().join("notebook").join("index.json").exists());
     }
 
     #[test]

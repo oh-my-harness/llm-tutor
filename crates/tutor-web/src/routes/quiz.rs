@@ -633,9 +633,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let embedding = tutor_rag::EmbeddingConfig {
             provider: "local-test".into(),
@@ -713,9 +711,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let app =
             quiz_router_with_rag_root(store, knowledge, notebook, memory, dir.path().join("rag"));
@@ -777,9 +773,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let entry = notebook
             .create(crate::notebook_store::NotebookEntryInput {

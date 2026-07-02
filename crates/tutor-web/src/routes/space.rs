@@ -461,9 +461,7 @@ mod tests {
     #[tokio::test]
     async fn lists_and_reads_space_mentions() {
         let dir = tempfile::tempdir().unwrap();
-        let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let quizzes = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let entry = notebook
             .create(NotebookEntryInput {

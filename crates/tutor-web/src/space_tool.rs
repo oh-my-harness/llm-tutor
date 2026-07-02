@@ -550,7 +550,7 @@ mod tests {
     async fn read_space_item_returns_notebook_markdown() {
         let dir = tempfile::tempdir().unwrap();
         let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
+            dir.path().join("notebook"),
         ));
         let quizzes = Arc::new(QuizStore::new_with_path(dir.path().join("quizzes.json")));
         let entry = notebook
@@ -589,7 +589,7 @@ mod tests {
     async fn propose_notebook_edit_returns_preview_without_writing() {
         let dir = tempfile::tempdir().unwrap();
         let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
+            dir.path().join("notebook"),
         ));
         let entry = notebook
             .create(NotebookEntryInput {
@@ -637,7 +637,7 @@ mod tests {
     async fn search_notebook_returns_plain_text_hits() {
         let dir = tempfile::tempdir().unwrap();
         let notebook = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
+            dir.path().join("notebook"),
         ));
         let entry = notebook
             .create(NotebookEntryInput {

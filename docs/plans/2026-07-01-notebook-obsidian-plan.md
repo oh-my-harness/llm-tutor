@@ -175,8 +175,8 @@ notebook/
 relative paths, entry types, product source metadata, timestamps, and other
 fields that do not naturally belong in Markdown frontmatter.
 
-Keep the existing `NotebookEntry` API shape while migrating the persistence
-backend:
+Keep the existing `NotebookEntry` API shape while using the file-backed
+persistence backend:
 
 ```ts
 NotebookEntry {
@@ -230,11 +230,9 @@ metadata and may be shown as an optional display subtitle or alias. This keeps
 `[[TCC]]`, exported filenames, Obsidian compatibility, and local file paths
 stable.
 
-### Migration Direction
+### Storage Direction
 
-Current implementation stores all Notebook entries in `notebook_entries.json`.
-This is acceptable only as a transitional implementation. The next Notebook
-storage slice should:
+Notebook storage should use the file-backed vault layout directly:
 
 - write each note body to an individual `.md` file under `notebook/vault/`,
 - keep an `index.json` for ids, relative paths, source mappings, entry types,
@@ -244,9 +242,10 @@ storage slice should:
 - preserve frontmatter and unknown metadata without letting frontmatter title
   overwrite the imported file-name identity,
 - update the index and Markdown file together for create, edit, rename, delete,
-  import, export, and agent-applied edit flows,
-- provide a migration path from existing `notebook_entries.json` data into the
-  vault directory layout.
+  import, export, and agent-applied edit flows.
+
+The old single-file `notebook_entries.json` format is not a supported storage
+format for this product direction.
 
 ## 4. UI Direction
 
@@ -591,8 +590,6 @@ blunt.
 - [x] Store note bodies as individual Markdown files under `notebook/vault/`.
 - [x] Store Notebook ids, paths, types, source metadata, and timestamps in
   `notebook/index.json`.
-- [x] Migrate existing `notebook_entries.json` data into the vault layout on
-  store startup.
 - [x] Prefer imported source file-name stems over `frontmatter.title` for entry
   titles.
 - [x] Preserve imported relative folder paths in entry paths and zip exports.

@@ -982,9 +982,7 @@ mod tests {
     #[tokio::test]
     async fn creates_lists_and_deletes_notebook_entry() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let store = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let app = notebook_router(store, memory.clone());
         let response = app
@@ -1054,9 +1052,7 @@ mod tests {
     #[tokio::test]
     async fn imports_markdown_entries_from_multipart() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let store = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let app = notebook_router(store, memory.clone());
         let markdown = "---\ntitle: Imported OPC\ntags:\n  - optics\n  - opc\n---\n# Imported OPC\n\nSee [[Lithography]].\n";
@@ -1103,9 +1099,7 @@ mod tests {
     #[tokio::test]
     async fn previews_import_conflicts_and_exports_notebook() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(NotebookStore::new_with_path(
-            dir.path().join("notebook.json"),
-        ));
+        let store = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
         let existing = store
             .create(NotebookEntryInput {

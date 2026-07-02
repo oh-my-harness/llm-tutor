@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn resolves_space_mentions_into_turn_context() {
         let dir = tempfile::tempdir().unwrap();
-        let notebook = NotebookStore::new_with_path(dir.path().join("notebook.json"));
+        let notebook = NotebookStore::new_with_path(dir.path().join("notebook"));
         let quizzes = QuizStore::new_with_path(dir.path().join("quizzes.json"));
         let entry = notebook
             .create(NotebookEntryInput {

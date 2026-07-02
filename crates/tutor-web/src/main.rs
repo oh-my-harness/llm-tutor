@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         config.data_dir.join("books.json"),
     ));
     let notebook = std::sync::Arc::new(notebook_store::NotebookStore::new_with_path(
-        config.data_dir.join("notebook_entries.json"),
+        config.data_dir.join("notebook"),
     ));
     let memory = std::sync::Arc::new(memory_store::MemoryStore::new_with_root(
         config.data_dir.join("memory"),
