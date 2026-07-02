@@ -74,10 +74,15 @@ jobs:
         with:
           key: desktop-${{ matrix.target }}
 
-      - name: Install Windows bundle tools
+      - name: Install Windows build dependencies
         if: runner.os == 'Windows'
         shell: powershell
-        run: choco install nsis -y --no-progress
+        run: choco install nsis protoc -y --no-progress
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install protobuf
 
       - name: Build tutor-web sidecar
         shell: bash
