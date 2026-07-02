@@ -79,6 +79,12 @@ struct AppendMessageCitationsRequest {
     citations: Vec<serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+struct ForkBeforeMessageRequest {
+    message_index: usize,
+    label: Option<String>,
+}
+
 async fn create_session(
     State(state): State<Arc<SessionsState>>,
     Json(req): Json<CreateSessionRequest>,
@@ -644,6 +650,40 @@ async fn append_message_citations(
     }
 }
 
+async fn fork_session_before_message(
+    State(state): State<Arc<SessionsState>>,
+    Path(id): Path<String>,
+    Json(req): Json<ForkBeforeMessageRequest>,
+) -> impl IntoResponse {
+    if state.pool.ensure_entry(&id).await.is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "session not found" })),
+        )
+            .into_response();
+    }
+
+    match state
+        .pool
+        .fork_before_message(&id, req.message_index, req.label)
+        .await
+    {
+        Ok(forked) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "id": id,
+                "forked": forked,
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 fn llm_config_from_request(config: CreateLlmConfig) -> LlmSessionConfig {
     LlmSessionConfig {
         provider: config.provider,
@@ -699,6 +739,10 @@ pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -
                 .delete(delete_session),
         )
         .route("/api/sessions/{id}/messages", post(append_session_messages))
+        .route(
+            "/api/sessions/{id}/fork-before-message",
+            post(fork_session_before_message),
+        )
         .route(
             "/api/sessions/{id}/message-citations",
             post(append_message_citations),

@@ -465,6 +465,36 @@ export default function App() {
       const priorMessages = messages
         .slice(0, messageIndex)
         .filter((message) => message.role === 'user' || message.role === 'assistant')
+      if (sessionId) {
+        const forkRes = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/fork-before-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message_index: messageIndex,
+            label: 'edited user message',
+          }),
+        })
+        const forkData = await safeJson(forkRes)
+        if (!forkRes.ok) {
+          throw new Error(errorMessage(forkData, forkRes.status))
+        }
+        if (forkData.forked === true) {
+          setMessages([...priorMessages, { role: 'user', text: nextText }])
+          setTraceEntries([])
+          setLatestUsage(null)
+          setStreamingText('')
+          streamingRef.current = ''
+          pendingCitationsRef.current = []
+          pendingDeepSolveRef.current = []
+          pendingNotebookEditProposalRef.current = undefined
+          setRunning(true)
+          pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
+          send({ type: 'message', content: nextText, mentions: [] })
+          void refreshSessions()
+          return
+        }
+      }
+
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -481,17 +511,10 @@ export default function App() {
         throw new Error(errorMessage(data, res.status))
       }
       const nextSessionId = data.id as string
-      for (const message of priorMessages) {
-        await persistPlainMessage(
-          nextSessionId,
-          message.role === 'user' ? message.text : undefined,
-          message.role === 'assistant' ? message.text : undefined,
-        )
-      }
 
       setSessionId(nextSessionId)
       upsertRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
-      setMessages([...priorMessages, { role: 'user', text: nextText }])
+      setMessages([{ role: 'user', text: nextText }])
       setTraceEntries([])
       setLatestUsage(null)
       setStreamingText('')
@@ -508,7 +531,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [capability, llmSettings, messages, pushStatus, running, selectedKnowledgeBaseId, selectedNotebookEnabled])
+  }, [capability, llmSettings, messages, pushStatus, refreshSessions, running, selectedKnowledgeBaseId, selectedNotebookEnabled, send, sessionId])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -1556,20 +1579,6 @@ async function persistQuizMessage(sessionId: string, user: string, assistant: st
   }
 }
 
-async function persistPlainMessage(sessionId: string, user?: string, assistant?: string) {
-  const res = await fetch(`/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user,
-      assistant,
-    }),
-  })
-  const data = await safeJson(res)
-  if (!res.ok) {
-    throw new Error(errorMessage(data, res.status))
-  }
-}
 
 async function persistMessageCitations(sessionId: string, citations: Citation[]) {
   const res = await fetch(`/api/sessions/${sessionId}/message-citations`, {

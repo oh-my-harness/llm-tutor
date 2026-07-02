@@ -6,7 +6,7 @@ use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
     session::{CreateSessionOptions, ListSessionOptions, SessionEntryPayload, SessionMetadata},
 };
-use llm_harness_types::{AgentMessage, TokenUsage};
+use llm_harness_types::{AgentMessage, EntryId, TokenUsage};
 use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
@@ -246,6 +246,38 @@ impl SessionPool {
             .build_context()
             .await?
             .messages)
+    }
+
+    pub async fn fork_before_message(
+        &self,
+        id: &str,
+        message_index: usize,
+        label: Option<String>,
+    ) -> Result<bool, llm_harness_types::SessionError> {
+        let session = self.open_runtime_session(id).await?;
+        let entries = session.read_active_path().await?;
+        let mut displayed_message_index = 0usize;
+        let mut previous_entry_id: Option<EntryId> = None;
+
+        for entry in entries {
+            if let SessionEntryPayload::Message(message) = &entry.payload
+                && message_role(message).is_some()
+            {
+                if displayed_message_index == message_index {
+                    if let Some(target) = previous_entry_id {
+                        session.fork_branch(target, label).await?;
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
+                displayed_message_index += 1;
+            }
+            previous_entry_id = Some(entry.id);
+        }
+
+        Err(llm_harness_types::SessionError::EntryNotFound(
+            EntryId::new(),
+        ))
     }
 
     pub async fn latest_usage(
@@ -758,7 +790,10 @@ mod tests {
     #[tokio::test]
     async fn session_pool_creates_and_retrieves() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         let entry = pool.get(&id);
         assert!(entry.is_some());
         let entry = entry.unwrap();
@@ -769,7 +804,10 @@ mod tests {
     #[tokio::test]
     async fn runtime_session_persists_messages() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
 
         session
@@ -783,10 +821,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fork_before_message_keeps_edited_branch_active() {
+        let pool = test_pool();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+
+        session
+            .append_message(tutor_agent::chat::user_message("first"))
+            .await
+            .unwrap();
+        session
+            .append_message(tutor_agent::chat::assistant_message("first reply"))
+            .await
+            .unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("second"))
+            .await
+            .unwrap();
+        session
+            .append_message(tutor_agent::chat::assistant_message("old second reply"))
+            .await
+            .unwrap();
+
+        let forked = pool
+            .fork_before_message(&id, 2, Some("edit second".into()))
+            .await
+            .unwrap();
+        assert!(forked);
+
+        let session = pool.open_runtime_session(&id).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("edited second"))
+            .await
+            .unwrap();
+        session
+            .append_message(tutor_agent::chat::assistant_message("new second reply"))
+            .await
+            .unwrap();
+
+        let texts = pool
+            .messages(&id)
+            .await
+            .unwrap()
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            texts,
+            vec![
+                "first".to_string(),
+                "first reply".to_string(),
+                "edited second".to_string(),
+                "new second reply".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_session_persists_trace_entries() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
 
         pool.append_trace(
             &id,
@@ -810,7 +912,10 @@ mod tests {
     async fn message_mentions_survive_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
 
         pool.append_message_mentions(
             &id,
@@ -838,7 +943,10 @@ mod tests {
     async fn message_citations_survive_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
         session
             .append_message(tutor_agent::chat::assistant_message("answer"))
@@ -946,7 +1054,10 @@ mod tests {
     async fn compact_summary_survives_pool_reopen() {
         let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
         let pool = SessionPool::new_with_root(&root);
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
         session
             .append_message(tutor_agent::chat::user_message("what is lithography?"))
@@ -974,7 +1085,10 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_capability_without_replacing_runtime_session() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         assert!(pool.set_capability(&id, "code_exec"));
 
         let updated = pool.get(&id).unwrap();
@@ -985,7 +1099,10 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_knowledge_binding() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         assert!(pool.set_knowledge(
             &id,
             Some("kb-1".into()),
@@ -1014,7 +1131,10 @@ mod tests {
     #[tokio::test]
     async fn session_pool_updates_notebook_binding_and_clears_knowledge() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
         assert!(pool.set_knowledge(
             &id,
             Some("kb-1".into()),
@@ -1107,7 +1227,9 @@ mod tests {
     #[tokio::test]
     async fn list_returns_runtime_sessions() {
         let pool = test_pool();
-        pool.create("chat", None, false, None, None, None).await.unwrap();
+        pool.create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
 
         let sessions = pool.list(Some(10)).await.unwrap();
         assert_eq!(sessions.len(), 1);
@@ -1116,7 +1238,10 @@ mod tests {
     #[tokio::test]
     async fn rename_updates_runtime_metadata() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
 
         pool.rename(&id, Some("Algebra review".into()))
             .await
@@ -1129,7 +1254,10 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_runtime_session() {
         let pool = test_pool();
-        let id = pool.create("chat", None, false, None, None, None).await.unwrap();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
 
         pool.delete(&id).await.unwrap();
 
