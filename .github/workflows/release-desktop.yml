@@ -65,9 +65,6 @@ jobs:
         shell: powershell
         run: choco install nsis -y --no-progress
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "2.11.4" --locked
-
       - name: Build tutor-web sidecar
         shell: bash
         env:
@@ -89,7 +86,7 @@ jobs:
           BUNDLES: ${{ matrix.bundles }}
         run: |
           set -euo pipefail
-          cargo tauri build --target "${TARGET}" --config src-tauri/tauri.release.conf.json --ci --bundles "${BUNDLES}"
+          npx --yes @tauri-apps/cli@2.11.4 build --target "${TARGET}" --config src-tauri/tauri.release.conf.json --ci --bundles "${BUNDLES}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
