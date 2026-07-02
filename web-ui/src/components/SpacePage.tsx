@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react'
 import type { QuizQuestion, QuizSession } from '../quizTypes'
+import { useI18n, type TranslationKey } from '../i18n'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
@@ -112,10 +113,10 @@ interface MemoryFile {
   markdown: string
 }
 
-const tabs: Array<{ key: SpaceTab; label: string; icon: typeof NotebookPen }> = [
-  { key: 'notebook', label: 'Notebook', icon: NotebookPen },
-  { key: 'quiz_bank', label: 'Quiz Bank', icon: FileQuestion },
-  { key: 'student_profile', label: 'Student Profile', icon: UserRound },
+const tabs: Array<{ key: SpaceTab; labelKey: TranslationKey; icon: typeof NotebookPen }> = [
+  { key: 'notebook', labelKey: 'space.tabs.notebook', icon: NotebookPen },
+  { key: 'quiz_bank', labelKey: 'space.tabs.quizBank', icon: FileQuestion },
+  { key: 'student_profile', labelKey: 'space.tabs.studentProfile', icon: UserRound },
 ]
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
@@ -137,6 +138,7 @@ export function SpacePage({
   focusTarget?: SpaceFocusTarget | null
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
+  const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
@@ -690,15 +692,15 @@ export function SpacePage({
           <div className={`flex gap-3 ${spaceNavCollapsed ? 'items-center justify-center' : 'items-start justify-between'}`}>
             {!spaceNavCollapsed && (
               <div className="min-w-0">
-                <div className="text-xs font-medium uppercase tracking-wide text-blue-600">Default Space</div>
-                <h1 className="mt-1 text-2xl font-semibold text-gray-950">Learning Space</h1>
+                <div className="text-xs font-medium uppercase tracking-wide text-blue-600">{t('space.default')}</div>
+                <h1 className="mt-1 text-2xl font-semibold text-gray-950">{t('space.title')}</h1>
               </div>
             )}
             <button
               className={`shrink-0 rounded text-gray-500 hover:bg-white hover:text-blue-700 ${spaceNavCollapsed ? 'p-2' : 'inline-flex h-9 w-9 items-center justify-center rounded-lg'}`}
               type="button"
-              title={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
-              aria-label={spaceNavCollapsed ? 'Expand space columns' : 'Collapse space columns'}
+              title={spaceNavCollapsed ? t('space.expand') : t('space.collapse')}
+              aria-label={spaceNavCollapsed ? t('space.expand') : t('space.collapse')}
               onClick={() => setSpaceNavCollapsed((value) => !value)}
             >
               {spaceNavCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
@@ -706,7 +708,7 @@ export function SpacePage({
           </div>
           {!spaceNavCollapsed && (
             <p className="mt-2 text-sm leading-6 text-gray-500">
-              Organize notes, quiz records, and learner memory in one workspace.
+              {t('space.description')}
             </p>
           )}
         </div>
@@ -715,6 +717,7 @@ export function SpacePage({
           {tabs.map((tab) => {
             const Icon = tab.icon
             const active = activeTab === tab.key
+            const label = t(tab.labelKey)
             return (
               <button
                 key={tab.key}
@@ -722,27 +725,29 @@ export function SpacePage({
                   active ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100' : 'text-gray-700 hover:bg-white hover:text-gray-950'
                 } ${spaceNavCollapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}
                 type="button"
-                title={tab.label}
-                aria-label={tab.label}
+                title={label}
+                aria-label={label}
                 onClick={() => setActiveTab(tab.key)}
               >
                 <Icon size={18} />
-                {!spaceNavCollapsed && <span>{tab.label}</span>}
+                {!spaceNavCollapsed && <span>{label}</span>}
               </button>
             )
           })}
         </nav>
 
         <div className={`mt-auto border-t border-gray-200 px-5 py-4 text-xs text-gray-500 ${spaceNavCollapsed ? 'hidden' : ''}`}>
-          Local-first space. Multi-space management can come later.
+          {t('space.localFirst')}
         </div>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-4 border-b border-gray-100 px-8 py-5">
           <div>
-            <h2 className="text-xl font-semibold text-gray-950">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
-            <p className="mt-1 text-sm text-gray-500">{subtitleFor(activeTab)}</p>
+            <h2 className="text-xl font-semibold text-gray-950">
+              {t(tabs.find((tab) => tab.key === activeTab)?.labelKey ?? 'space.tabs.notebook')}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">{subtitleFor(activeTab, t)}</p>
           </div>
           <button
             className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
@@ -751,7 +756,7 @@ export function SpacePage({
             onClick={refreshActiveTab}
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            {t('space.refresh')}
           </button>
         </header>
 
@@ -2253,10 +2258,10 @@ function sortNotebookTreeNodes(nodes: NotebookTreeNode[]) {
   })
 }
 
-function subtitleFor(tab: SpaceTab) {
-  if (tab === 'notebook') return 'Saved reports, notes, snippets, and reusable learning records.'
-  if (tab === 'quiz_bank') return 'Review historical quizzes and missed questions.'
-  return 'A visible learner profile built from Markdown memory and practice data.'
+function subtitleFor(tab: SpaceTab, t: (key: TranslationKey) => string) {
+  if (tab === 'notebook') return t('space.tabs.notebook.description')
+  if (tab === 'quiz_bank') return t('space.tabs.quizBank.description')
+  return t('space.tabs.studentProfile.description')
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {

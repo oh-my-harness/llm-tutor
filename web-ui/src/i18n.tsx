@@ -16,6 +16,19 @@ export type TranslationKey =
   | 'nav.noRecent'
   | 'nav.collapse'
   | 'nav.expand'
+  | 'space.default'
+  | 'space.title'
+  | 'space.description'
+  | 'space.localFirst'
+  | 'space.refresh'
+  | 'space.collapse'
+  | 'space.expand'
+  | 'space.tabs.notebook'
+  | 'space.tabs.quizBank'
+  | 'space.tabs.studentProfile'
+  | 'space.tabs.notebook.description'
+  | 'space.tabs.quizBank.description'
+  | 'space.tabs.studentProfile.description'
   | 'chat.title'
   | 'chat.subtitle'
   | 'chat.new'
@@ -84,6 +97,19 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'nav.noRecent': '暂无历史会话',
     'nav.collapse': '收起侧边栏',
     'nav.expand': '展开侧边栏',
+    'space.default': '默认空间',
+    'space.title': '学习空间',
+    'space.description': '统一管理笔记、测验记录和学生画像。',
+    'space.localFirst': '本地优先空间，多空间管理后续再扩展。',
+    'space.refresh': '刷新',
+    'space.collapse': '收起空间栏',
+    'space.expand': '展开空间栏',
+    'space.tabs.notebook': '笔记本',
+    'space.tabs.quizBank': '题库',
+    'space.tabs.studentProfile': '学生画像',
+    'space.tabs.notebook.description': '保存研究报告、笔记、片段和可复用学习记录。',
+    'space.tabs.quizBank.description': '查看历史测验和错题记录。',
+    'space.tabs.studentProfile.description': '由 Markdown 记忆和练习数据构成的可见学生画像。',
     'chat.title': '聊天',
     'chat.subtitle': '提问、运行工具、查看轨迹。',
     'chat.new': '新对话',
@@ -130,7 +156,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'cap.deepSolve.description': '多步推理与问题求解',
     'cap.codeExec': '代码',
     'cap.codeExec.description': '运行代码并验证结果',
-    'cap.quiz': 'Quiz',
+    'cap.quiz': '测验',
     'cap.quiz.description': '基于对话或知识库生成测验',
     'cap.research': '研究',
     'cap.research.description': '搜索、阅读并生成带引用的研究报告',
@@ -151,6 +177,19 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'nav.noRecent': 'No recent sessions',
     'nav.collapse': 'Collapse sidebar',
     'nav.expand': 'Expand sidebar',
+    'space.default': 'Default Space',
+    'space.title': 'Learning Space',
+    'space.description': 'Organize notes, quiz records, and learner memory in one workspace.',
+    'space.localFirst': 'Local-first space. Multi-space management can come later.',
+    'space.refresh': 'Refresh',
+    'space.collapse': 'Collapse space columns',
+    'space.expand': 'Expand space columns',
+    'space.tabs.notebook': 'Notebook',
+    'space.tabs.quizBank': 'Quiz Bank',
+    'space.tabs.studentProfile': 'Student Profile',
+    'space.tabs.notebook.description': 'Saved reports, notes, snippets, and reusable learning records.',
+    'space.tabs.quizBank.description': 'Review historical quizzes and missed questions.',
+    'space.tabs.studentProfile.description': 'A visible learner profile built from Markdown memory and practice data.',
     'chat.title': 'Chat',
     'chat.subtitle': 'Ask questions, run tools, and inspect traces.',
     'chat.new': 'New chat',
