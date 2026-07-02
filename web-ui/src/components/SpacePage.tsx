@@ -886,7 +886,7 @@ function NotebookTab({
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const importInputRef = useRef<HTMLInputElement | null>(null)
-  const [relationsCollapsed, setRelationsCollapsed] = useState(false)
+  const [relationsCollapsed, setRelationsCollapsed] = useState(true)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const notebookTree = useMemo(() => buildNotebookTree(entries, folders), [entries, folders])
