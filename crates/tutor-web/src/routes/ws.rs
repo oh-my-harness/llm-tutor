@@ -26,7 +26,7 @@ use crate::knowledge_store::KnowledgeStore;
 use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
-use crate::quiz_tool::CreateQuizTool;
+use crate::quiz_tool::{CreateQuizTool, ProposeQuizPlanTool};
 use crate::routes::quiz::CreateLlmConfig;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
@@ -326,15 +326,17 @@ async fn run_tutor_message(
                 quizzes.clone(),
             )));
         if entry.capability == "quiz" {
-            router = router.with_product_tool(Arc::new(CreateQuizTool::new(
-                quizzes.clone(),
-                knowledge.clone(),
-                notebook.clone(),
-                memory.clone(),
-                rag_root.clone(),
-                entry.kb.clone(),
-                create_quiz_llm_config_for_session(entry.llm.clone()),
-            )));
+            router = router
+                .with_product_tool(Arc::new(ProposeQuizPlanTool))
+                .with_product_tool(Arc::new(CreateQuizTool::new(
+                    quizzes.clone(),
+                    knowledge.clone(),
+                    notebook.clone(),
+                    memory.clone(),
+                    rag_root.clone(),
+                    entry.kb.clone(),
+                    create_quiz_llm_config_for_session(entry.llm.clone()),
+                )));
         }
         if entry.notebook_enabled {
             router = router

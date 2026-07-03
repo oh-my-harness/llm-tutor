@@ -59,6 +59,22 @@ pub struct QuizCitation {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuizVerificationStatus {
+    Verified,
+    Warning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuizVerificationReport {
+    pub status: QuizVerificationStatus,
+    pub method: String,
+    pub checked_at: DateTime<Utc>,
+    #[serde(default)]
+    pub issues: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuizQuestion {
     pub id: String,
@@ -96,6 +112,8 @@ pub struct QuizSession {
     pub questions: Vec<QuizQuestion>,
     pub answers: Vec<QuizAnswer>,
     pub score: Option<QuizScore>,
+    #[serde(default)]
+    pub verification: Option<QuizVerificationReport>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -150,6 +168,7 @@ impl QuizStore {
             questions: vec![],
             answers: vec![],
             score: None,
+            verification: None,
             created_at: now,
             updated_at: now,
         };
@@ -177,6 +196,7 @@ impl QuizStore {
         item.questions = questions;
         item.answers.clear();
         item.score = Some(score_for(&item.questions, &item.answers));
+        item.verification = None;
         item.status = QuizStatus::Active;
         item.updated_at = Utc::now();
         let updated = item.clone();
@@ -239,6 +259,22 @@ impl QuizStore {
         };
         item.status = QuizStatus::Finished;
         item.score = Some(score_for(&item.questions, &item.answers));
+        item.updated_at = Utc::now();
+        let updated = item.clone();
+        self.save_locked(&items)?;
+        Ok(updated)
+    }
+
+    pub fn set_verification(
+        &self,
+        quiz_id: &str,
+        verification: QuizVerificationReport,
+    ) -> Result<QuizSession> {
+        let mut items = self.items.lock().unwrap();
+        let Some(item) = items.iter_mut().find(|item| item.id == quiz_id) else {
+            return Err(anyhow!("quiz not found"));
+        };
+        item.verification = Some(verification);
         item.updated_at = Utc::now();
         let updated = item.clone();
         self.save_locked(&items)?;

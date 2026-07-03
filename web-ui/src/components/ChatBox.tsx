@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   AlertCircle,
@@ -38,9 +38,19 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  quizPlan?: QuizPlan
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
+}
+
+interface QuizPlan {
+  title: string
+  topic: string
+  source: string
+  difficulty: string
+  questionCount: number
+  notes: string[]
 }
 
 export interface ChatAttachment {
@@ -280,7 +290,7 @@ export function ChatBox({
           <div className="w-full max-w-4xl">
             <div className="mb-10 flex items-center justify-center gap-4 text-center">
               <Sparkles size={42} className="text-gray-800" />
-              <h2 className="text-4xl font-semibold text-gray-900">你想学点什么？</h2>
+              <h2 className="text-4xl font-semibold text-gray-900">浣犳兂瀛︾偣浠€涔堬紵</h2>
             </div>
             <Composer
               input={input}
@@ -330,6 +340,8 @@ export function ChatBox({
                       onFinish={onQuizFinish}
                       onSourceNavigate={onSourceNavigate}
                     />
+                  ) : msg.quizPlan ? (
+                    <QuizPlanCard plan={msg.quizPlan} text={msg.text} />
                   ) : msg.deepSolve && msg.deepSolve.length > 0 ? (
                     <DeepSolveMessage
                       text={msg.text}
@@ -351,7 +363,7 @@ export function ChatBox({
                             }}
                           >
                             <FileText size={16} />
-                            保存到笔记本
+                            淇濆瓨鍒扮瑪璁版湰
                           </button>
                         </div>
                       )}
@@ -382,7 +394,7 @@ export function ChatBox({
                             type="button"
                             onClick={cancelEditUserMessage}
                           >
-                            取消
+                            鍙栨秷
                           </button>
                           <button
                             className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-gray-200"
@@ -390,7 +402,7 @@ export function ChatBox({
                             disabled={!editingMessageText.trim()}
                             onClick={submitEditUserMessage}
                           >
-                            重新发送
+                            Regenerate
                           </button>
                         </div>
                       </div>
@@ -401,7 +413,7 @@ export function ChatBox({
                           <button
                             className="absolute right-0 top-0 hidden h-7 w-7 items-center justify-center rounded-md text-blue-700 hover:bg-blue-100 group-hover/user-message:flex"
                             type="button"
-                            title="编辑并重新生成"
+                            title="Edit and regenerate"
                             onClick={() => startEditUserMessage(i, msg.text)}
                           >
                             <Edit3 size={15} />
@@ -473,7 +485,7 @@ function ContextCapacity({ stats }: { stats: ContextStats }) {
   return (
     <div className="border-b border-blue-50 bg-white px-5 py-2">
       <div className="flex items-center gap-3 text-xs text-gray-500">
-        <span className="font-medium text-gray-700">上下文容量</span>
+        <span className="font-medium text-gray-700">Context capacity</span>
         <div className="h-1.5 w-36 overflow-hidden rounded-full bg-gray-100">
           <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
         </div>
@@ -481,7 +493,7 @@ function ContextCapacity({ stats }: { stats: ContextStats }) {
           {formatTokenCount(usedTokens)} / {formatTokenCount(maxTokens)}
         </span>
         <span className="text-gray-400">{percent}%</span>
-        <span className="text-gray-400">{stats.source === 'provider' ? '上次请求' : '估算'}</span>
+        <span className="text-gray-400">{stats.source === 'provider' ? '涓婃璇锋眰' : '浼扮畻'}</span>
       </div>
     </div>
   )
@@ -530,7 +542,7 @@ function NotebookEditProposalCard({
           <ProposalDetailList
             title="Suggested links"
             items={proposal.suggestedLinks.map((link) =>
-              `${link.text} -> [[${link.target}]]${link.reason ? ` · ${link.reason}` : ''}`,
+              `${link.text} -> [[${link.target}]]${link.reason ? ` 路 ${link.reason}` : ''}`,
             )}
           />
         )}
@@ -538,7 +550,7 @@ function NotebookEditProposalCard({
           <ProposalDetailList
             title="Suggested tags"
             items={proposal.suggestedTags.map((tag) =>
-              `${tag.action}: #${tag.tag.replace(/^#/, '')}${tag.reason ? ` · ${tag.reason}` : ''}`,
+              `${tag.action}: #${tag.tag.replace(/^#/, '')}${tag.reason ? ` 路 ${tag.reason}` : ''}`,
             )}
           />
         )}
@@ -592,7 +604,7 @@ function CitationList({
   const references = citations.map(citationToSourceReference)
   return (
     <div className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
-      <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '网页来源' : '引用来源'}</div>
+      <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '缃戦〉鏉ユ簮' : '寮曠敤鏉ユ簮'}</div>
       <SourceReferences
         id={`chat-citations-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`}
         references={references}
@@ -632,6 +644,48 @@ function citationRawTarget(citation: Citation) {
   return citation.rawSource || citation.source
 }
 
+function QuizPlanCard({ plan, text }: { plan: QuizPlan; text: string }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-4">
+      {text.trim() && <MarkdownMessage text={text} />}
+      <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+          <FileQuestion size={17} />
+          Quiz plan
+        </div>
+        <div className="mt-3 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Title</span>
+            <p className="font-medium text-gray-950">{plan.title}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Topic</span>
+            <p>{plan.topic}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Source</span>
+            <p>{plan.source}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Settings</span>
+            <p>
+              {plan.questionCount} questions · {plan.difficulty}
+            </p>
+          </div>
+        </div>
+        {plan.notes.length > 0 && (
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
+            {plan.notes.map((note, index) => (
+              <li key={`${index}:${note}`}>{note}</li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-gray-500">Reply with confirmation or changes before generating the quiz.</p>
+      </div>
+    </div>
+  )
+}
+
 function ChatQuizCard({
   quiz,
   onAnswer,
@@ -661,7 +715,7 @@ function ChatQuizCard({
           <FileQuestion size={18} />
           Quiz
         </div>
-        <p className="mt-3 text-sm text-gray-600">测验还没有生成题目。</p>
+        <p className="mt-3 text-sm text-gray-600">This quiz does not have generated questions yet.</p>
       </div>
     )
   }
@@ -693,11 +747,23 @@ function ChatQuizCard({
           <FileQuestion size={19} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-base font-semibold text-gray-950">{quiz.title || 'Quiz'}</h3>
             <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
               {quiz.status}
             </span>
+            {quiz.verification && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  quiz.verification.status === 'verified'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-amber-50 text-amber-700'
+                }`}
+                title={quiz.verification.method}
+              >
+                {quiz.verification.status === 'verified' ? 'Verified' : 'Needs review'}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-gray-500">
             Question {currentIndex + 1} of {quiz.questions.length} · Score {score.correct}/{score.total}
@@ -744,7 +810,7 @@ function ChatQuizCard({
 
       {answer && (
         <div className={`rounded-lg p-3 text-sm ${answer.correct ? 'bg-emerald-50 text-emerald-900' : 'bg-red-50 text-red-900'}`}>
-          <div className="font-medium">{answer.correct ? '回答正确' : '回答错误'}</div>
+          <div className="font-medium">{answer.correct ? 'Correct' : 'Incorrect'}</div>
           <p className="mt-2 leading-6">{question.explanation}</p>
           {question.citations.length > 0 && (
             <QuizCitationReferences
@@ -764,7 +830,7 @@ function ChatQuizCard({
           disabled={currentIndex === 0}
           onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
         >
-          上一题
+          Previous
         </button>
         <button
           className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-blue-50 disabled:opacity-50"
@@ -772,7 +838,7 @@ function ChatQuizCard({
           disabled={currentIndex >= quiz.questions.length - 1}
           onClick={() => setCurrentIndex((value) => Math.min(quiz.questions.length - 1, value + 1))}
         >
-          下一题
+          Next
         </button>
         <button
           className="ml-auto inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
@@ -780,7 +846,7 @@ function ChatQuizCard({
           disabled={!selectedOptionId || Boolean(answer) || busy}
           onClick={submit}
         >
-          提交答案
+          Submit answer
         </button>
         <button
           className="inline-flex h-8 items-center rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-blue-50 disabled:opacity-50"
@@ -788,13 +854,12 @@ function ChatQuizCard({
           disabled={busy || quiz.status === 'finished'}
           onClick={finish}
         >
-          结束测验
+          Finish quiz
         </button>
       </div>
     </div>
   )
 }
-
 function QuizCitationReferences({
   quizId,
   questionId,
@@ -1196,7 +1261,7 @@ function Composer({
                     selected={config.id === activeModel?.id}
                     icon={<Brain size={21} />}
                     title={config.name || config.model}
-                    description={`${llmApiModeLabel(config.provider)} · ${config.model}`}
+                    description={`${llmApiModeLabel(config.provider)} 路 ${config.model}`}
                     onClick={() => {
                       onLlmConfigChange(config.id)
                       setOpenMenu(null)
@@ -1261,7 +1326,7 @@ async function readChatAttachment(file: File): Promise<ChatAttachment> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
     return {
       ...base,
-      error: `附件超过 ${formatBytes(MAX_ATTACHMENT_BYTES)}，请拆分后再发送。`,
+      error: `Attachment exceeds ${formatBytes(MAX_ATTACHMENT_BYTES)}. Split it before sending.`,
     }
   }
 
@@ -1279,7 +1344,7 @@ async function readChatAttachment(file: File): Promise<ChatAttachment> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { ...base, error: `读取失败：${message}` }
+    return { ...base, error: `Read failed: ${message}` }
   }
 }
 
@@ -1305,7 +1370,7 @@ async function parseAttachmentOnServer(
       error?: string
     }
     if (!res.ok || !data.attachment?.text) {
-      return { ...base, error: data.error || `附件解析失败：HTTP ${res.status}` }
+      return { ...base, error: data.error || `Attachment parse failed: HTTP ${res.status}` }
     }
     return {
       ...base,
@@ -1317,7 +1382,7 @@ async function parseAttachmentOnServer(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { ...base, error: `附件解析请求失败：${message}` }
+    return { ...base, error: `Attachment parse request failed: ${message}` }
   }
 }
 
@@ -1366,7 +1431,7 @@ function AttachmentSummary({
               className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-white hover:text-gray-900"
               type="button"
               onClick={() => onRemove?.(attachment.id)}
-              title="移除附件"
+              title="Remove attachment"
             >
               <X size={14} />
             </button>
@@ -1540,3 +1605,4 @@ function messageClassName(msg: Message) {
   }
   return `max-w-3xl rounded-lg p-3 ${tones[msg.kind ?? 'idle']}`
 }
+

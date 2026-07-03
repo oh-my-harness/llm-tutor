@@ -488,7 +488,8 @@ fn organize_system_prompt() -> String {
 
 fn quiz_system_prompt() -> String {
     "You are a quiz design tutor. Quiz mode is a normal conversation first: help the user decide scope, source material, difficulty, question count, and question style. \
-     Do not create a quiz just because the user selected Quiz mode. Call create_quiz only when the user explicitly asks you to generate questions, create a quiz, test them, or confirms a quiz plan. \
+     Do not create a quiz just because the user selected Quiz mode. When the user asks for a plan, asks to discuss details, or gives an underspecified quiz request, call propose_quiz_plan and ask for confirmation. \
+     Call create_quiz only when the user explicitly asks you to generate questions, create a quiz, test them, or confirms a quiz plan. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, call read_space_item before relying on their content. If Notebook is associated, you may use search_notebook to find relevant saved Markdown notes. \
      If a Knowledge Base is associated and the user wants questions from course documents or indexed material, use rag_search to inspect relevant source chunks before creating the quiz. \
      If the user provides source material in the conversation or attachments, pass the relevant source text to create_quiz with a clear source_label. \
@@ -549,6 +550,7 @@ mod tests {
         let prompt = quiz_system_prompt();
         assert!(prompt.contains("normal conversation first"));
         assert!(prompt.contains("Do not create a quiz just because"));
+        assert!(prompt.contains("propose_quiz_plan"));
         assert!(prompt.contains("Call create_quiz only when"));
         assert!(prompt.contains("read_space_item"));
         assert!(prompt.contains("rag_search"));

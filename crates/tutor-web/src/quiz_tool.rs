@@ -12,6 +12,8 @@ use crate::quiz_store::{QuizDifficulty, QuizStore};
 use crate::routes::quiz::{CreateLlmConfig, CreateQuizRequest, QuizState, create_quiz_for_request};
 
 static CREATE_QUIZ_SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+static PROPOSE_QUIZ_PLAN_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
 
 pub(crate) struct CreateQuizTool {
     store: Arc<QuizStore>,
@@ -42,6 +44,80 @@ impl CreateQuizTool {
             default_kb_id,
             llm,
         }
+    }
+}
+
+pub(crate) struct ProposeQuizPlanTool;
+
+impl Tool for ProposeQuizPlanTool {
+    fn name(&self) -> &str {
+        "propose_quiz_plan"
+    }
+
+    fn description(&self) -> &str {
+        "Show a quiz generation plan for user confirmation. Use this before create_quiz when the user wants to discuss scope, source, difficulty, or question count. This tool does not create a quiz."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        PROPOSE_QUIZ_PLAN_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Proposed quiz title." },
+                    "topic": { "type": "string", "description": "Main topic or learning objective." },
+                    "source": { "type": "string", "description": "Planned source material, such as conversation, attachment, Notebook note, Space item, or knowledge base." },
+                    "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "Planned difficulty." },
+                    "question_count": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Planned number of questions." },
+                    "notes": { "type": "array", "items": { "type": "string" }, "description": "Important constraints or confirmation questions." }
+                }
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let title = optional_string(&args, "title").unwrap_or_else(|| "Quiz plan".into());
+            let topic =
+                optional_string(&args, "topic").unwrap_or_else(|| "selected material".into());
+            let source =
+                optional_string(&args, "source").unwrap_or_else(|| "current conversation".into());
+            let difficulty =
+                optional_string(&args, "difficulty").unwrap_or_else(|| "medium".into());
+            let question_count = args["question_count"].as_u64().unwrap_or(5).clamp(1, 10);
+            let notes = args["notes"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Proposed quiz plan: {title}, topic {topic}, {question_count} {difficulty} questions from {source}. Ask the user to confirm before creating it."
+                    ),
+                }],
+                details: json!({
+                    "title": title,
+                    "topic": topic,
+                    "source": source,
+                    "difficulty": difficulty,
+                    "question_count": question_count,
+                    "notes": notes,
+                }),
+                terminate: false,
+            })
+        })
     }
 }
 

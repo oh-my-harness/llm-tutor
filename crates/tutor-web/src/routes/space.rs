@@ -606,6 +606,7 @@ mod tests {
             questions: vec![],
             answers: vec![],
             score: None,
+            verification: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

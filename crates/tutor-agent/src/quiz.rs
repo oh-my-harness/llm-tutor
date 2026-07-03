@@ -40,6 +40,20 @@ struct GeneratedQuiz {
     questions: Vec<GeneratedQuizQuestion>,
 }
 
+#[derive(Debug, Deserialize)]
+struct QuizVerification {
+    verdict: String,
+    #[serde(default)]
+    issues: Vec<QuizVerificationIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuizVerificationIssue {
+    question_index: Option<usize>,
+    severity: Option<String>,
+    message: String,
+}
+
 pub async fn generate_quiz_questions(
     llm: &LlmConfig,
     config: &QuizGenerationConfig,
@@ -83,7 +97,37 @@ pub async fn generate_quiz_questions_with_client(
     let text = response_text(&response.content);
     let mut questions = parse_generated_quiz(&text, config.question_count, chunks.len())?;
     repair_supporting_quotes_against_chunks(&mut questions, chunks);
+    verify_quiz_questions_with_client(client, model, &questions, chunks).await?;
     Ok(questions)
+}
+
+async fn verify_quiz_questions_with_client(
+    client: Arc<dyn Provider>,
+    model: &str,
+    questions: &[GeneratedQuizQuestion],
+    chunks: &[QuizSourceChunk],
+) -> Result<()> {
+    let prompt = verification_prompt(questions, chunks)?;
+    let mut builder = ChatRequest::builder(model, 1024)
+        .message(Message::System(verification_system_prompt()))
+        .message(Message::User(vec![RequestContent::Text(prompt)]))
+        .temperature(0.0);
+
+    if client.capabilities().supports_json_schema() {
+        builder = builder.response_format(ResponseFormat::JsonSchema {
+            name: "quiz_verification".into(),
+            schema: verification_schema(),
+            strict: Some(true),
+        });
+    } else {
+        builder = builder.response_format(ResponseFormat::JsonObject);
+    }
+
+    let response = client
+        .chat(&builder.build())
+        .await
+        .map_err(|err| TutorError::Internal(format!("quiz verifier failed: {err}")))?;
+    parse_quiz_verification(&response_text(&response.content))
 }
 
 pub fn parse_generated_quiz(
@@ -169,6 +213,10 @@ fn system_prompt() -> String {
     "You generate grounded tutor quiz questions. Return only valid JSON. Every question must be answerable from the supplied source chunks. The correct answer, explanation, citation_indices, and supporting_quote must all agree with each other.".into()
 }
 
+fn verification_system_prompt() -> String {
+    "You are a strict quiz verifier. Return only JSON. Reject any question whose correct answer, explanation, or citation is not directly supported by the cited source chunks.".into()
+}
+
 fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) -> String {
     let topic = config
         .topic
@@ -202,6 +250,61 @@ fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) 
         count = config.question_count.clamp(1, 10),
         difficulty = config.difficulty,
     )
+}
+
+fn verification_prompt(
+    questions: &[GeneratedQuizQuestion],
+    chunks: &[QuizSourceChunk],
+) -> Result<String> {
+    let payload = serde_json::json!({
+        "questions": questions,
+        "sources": chunks.iter().enumerate().map(|(index, chunk)| serde_json::json!({
+            "index": index,
+            "source": chunk.source,
+            "text": chunk.text,
+        })).collect::<Vec<_>>(),
+        "rules": [
+            "The correct option must be directly supported by the cited source chunks.",
+            "The explanation must not contradict the correct option.",
+            "supporting_quote must support the correct option.",
+            "citation_indices must not cite merely topical but unsupported chunks.",
+            "Return fail for any hallucination, answer/explanation mismatch, or wrong citation."
+        ]
+    });
+    serde_json::to_string_pretty(&payload)
+        .map_err(|err| TutorError::Internal(format!("failed to build quiz verifier prompt: {err}")))
+}
+
+fn parse_quiz_verification(text: &str) -> Result<()> {
+    let json_text = extract_json_object(text)
+        .ok_or_else(|| TutorError::Internal("quiz verifier output did not contain JSON".into()))?;
+    let parsed: QuizVerification = serde_json::from_str(json_text)
+        .map_err(|err| TutorError::Internal(format!("invalid quiz verifier JSON: {err}")))?;
+    if parsed.verdict.trim().eq_ignore_ascii_case("pass") {
+        return Ok(());
+    }
+
+    let issues = parsed
+        .issues
+        .into_iter()
+        .map(|issue| {
+            let location = issue
+                .question_index
+                .map(|index| format!("question {index}"))
+                .unwrap_or_else(|| "quiz".into());
+            let severity = issue.severity.unwrap_or_else(|| "issue".into());
+            format!("{location} {severity}: {}", issue.message)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(TutorError::Internal(format!(
+        "quiz verifier rejected generated questions{}",
+        if issues.is_empty() {
+            String::new()
+        } else {
+            format!(": {issues}")
+        }
+    )))
 }
 
 fn normalize_text(text: &str) -> String {
@@ -304,15 +407,51 @@ fn quiz_schema() -> serde_json::Value {
     })
 }
 
+fn verification_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "verdict": { "type": "string", "enum": ["pass", "fail"] },
+            "issues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "question_index": { "type": ["integer", "null"], "minimum": 0 },
+                        "severity": { "type": ["string", "null"] },
+                        "message": { "type": "string" }
+                    },
+                    "required": ["question_index", "severity", "message"]
+                }
+            }
+        },
+        "required": ["verdict", "issues"]
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use llm_adapter::LlmError;
     use llm_adapter::provider::ProviderCapabilities;
     use llm_adapter::stream_handle::StreamHandle;
     use llm_adapter::types::{ChatResponse, StopReason, Usage};
 
-    struct FakeQuizProvider;
+    struct FakeQuizProvider {
+        calls: AtomicUsize,
+    }
+
+    impl FakeQuizProvider {
+        fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+            }
+        }
+    }
 
     #[async_trait::async_trait]
     impl Provider for FakeQuizProvider {
@@ -321,10 +460,16 @@ mod tests {
         }
 
         async fn chat(&self, _req: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = if call == 0 {
+                r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#
+            } else {
+                r#"{"verdict":"pass","issues":[]}"#
+            };
             Ok(ChatResponse {
                 id: "fake".into(),
                 model: "fake-model".into(),
-                content: vec![ResponseContent::Text(r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#.into())],
+                content: vec![ResponseContent::Text(content.into())],
                 stop_reason: StopReason::EndTurn,
                 usage: Usage::default(),
             })
@@ -341,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn generates_questions_with_fake_provider() {
         let questions = generate_quiz_questions_with_client(
-            Arc::new(FakeQuizProvider),
+            Arc::new(FakeQuizProvider::new()),
             "fake-model",
             &QuizGenerationConfig {
                 topic: Some("OPC".into()),

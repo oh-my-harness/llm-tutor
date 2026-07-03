@@ -15,6 +15,12 @@ export interface QuizSession {
     correct: number
     total: number
   } | null
+  verification?: {
+    status: 'verified' | 'warning'
+    method: string
+    checked_at: string
+    issues: string[]
+  } | null
   created_at: string
   updated_at: string
 }

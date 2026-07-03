@@ -39,9 +39,19 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  quizPlan?: QuizPlan
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
+}
+
+interface QuizPlan {
+  title: string
+  topic: string
+  source: string
+  difficulty: string
+  questionCount: number
+  notes: string[]
 }
 
 interface Citation {
@@ -126,6 +136,7 @@ export default function App() {
   const pendingDeepSolveRef = useRef<DeepSolveTraceEntry[]>([])
   const pendingNotebookEditProposalRef = useRef<NotebookEditProposal | undefined>(undefined)
   const pendingQuizRef = useRef<QuizSession | undefined>(undefined)
+  const pendingQuizPlanRef = useRef<QuizPlan | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -185,7 +196,8 @@ export default function App() {
           const deepSolve = pendingDeepSolveRef.current
           const notebookEditProposal = pendingNotebookEditProposalRef.current
           const quiz = pendingQuizRef.current
-          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz) {
+          const quizPlan = pendingQuizPlanRef.current
+          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan) {
             setMessages((prev) => [
               ...dropTrailingTransientStatus(prev),
               {
@@ -195,6 +207,7 @@ export default function App() {
                 deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
                 notebookEditProposal,
                 quiz,
+                quizPlan,
               },
             ])
           } else {
@@ -204,6 +217,7 @@ export default function App() {
           pendingDeepSolveRef.current = []
           pendingNotebookEditProposalRef.current = undefined
           pendingQuizRef.current = undefined
+          pendingQuizPlanRef.current = undefined
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
@@ -230,6 +244,10 @@ export default function App() {
         const quiz = quizFromTrace(event.payload as Record<string, unknown>)
         if (quiz) {
           pendingQuizRef.current = quiz
+        }
+        const quizPlan = quizPlanFromTrace(event.payload as Record<string, unknown>)
+        if (quizPlan) {
+          pendingQuizPlanRef.current = quizPlan
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -483,6 +501,7 @@ export default function App() {
       pendingDeepSolveRef.current = []
       pendingNotebookEditProposalRef.current = undefined
       pendingQuizRef.current = undefined
+      pendingQuizPlanRef.current = undefined
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       pendingSessionSendRef.current = { sessionId: nextSessionId, content: nextText, mentions: [] }
@@ -623,6 +642,7 @@ export default function App() {
     pendingDeepSolveRef.current = []
     pendingNotebookEditProposalRef.current = undefined
     pendingQuizRef.current = undefined
+    pendingQuizPlanRef.current = undefined
     setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
@@ -749,6 +769,7 @@ export default function App() {
       pendingDeepSolveRef.current = []
       pendingNotebookEditProposalRef.current = undefined
       pendingQuizRef.current = undefined
+      pendingQuizPlanRef.current = undefined
       setLatestUsage(null)
       setSessionId(id)
       try {
@@ -767,7 +788,7 @@ export default function App() {
           })),
           restoredTrace,
         )
-        const restored = attachRestoredDeepSolve(withCitations, restoredTrace)
+        const restored = attachRestoredQuizPlans(attachRestoredDeepSolve(withCitations, restoredTrace), restoredTrace)
         setMessages(restored)
         void attachRestoredQuizzes(restored, restoredTrace).then(setMessages)
         setTraceEntries(restoredTrace)
@@ -1169,6 +1190,29 @@ function quizFromTrace(payload: Record<string, unknown>): QuizSession | undefine
   return quiz as QuizSession
 }
 
+function quizPlanFromTrace(payload: Record<string, unknown>): QuizPlan | undefined {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'propose_quiz_plan' || payload.ok === false) return undefined
+  const details = payload.details
+  if (!details || typeof details !== 'object') return undefined
+  const item = details as Record<string, unknown>
+  const title = typeof item.title === 'string' && item.title.trim() ? item.title : 'Quiz plan'
+  const topic = typeof item.topic === 'string' && item.topic.trim() ? item.topic : 'selected material'
+  const source = typeof item.source === 'string' && item.source.trim() ? item.source : 'current conversation'
+  const difficulty = typeof item.difficulty === 'string' && item.difficulty.trim() ? item.difficulty : 'medium'
+  const questionCount = typeof item.question_count === 'number' ? item.question_count : 5
+  const notes = Array.isArray(item.notes)
+    ? item.notes.filter((note): note is string => typeof note === 'string' && note.trim().length > 0)
+    : []
+  return {
+    title,
+    topic,
+    source,
+    difficulty,
+    questionCount,
+    notes,
+  }
+}
+
 function notebookProposalKind(value: unknown): NotebookEditProposal['proposalKind'] {
   return value === 'links' || value === 'tags' || value === 'merge' || value === 'edit' ? value : 'edit'
 }
@@ -1313,6 +1357,22 @@ function attachRestoredDeepSolve(messages: Message[], traceEntries: TraceEntry[]
     if (!group) return message
     groupIndex += 1
     return { ...message, deepSolve: group }
+  })
+}
+
+function attachRestoredQuizPlans(messages: Message[], traceEntries: TraceEntry[]): Message[] {
+  const plans = traceEntries
+    .map((entry) => quizPlanFromTrace(entry.payload))
+    .filter((plan): plan is QuizPlan => Boolean(plan))
+  if (plans.length === 0) return messages
+
+  let planIndex = 0
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    if (message.quiz || message.quizPlan) return message
+    const plan = plans[planIndex]
+    planIndex += 1
+    return plan ? { ...message, quizPlan: plan } : message
   })
 }
 

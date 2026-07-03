@@ -16,7 +16,7 @@ use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::notebook_store::NotebookStore;
 use crate::quiz_store::{
     QuizCitation, QuizConfig, QuizDifficulty, QuizOption, QuizQuestion, QuizQuestionType,
-    QuizSession, QuizStore,
+    QuizSession, QuizStore, QuizVerificationReport, QuizVerificationStatus,
 };
 
 #[derive(Clone)]
@@ -312,8 +312,14 @@ async fn generate_questions(
 ) -> anyhow::Result<QuizSession> {
     if let Some(source_text) = source_text {
         let hits = source_hits_from_text(&quiz, &source_label, &source_text);
-        let questions = questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
-        return state.store.replace_questions(&quiz.id, questions);
+        let (questions, verification_method) =
+            questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
+        validate_quiz_questions_for_storage(&questions)?;
+        let quiz = state.store.replace_questions(&quiz.id, questions)?;
+        return state.store.set_verification(
+            &quiz.id,
+            quiz_verification_report(verification_method, Vec::new()),
+        );
     }
 
     let Some(kb) = state.knowledge.get(&quiz.kb_id) else {
@@ -334,8 +340,14 @@ async fn generate_questions(
     if hits.is_empty() {
         anyhow::bail!("no source chunks found for quiz generation");
     }
-    let questions = questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
-    state.store.replace_questions(&quiz.id, questions)
+    let (questions, verification_method) =
+        questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
+    validate_quiz_questions_for_storage(&questions)?;
+    let quiz = state.store.replace_questions(&quiz.id, questions)?;
+    state.store.set_verification(
+        &quiz.id,
+        quiz_verification_report(verification_method, Vec::new()),
+    )
 }
 
 async fn questions_for_hits(
@@ -343,7 +355,7 @@ async fn questions_for_hits(
     llm: Option<CreateLlmConfig>,
     hits: &[tutor_rag::SearchHit],
     memory_markdown: Option<String>,
-) -> anyhow::Result<Vec<QuizQuestion>> {
+) -> anyhow::Result<(Vec<QuizQuestion>, &'static str)> {
     if let Some(llm) = llm.and_then(llm_config_from_request) {
         let sources = hits
             .iter()
@@ -364,9 +376,15 @@ async fn questions_for_hits(
             &sources,
         )
         .await?;
-        Ok(questions_from_generated(&quiz.config, hits, generated))
+        Ok((
+            questions_from_generated(&quiz.config, hits, generated),
+            "llm_verifier_and_citation_check",
+        ))
     } else {
-        Ok(questions_from_hits(&quiz.config, hits))
+        Ok((
+            questions_from_hits(&quiz.config, hits),
+            "deterministic_fallback_citation_check",
+        ))
     }
 }
 
@@ -522,6 +540,52 @@ fn questions_from_generated(
             }
         })
         .collect()
+}
+
+fn validate_quiz_questions_for_storage(questions: &[QuizQuestion]) -> anyhow::Result<()> {
+    if questions.is_empty() {
+        anyhow::bail!("quiz generation produced no questions");
+    }
+    for (index, question) in questions.iter().enumerate() {
+        if question.stem.trim().is_empty() {
+            anyhow::bail!("quiz question {} has an empty stem", index + 1);
+        }
+        if question.options.len() < 2 {
+            anyhow::bail!("quiz question {} has fewer than two options", index + 1);
+        }
+        if !question
+            .options
+            .iter()
+            .any(|option| option.id == question.correct_option_id)
+        {
+            anyhow::bail!("quiz question {} correct option does not exist", index + 1);
+        }
+        if question.explanation.trim().is_empty() {
+            anyhow::bail!("quiz question {} has an empty explanation", index + 1);
+        }
+        if question.citations.is_empty() {
+            anyhow::bail!("quiz question {} has no citations", index + 1);
+        }
+        for citation in &question.citations {
+            if citation.text.trim().is_empty() {
+                anyhow::bail!("quiz question {} has an empty citation", index + 1);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn quiz_verification_report(method: &str, issues: Vec<String>) -> QuizVerificationReport {
+    QuizVerificationReport {
+        status: if issues.is_empty() {
+            QuizVerificationStatus::Verified
+        } else {
+            QuizVerificationStatus::Warning
+        },
+        method: method.to_string(),
+        checked_at: chrono::Utc::now(),
+        issues,
+    }
 }
 
 fn citation_excerpt(source_text: &str, quote: &str) -> String {
