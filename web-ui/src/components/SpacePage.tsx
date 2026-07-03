@@ -100,6 +100,12 @@ interface NotebookFolder {
   path: string
 }
 
+interface NotebookVault {
+  root: string
+  external: boolean
+  entries: number
+}
+
 interface MemoryFile {
   path: string
   level: string
@@ -139,6 +145,7 @@ export function SpacePage({
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [notebookFolders, setNotebookFolders] = useState<string[]>([])
+  const [notebookVault, setNotebookVault] = useState<NotebookVault | null>(null)
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [activeNotebookDetail, setActiveNotebookDetail] = useState<NotebookEntry | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
@@ -200,6 +207,7 @@ export function SpacePage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
       setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+      setNotebookVault((data.vault ?? null) as NotebookVault | null)
       setNotebookEntries(entries)
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
       setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
@@ -437,26 +445,27 @@ export function SpacePage({
     }
   }
 
-  const importNotebookFolder = async (folderPath: string) => {
+  const bindNotebookVault = async (folderPath: string) => {
     if (!folderPath.trim()) return
     setPendingImportFiles([])
     setImportPreview(null)
     setImportResult(null)
     setLoading(true)
     try {
-      const res = await fetch('/api/notebook/import/folder', {
-        method: 'POST',
+      const res = await fetch('/api/notebook/vault', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ space_id: 'default', path: folderPath }),
+        body: JSON.stringify({ path: folderPath }),
       })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const imported = (data.entries ?? []) as NotebookEntry[]
-      await refreshNotebook()
-      if (imported[0]?.id) setActiveNotebookId(imported[0].id)
-      const skippedItems = Array.isArray(data.skipped) ? data.skipped as NotebookImportSkipped[] : []
-      setImportResult({ imported_count: imported.length, skipped: skippedItems })
-      setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'} from folder${skippedItems.length ? `, skipped ${skippedItems.length}` : ''}`)
+      const entries = (data.entries ?? []) as NotebookEntry[]
+      setNotebookEntries(entries)
+      setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+      setNotebookVault((data.vault ?? null) as NotebookVault | null)
+      setActiveNotebookDetail(null)
+      setActiveNotebookId(entries[0]?.id ?? null)
+      setStatus(`Bound notebook vault: ${(data.vault as NotebookVault | undefined)?.root ?? folderPath}`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -716,6 +725,7 @@ export function SpacePage({
           <NotebookTab
             entries={notebookEntries}
             folders={notebookFolders}
+            vault={notebookVault}
             activeEntry={activeNotebookEntry}
             status={status}
             loading={loading}
@@ -735,7 +745,7 @@ export function SpacePage({
             importPreview={importPreview}
             importResult={importResult}
             onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
-            onImportFolder={(folderPath) => void importNotebookFolder(folderPath)}
+            onBindVault={(folderPath) => void bindNotebookVault(folderPath)}
             onConfirmImport={() => void importNotebookFiles()}
             onCancelImport={cancelNotebookImport}
             onExportEntry={(entry) => void exportNotebookEntry(entry)}
@@ -782,6 +792,7 @@ export function SpacePage({
 function NotebookTab({
   entries,
   folders,
+  vault,
   activeEntry,
   status,
   loading,
@@ -801,7 +812,7 @@ function NotebookTab({
   importPreview,
   importResult,
   onPreviewImportFiles,
-  onImportFolder,
+  onBindVault,
   onConfirmImport,
   onCancelImport,
   onExportEntry,
@@ -811,6 +822,7 @@ function NotebookTab({
 }: {
   entries: NotebookEntry[]
   folders: string[]
+  vault: NotebookVault | null
   activeEntry: NotebookEntry | null
   status: string
   loading: boolean
@@ -830,7 +842,7 @@ function NotebookTab({
   importPreview: NotebookImportPreview | null
   importResult: NotebookImportResult | null
   onPreviewImportFiles: (files: FileList | null) => void
-  onImportFolder: (folderPath: string) => void
+  onBindVault: (folderPath: string) => void
   onConfirmImport: () => void
   onCancelImport: () => void
   onExportEntry: (entry: NotebookEntry) => void
@@ -903,13 +915,13 @@ function NotebookTab({
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Import Obsidian Vault folder',
+        title: 'Bind Notebook Vault folder',
       })
       if (typeof selected === 'string') {
-        onImportFolder(selected)
+        onBindVault(selected)
       }
     } catch {
-      window.alert('Folder import is available in the Tauri desktop app. In the web app, zip the vault folder and import the zip file.')
+      window.alert('Vault folder binding is available in the Tauri desktop app. In the web app, import Markdown files or a zip archive instead.')
     }
   }
 
@@ -990,8 +1002,8 @@ function NotebookTab({
                   >
                     <BookMarked size={16} className="mt-0.5 shrink-0 text-blue-600" />
                     <span>
-                      <span className="block font-medium text-gray-900">Vault folder</span>
-                      <span className="block text-xs text-gray-500">Desktop only, recursive Markdown import</span>
+                      <span className="block font-medium text-gray-900">Bind vault folder</span>
+                      <span className="block text-xs text-gray-500">Desktop only, read and write this folder directly</span>
                     </span>
                   </button>
                 </div>
@@ -1044,6 +1056,15 @@ function NotebookTab({
               )}
             </div>
           </div>
+          {vault && (
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-gray-700">{vault.external ? 'Bound vault' : 'Local vault'}</span>
+                <span>{vault.entries} notes</span>
+              </div>
+              <div className="mt-1 truncate" title={vault.root}>{vault.root}</div>
+            </div>
+          )}
           {importPreview && (
             <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-3 text-xs shadow-sm">
               <div className="flex items-center justify-between gap-3">

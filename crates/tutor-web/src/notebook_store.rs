@@ -73,9 +73,15 @@ pub struct NotebookEntrySummary {
 
 pub struct NotebookStore {
     index_path: PathBuf,
-    vault_root: PathBuf,
+    config_path: PathBuf,
+    vault_root: Mutex<PathBuf>,
     items: Mutex<Vec<NotebookEntry>>,
     folders: Mutex<HashSet<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct NotebookConfig {
+    vault_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,19 +112,74 @@ impl NotebookStore {
 
     pub fn new_with_path(path: PathBuf) -> Self {
         let index_path = path.join("index.json");
-        let vault_root = path.join("vault");
+        let config_path = path.join("config.json");
+        let configured_vault_root = load_config(&config_path).and_then(|config| config.vault_root);
+        let vault_root = configured_vault_root.unwrap_or_else(|| path.join("vault"));
         fs::create_dir_all(&vault_root).expect("failed to create notebook vault directory");
         let (items, folders) =
             load_file_backed_entries(&index_path, &vault_root).unwrap_or_default();
         Self {
             index_path,
-            vault_root,
+            config_path,
+            vault_root: Mutex::new(vault_root),
             items: Mutex::new(items),
             folders: Mutex::new(folders.into_iter().collect()),
         }
     }
 
+    pub fn vault_info(&self) -> NotebookVaultInfo {
+        let root = self.vault_root.lock().unwrap().clone();
+        NotebookVaultInfo {
+            root: root.to_string_lossy().to_string(),
+            external: load_config(&self.config_path)
+                .and_then(|config| config.vault_root)
+                .is_some(),
+            entries: self.items.lock().unwrap().len(),
+        }
+    }
+
+    pub fn set_vault_root(&self, path: PathBuf) -> Result<NotebookVaultMount> {
+        if !path.is_dir() {
+            return Err(anyhow!(
+                "notebook vault folder does not exist or is not a directory"
+            ));
+        }
+        let root = path.canonicalize()?;
+        let previous_items = self.items.lock().unwrap().clone();
+        let (entries, folders) = scan_vault_root(&root, &previous_items)?;
+        fs::create_dir_all(
+            self.config_path
+                .parent()
+                .ok_or_else(|| anyhow!("notebook config path has no parent"))?,
+        )?;
+        fs::write(
+            &self.config_path,
+            serde_json::to_string_pretty(&NotebookConfig {
+                vault_root: Some(root.clone()),
+            })?,
+        )?;
+        {
+            let mut vault_root = self.vault_root.lock().unwrap();
+            *vault_root = root;
+        }
+        {
+            let mut items = self.items.lock().unwrap();
+            *items = entries.clone();
+        }
+        {
+            let mut stored_folders = self.folders.lock().unwrap();
+            *stored_folders = folders.iter().cloned().collect();
+            self.save_index_locked(&entries, &stored_folders)?;
+        }
+        Ok(NotebookVaultMount {
+            vault: self.vault_info(),
+            entries,
+            folders,
+        })
+    }
+
     pub fn list(&self, space_id: Option<&str>) -> Vec<NotebookEntry> {
+        let _ = self.refresh_from_vault();
         let mut items: Vec<_> = self
             .items
             .lock()
@@ -132,12 +193,29 @@ impl NotebookStore {
     }
 
     pub fn get(&self, id: &str) -> Option<NotebookEntry> {
+        let _ = self.refresh_from_vault();
         self.items
             .lock()
             .unwrap()
             .iter()
             .find(|item| item.id == id)
             .cloned()
+    }
+
+    fn refresh_from_vault(&self) -> Result<()> {
+        let root = self.vault_root.lock().unwrap().clone();
+        let previous_items = self.items.lock().unwrap().clone();
+        let (entries, folders) = scan_vault_root(&root, &previous_items)?;
+        {
+            let mut items = self.items.lock().unwrap();
+            *items = entries.clone();
+        }
+        {
+            let mut stored_folders = self.folders.lock().unwrap();
+            stored_folders.extend(folders);
+            self.save_index_locked(&entries, &stored_folders)?;
+        }
+        Ok(())
     }
 
     pub fn list_views(&self, space_id: Option<&str>) -> Vec<NotebookEntryView> {
@@ -176,7 +254,8 @@ impl NotebookStore {
         let Some(folder) = normalize_folder_path(path) else {
             return Err(anyhow!("notebook folder path is empty"));
         };
-        fs::create_dir_all(self.vault_root.join(&folder))?;
+        let vault_root = self.vault_root.lock().unwrap().clone();
+        fs::create_dir_all(vault_root.join(&folder))?;
         let items = self.items.lock().unwrap();
         let mut folders = self.folders.lock().unwrap();
         folders.insert(folder.clone());
@@ -272,14 +351,32 @@ impl NotebookStore {
             let folders = self.folders.lock().unwrap();
             let _ = self.save_locked(&items, &folders);
             if let Some(entry) = removed.and_then(|entry| entry.path) {
-                let _ = fs::remove_file(self.vault_root.join(entry));
+                let vault_root = self.vault_root.lock().unwrap().clone();
+                let _ = fs::remove_file(vault_root.join(entry));
             }
         }
         deleted
     }
 
     fn save_locked(&self, items: &[NotebookEntry], folders: &HashSet<String>) -> Result<()> {
-        fs::create_dir_all(&self.vault_root)?;
+        let vault_root = self.vault_root.lock().unwrap().clone();
+        fs::create_dir_all(&vault_root)?;
+        for entry in items {
+            let path = entry
+                .path
+                .clone()
+                .unwrap_or_else(|| safe_markdown_file_name(&entry.title));
+            let markdown_path = vault_root.join(&path);
+            if let Some(parent) = markdown_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(markdown_path, &entry.markdown)?;
+        }
+        self.save_index_locked(items, folders)?;
+        Ok(())
+    }
+
+    fn save_index_locked(&self, items: &[NotebookEntry], folders: &HashSet<String>) -> Result<()> {
         if let Some(parent) = self.index_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -289,11 +386,6 @@ impl NotebookStore {
                 .path
                 .clone()
                 .unwrap_or_else(|| safe_markdown_file_name(&entry.title));
-            let markdown_path = self.vault_root.join(&path);
-            if let Some(parent) = markdown_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(markdown_path, &entry.markdown)?;
             index.push(NotebookIndexEntry::from_entry(entry, path));
         }
         let mut folders = folders.iter().cloned().collect::<Vec<_>>();
@@ -307,6 +399,20 @@ impl NotebookStore {
         )?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NotebookVaultInfo {
+    pub root: String,
+    pub external: bool,
+    pub entries: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NotebookVaultMount {
+    pub vault: NotebookVaultInfo,
+    pub entries: Vec<NotebookEntry>,
+    pub folders: Vec<String>,
 }
 
 impl NotebookIndexEntry {
@@ -389,6 +495,102 @@ fn parse_notebook_index(text: &str) -> Result<NotebookIndex> {
         entries: serde_json::from_str::<Vec<NotebookIndexEntry>>(text)?,
         folders: Vec::new(),
     })
+}
+
+fn load_config(config_path: &Path) -> Option<NotebookConfig> {
+    fs::read_to_string(config_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<NotebookConfig>(&text).ok())
+}
+
+fn scan_vault_root(
+    root: &Path,
+    previous_items: &[NotebookEntry],
+) -> Result<(Vec<NotebookEntry>, Vec<String>)> {
+    let mut files = Vec::new();
+    collect_markdown_files(root, root, &mut files)?;
+    files.sort();
+
+    let previous_by_path = previous_items
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .path
+                .as_ref()
+                .map(|path| (path.to_lowercase(), entry.clone()))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let now = Utc::now();
+    let mut entries = Vec::with_capacity(files.len());
+    let mut folders = HashSet::new();
+
+    for relative_path in files {
+        let markdown = fs::read_to_string(root.join(&relative_path))?;
+        let title = title_from_note_path(&relative_path);
+        let lower_path = relative_path.to_lowercase();
+        let mut entry = previous_by_path
+            .get(&lower_path)
+            .cloned()
+            .unwrap_or_else(|| NotebookEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                space_id: "default".into(),
+                entry_type: NotebookEntryType::Note,
+                title: title.clone(),
+                path: Some(relative_path.clone()),
+                markdown: String::new(),
+                metadata: Some(serde_json::json!({
+                    "source": "external_vault",
+                    "source_path": relative_path,
+                })),
+                source_session_id: None,
+                source_message_id: None,
+                created_at: now,
+                updated_at: now,
+            });
+        entry.title = title;
+        entry.path = Some(relative_path);
+        entry.markdown = markdown;
+        entry.updated_at = now;
+        add_parent_folders(&entry, &mut folders);
+        entries.push(entry);
+    }
+
+    let mut folders = folders.into_iter().collect::<Vec<_>>();
+    folders.sort_by_key(|folder| folder.to_lowercase());
+    Ok((entries, folders))
+}
+
+fn collect_markdown_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<()> {
+    for item in fs::read_dir(dir)? {
+        let item = item?;
+        let path = item.path();
+        let file_type = item.file_type()?;
+        if file_type.is_dir() {
+            collect_markdown_files(root, &path, files)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let lower = relative_path.to_lowercase();
+        if lower.ends_with(".md") || lower.ends_with(".markdown") {
+            files.push(relative_path);
+        }
+    }
+    Ok(())
+}
+
+fn title_from_note_path(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(normalize_title)
+        .unwrap_or_else(|| "Untitled note".to_string())
 }
 
 pub fn entry_views(entries: &[NotebookEntry]) -> Vec<NotebookEntryView> {
@@ -963,6 +1165,44 @@ mod tests {
 
         assert!(reloaded.delete(&entry.id));
         assert!(!note_path.exists());
+    }
+
+    #[test]
+    fn notebook_store_binds_external_vault_and_writes_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_root = dir.path().join("app-notebook");
+        let vault_root = dir.path().join("external-vault");
+        std::fs::create_dir_all(vault_root.join("optics")).unwrap();
+        std::fs::write(vault_root.join("optics").join("TCC.md"), "# TCC").unwrap();
+
+        let store = NotebookStore::new_with_path(app_root.clone());
+        let mounted = store.set_vault_root(vault_root.clone()).unwrap();
+        assert!(mounted.vault.external);
+        assert_eq!(mounted.entries.len(), 1);
+        assert_eq!(mounted.entries[0].title, "TCC");
+
+        let entry = store
+            .create(NotebookEntryInput {
+                space_id: None,
+                entry_type: NotebookEntryType::Note,
+                path: Some("new/OPC.md".into()),
+                title: "OPC".into(),
+                markdown: "# OPC".into(),
+                metadata: None,
+                source_session_id: None,
+                source_message_id: None,
+            })
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault_root.join("new").join("OPC.md")).unwrap(),
+            "# OPC"
+        );
+        assert!(!app_root.join("vault").join("new").join("OPC.md").exists());
+
+        std::fs::write(vault_root.join("External.md"), "# External").unwrap();
+        let listed = store.list(Some("default"));
+        assert!(listed.iter().any(|item| item.title == "External"));
+        assert!(listed.iter().any(|item| item.id == entry.id));
     }
 
     #[test]

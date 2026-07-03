@@ -61,6 +61,11 @@ struct ImportFolderRequest {
 }
 
 #[derive(Deserialize)]
+struct BindVaultRequest {
+    path: String,
+}
+
+#[derive(Deserialize)]
 struct CreateNotebookFolderRequest {
     path: String,
 }
@@ -75,8 +80,48 @@ async fn list_entries(
         Json(serde_json::json!({
             "entries": state.store.list_summaries(space_id),
             "folders": state.store.list_folders(),
+            "vault": state.store.vault_info(),
         })),
     )
+}
+
+async fn get_vault(State(state): State<NotebookState>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "vault": state.store.vault_info(),
+        })),
+    )
+}
+
+async fn bind_vault(
+    State(state): State<NotebookState>,
+    Json(req): Json<BindVaultRequest>,
+) -> impl IntoResponse {
+    match state.store.set_vault_root(PathBuf::from(req.path)) {
+        Ok(mount) => {
+            let _ = state.memory.record_event(
+                MemoryEventCategory::Notebook,
+                "bound_vault",
+                format!("Bound notebook vault: {}", mount.vault.root),
+                None,
+                serde_json::json!({
+                    "root": mount.vault.root,
+                    "entries": mount.entries.len(),
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "vault": mount.vault,
+                    "entries": mount.entries,
+                    "folders": mount.folders,
+                })),
+            )
+                .into_response()
+        }
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    }
 }
 
 async fn get_entry(
@@ -434,6 +479,7 @@ pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> R
             "/api/notebook/export-vault.zip",
             get(export_obsidian_vault_zip),
         )
+        .route("/api/notebook/vault", get(get_vault).put(bind_vault))
         .route(
             "/api/notebook/import/preview",
             axum::routing::post(preview_import_entries),
