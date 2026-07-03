@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+﻿import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
 import type { ChatAttachment, ContextStats, NotebookEditProposal, SpaceMention } from './components/ChatBox'
@@ -125,6 +125,7 @@ export default function App() {
   const pendingCitationsRef = useRef<Citation[]>([])
   const pendingDeepSolveRef = useRef<DeepSolveTraceEntry[]>([])
   const pendingNotebookEditProposalRef = useRef<NotebookEditProposal | undefined>(undefined)
+  const pendingQuizRef = useRef<QuizSession | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -183,15 +184,17 @@ export default function App() {
           const citations = pendingCitationsRef.current
           const deepSolve = pendingDeepSolveRef.current
           const notebookEditProposal = pendingNotebookEditProposalRef.current
-          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal) {
+          const quiz = pendingQuizRef.current
+          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz) {
             setMessages((prev) => [
               ...dropTrailingTransientStatus(prev),
               {
                 role: 'assistant',
-                text: finalText,
+                text: finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : ''),
                 citations,
                 deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
                 notebookEditProposal,
+                quiz,
               },
             ])
           } else {
@@ -200,6 +203,7 @@ export default function App() {
           pendingCitationsRef.current = []
           pendingDeepSolveRef.current = []
           pendingNotebookEditProposalRef.current = undefined
+          pendingQuizRef.current = undefined
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
@@ -222,6 +226,10 @@ export default function App() {
         const notebookEditProposal = notebookEditProposalFromTrace(event.payload as Record<string, unknown>)
         if (notebookEditProposal) {
           pendingNotebookEditProposalRef.current = notebookEditProposal
+        }
+        const quiz = quizFromTrace(event.payload as Record<string, unknown>)
+        if (quiz) {
+          pendingQuizRef.current = quiz
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -367,7 +375,7 @@ export default function App() {
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = [], mentions: SpaceMention[] = []) => {
     try {
       const content = buildMessageContentWithAttachments(text, attachments)
-      const displayText = text.trim() || (attachments.length > 0 ? `发送了 ${attachments.length} 个附件` : `引用了 ${mentions.length} 个空间内容`)
+      const displayText = text.trim() || (attachments.length > 0 ? `Sent ${attachments.length} attachment(s)` : `Referenced ${mentions.length} Space item(s)`)
       let sid = sessionId
       if (!sid) {
         const kb = selectedKnowledgeBaseId || null
@@ -395,53 +403,6 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments, mentions }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
-      if (capability === 'quiz') {
-        const attachmentSource = attachmentSourceText(attachments)
-        const mentionSource = await spaceMentionSourceText(mentions)
-        const conversationSource = [quizSourceFromMessages(messages), attachmentSource, mentionSource].filter(Boolean).join('\n\n')
-        const hasExplicitLocalSource = attachments.some((attachment) => attachment.text?.trim()) || mentions.length > 0
-        const useKnowledgeBaseForQuiz = Boolean(selectedKnowledgeBaseId && !selectedNotebookEnabled && !hasExplicitLocalSource)
-        if (!useKnowledgeBaseForQuiz && !conversationSource.trim()) {
-          throw new Error('当前还没有可用于出题的对话内容。请先提供一段材料，或关联知识库。')
-        }
-        pushStatus({
-          kind: 'tool',
-          label: 'Generating quiz',
-          detail: useKnowledgeBaseForQuiz ? 'Knowledge base' : mentions.length > 0 ? 'Space references' : 'Conversation',
-        })
-        const res = await fetch('/api/quizzes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kb_id: useKnowledgeBaseForQuiz ? selectedKnowledgeBaseId : null,
-            source_text: useKnowledgeBaseForQuiz ? null : conversationSource,
-            source_label: useKnowledgeBaseForQuiz ? null : mentions.length > 0 ? 'Space references' : '当前对话',
-            topic: text.trim() || (mentions.length > 0 ? 'Space references' : attachments.length > 0 ? '附件内容' : null),
-            difficulty: 'medium',
-            question_count: 5,
-            llm: settingsForSession(llmSettings),
-          }),
-        })
-        const data = await safeJson(res)
-        if (!res.ok) {
-          throw new Error(errorMessage(data, res.status))
-        }
-        const quiz = data.quiz as QuizSession
-        const assistantText = `已根据“${displayText}”生成 Quiz。`
-        await persistQuizMessage(sid, content, assistantText, quiz.id)
-        setMessages((prev) => [
-          ...dropTrailingTransientStatus(prev),
-          {
-            role: 'assistant',
-            text: assistantText,
-            quiz,
-          },
-        ])
-        setRunning(false)
-        pushStatus({ kind: 'done', label: 'Done', detail: 'Quiz generated' })
-        void refreshSessions()
-        return
-      }
       send({ type: 'message', content, mentions })
       void refreshSessions()
     } catch (err) {
@@ -521,6 +482,7 @@ export default function App() {
       pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
       pendingNotebookEditProposalRef.current = undefined
+      pendingQuizRef.current = undefined
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       pendingSessionSendRef.current = { sessionId: nextSessionId, content: nextText, mentions: [] }
@@ -660,6 +622,7 @@ export default function App() {
     pendingCitationsRef.current = []
     pendingDeepSolveRef.current = []
     pendingNotebookEditProposalRef.current = undefined
+    pendingQuizRef.current = undefined
     setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
@@ -785,6 +748,7 @@ export default function App() {
       pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
       pendingNotebookEditProposalRef.current = undefined
+      pendingQuizRef.current = undefined
       setLatestUsage(null)
       setSessionId(id)
       try {
@@ -992,8 +956,8 @@ export default function App() {
 
         {view === 'tutor' && (
           <PlaceholderPage
-            title="辅导机器人"
-            description="面向学习过程的专题辅导入口，后续可以承接题目讲解、错因分析、分步追问和学习路径推荐。"
+            title="Tutor Agent"
+            description="A guided learning entry point for explanations, mistake analysis, step-by-step follow-up, and study path suggestions."
           />
         )}
 
@@ -1192,6 +1156,19 @@ function notebookEditProposalFromTrace(payload: Record<string, unknown>): Notebo
   }
 }
 
+function quizFromTrace(payload: Record<string, unknown>): QuizSession | undefined {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'create_quiz' || payload.ok === false) return undefined
+  const details = payload.details
+  if (!details || typeof details !== 'object') return undefined
+  const quiz = (details as Record<string, unknown>).quiz
+  if (!quiz || typeof quiz !== 'object') return undefined
+  const id = (quiz as Record<string, unknown>).id
+  const title = (quiz as Record<string, unknown>).title
+  const questions = (quiz as Record<string, unknown>).questions
+  if (typeof id !== 'string' || typeof title !== 'string' || !Array.isArray(questions)) return undefined
+  return quiz as QuizSession
+}
+
 function notebookProposalKind(value: unknown): NotebookEditProposal['proposalKind'] {
   return value === 'links' || value === 'tags' || value === 'merge' || value === 'edit' ? value : 'edit'
 }
@@ -1340,6 +1317,9 @@ function attachRestoredDeepSolve(messages: Message[], traceEntries: TraceEntry[]
 }
 
 async function attachRestoredQuizzes(messages: Message[], traceEntries: TraceEntry[]): Promise<Message[]> {
+  const restoredQuizzes = traceEntries
+    .map((entry) => quizFromTrace(entry.payload))
+    .filter((quiz): quiz is QuizSession => Boolean(quiz))
   const quizIds = traceEntries
     .filter((entry) => entry.kind === 'quiz_created')
     .map((entry) => {
@@ -1348,9 +1328,9 @@ async function attachRestoredQuizzes(messages: Message[], traceEntries: TraceEnt
     })
     .filter((id): id is string => Boolean(id))
 
-  if (quizIds.length === 0) return messages
+  if (restoredQuizzes.length === 0 && quizIds.length === 0) return messages
 
-  const quizzes = await Promise.all(
+  const fetchedQuizzes = await Promise.all(
     quizIds.map(async (id) => {
       try {
         const res = await fetch(`/api/quizzes/${encodeURIComponent(id)}`)
@@ -1362,9 +1342,14 @@ async function attachRestoredQuizzes(messages: Message[], traceEntries: TraceEnt
     }),
   )
 
+  const quizzes = [
+    ...restoredQuizzes,
+    ...fetchedQuizzes.filter((quiz): quiz is QuizSession => Boolean(quiz)),
+  ]
   let quizIndex = 0
   return messages.map((message) => {
-    if (message.role !== 'assistant' || !message.text.includes('生成 Quiz')) return message
+    if (message.role !== 'assistant') return message
+    if (message.quiz) return message
     const quiz = quizzes[quizIndex]
     quizIndex += 1
     return quiz ? { ...message, quiz } : message
@@ -1395,7 +1380,7 @@ function phaseLabel(value: string): string {
 
 function sessionTitleFromMessage(text: string) {
   const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return '新的会话'
+  if (!normalized) return '鏂扮殑浼氳瘽'
   return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized
 }
 
@@ -1430,27 +1415,18 @@ function estimateContextTokens(messages: Message[], streamingText: string) {
   return Math.ceil(ascii / 4 + nonAscii * 1.2 + messageOverhead)
 }
 
-function quizSourceFromMessages(messages: Message[]) {
-  return messages
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .filter((message) => !message.quiz && message.text.trim())
-    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.text.trim()}`)
-    .join('\n\n')
-    .slice(-12000)
-}
-
 function buildMessageContentWithAttachments(text: string, attachments: ChatAttachment[]) {
   const baseText = text.trim()
   const source = attachmentSourceText(attachments)
   if (!source) return baseText
-  return `${baseText || '请根据附件内容继续。'}\n\n${source}`
+  return `${baseText || 'Please continue based on the attachment content.'}\n\n${source}`
 }
 
 function attachmentSourceText(attachments: ChatAttachment[]) {
   const readable = attachments.filter((attachment) => attachment.text?.trim())
   if (readable.length === 0) return ''
   return [
-    '[附件上下文]',
+    '[Attachment context]',
     ...readable.map((attachment, index) => [
       `### ${index + 1}. ${attachment.name}`,
       `Type: ${attachment.type || 'unknown'}`,
@@ -1460,42 +1436,6 @@ function attachmentSourceText(attachments: ChatAttachment[]) {
       attachment.text?.trim() ?? '',
     ].filter(Boolean).join('\n')),
   ].join('\n\n')
-}
-
-async function spaceMentionSourceText(mentions: SpaceMention[]) {
-  if (mentions.length === 0) return ''
-  const sources = await Promise.all(mentions.slice(0, 8).map(async (mention, index) => {
-    const targetId = mention.target_id?.trim()
-    if (!targetId) return ''
-    const res = await fetch(spaceMentionItemUrl(mention, targetId))
-    const data = await safeJson(res)
-    if (!res.ok) {
-      throw new Error(`failed to read Space reference "${mention.title}": ${errorMessage(data, res.status)}`)
-    }
-    const item = data.item as { content_markdown?: unknown } | undefined
-    const markdown = typeof item?.content_markdown === 'string' ? item.content_markdown.trim() : ''
-    if (!markdown) return ''
-    return [
-      `## Space Reference ${index + 1}: ${mention.title}`,
-      `Type: ${mention.type}`,
-      '',
-      markdown,
-    ].join('\n')
-  }))
-  return [
-    '[Space reference context]',
-    ...sources.filter(Boolean),
-  ].join('\n\n').slice(0, 40000)
-}
-
-function spaceMentionItemUrl(mention: SpaceMention, targetId: string) {
-  const params = new URLSearchParams()
-  if (mention.type === 'quiz_question' && mention.question_id) {
-    params.set('question_id', mention.question_id)
-  }
-  const query = params.toString()
-  const path = `/api/space/items/${encodeURIComponent(mention.type)}/${encodeURIComponent(targetId)}`
-  return query ? `${path}?${query}` : path
 }
 
 function titleFromMarkdown(markdown: string) {
@@ -1542,23 +1482,6 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
 function errorMessage(data: Record<string, unknown>, status: number) {
   return typeof data.error === 'string' ? data.error : `HTTP ${status}`
 }
-
-async function persistQuizMessage(sessionId: string, user: string, assistant: string, quizId: string) {
-  const res = await fetch(`/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user,
-      assistant,
-      quiz_id: quizId,
-    }),
-  })
-  const data = await safeJson(res)
-  if (!res.ok) {
-    throw new Error(errorMessage(data, res.status))
-  }
-}
-
 
 async function persistMessageCitations(sessionId: string, citations: Citation[]) {
   const res = await fetch(`/api/sessions/${sessionId}/message-citations`, {

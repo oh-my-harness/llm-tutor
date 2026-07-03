@@ -143,6 +143,7 @@ impl CapabilityRouter {
             Capability::Chat => crate::chat::run_chat_with_messages(self, messages).await,
             Capability::Research => crate::chat::run_research_with_messages(self, messages).await,
             Capability::Organize => crate::chat::run_organize_with_messages(self, messages).await,
+            Capability::Quiz => crate::chat::run_quiz_with_messages(self, messages).await,
             Capability::DeepSolve => {
                 let question = question_from_messages(&messages);
                 let client = self.make_client();
@@ -160,9 +161,6 @@ impl CapabilityRouter {
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_messages(self, messages).await
             }
-            Capability::Quiz => Err(TutorError::UnsupportedCapability(
-                "quiz is handled by tutor-web quiz APIs".into(),
-            )),
         }
     }
 
@@ -181,6 +179,7 @@ impl CapabilityRouter {
             Capability::Organize => {
                 crate::chat::run_organize_with_session(self, session, question).await
             }
+            Capability::Quiz => crate::chat::run_quiz_with_session(self, session, question).await,
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_session(self, session, question).await
             }
@@ -203,9 +202,6 @@ impl CapabilityRouter {
                     .map_err(|err| TutorError::Internal(err.to_string()))?;
                 Ok(answer)
             }
-            Capability::Quiz => Err(TutorError::UnsupportedCapability(
-                "quiz is handled by tutor-web quiz APIs".into(),
-            )),
         }
     }
 }

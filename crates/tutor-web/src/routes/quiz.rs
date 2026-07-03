@@ -20,25 +20,25 @@ use crate::quiz_store::{
 };
 
 #[derive(Clone)]
-struct QuizState {
-    store: Arc<QuizStore>,
-    knowledge: Arc<KnowledgeStore>,
-    notebook: Arc<NotebookStore>,
-    memory: Arc<MemoryStore>,
-    rag_root: PathBuf,
+pub(crate) struct QuizState {
+    pub(crate) store: Arc<QuizStore>,
+    pub(crate) knowledge: Arc<KnowledgeStore>,
+    pub(crate) notebook: Arc<NotebookStore>,
+    pub(crate) memory: Arc<MemoryStore>,
+    pub(crate) rag_root: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
-struct CreateQuizRequest {
-    title: Option<String>,
-    kb_id: Option<String>,
-    notebook_entry_id: Option<String>,
-    source_text: Option<String>,
-    source_label: Option<String>,
-    topic: Option<String>,
-    difficulty: Option<QuizDifficulty>,
-    question_count: Option<usize>,
-    llm: Option<CreateLlmConfig>,
+pub(crate) struct CreateQuizRequest {
+    pub(crate) title: Option<String>,
+    pub(crate) kb_id: Option<String>,
+    pub(crate) notebook_entry_id: Option<String>,
+    pub(crate) source_text: Option<String>,
+    pub(crate) source_label: Option<String>,
+    pub(crate) topic: Option<String>,
+    pub(crate) difficulty: Option<QuizDifficulty>,
+    pub(crate) question_count: Option<usize>,
+    pub(crate) llm: Option<CreateLlmConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,13 +47,13 @@ struct SubmitAnswerRequest {
     selected_option_id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct CreateLlmConfig {
-    provider: String,
-    model: String,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    chat_path: Option<String>,
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct CreateLlmConfig {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) api_key: Option<String>,
+    pub(crate) base_url: Option<String>,
+    pub(crate) chat_path: Option<String>,
 }
 
 async fn list_quizzes(State(state): State<QuizState>) -> impl IntoResponse {
@@ -67,6 +67,20 @@ async fn create_quiz(
     State(state): State<QuizState>,
     Json(req): Json<CreateQuizRequest>,
 ) -> impl IntoResponse {
+    match create_quiz_for_request(&state, req).await {
+        Ok(quiz) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "quiz": quiz })),
+        )
+            .into_response(),
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err),
+    }
+}
+
+pub(crate) async fn create_quiz_for_request(
+    state: &QuizState,
+    req: CreateQuizRequest,
+) -> anyhow::Result<QuizSession> {
     let use_memory = should_use_memory_for_quiz(&req);
     let mut source_text = req
         .source_text
@@ -89,7 +103,7 @@ async fn create_quiz(
         .map(str::to_string);
     if let Some(entry_id) = &notebook_entry_id {
         let Some(entry) = state.notebook.get(entry_id) else {
-            return error_response(StatusCode::NOT_FOUND, "notebook entry not found");
+            anyhow::bail!("notebook entry not found");
         };
         source_text = Some(entry.markdown);
         source_label = format!("notebook: {}", entry.title);
@@ -102,10 +116,7 @@ async fn create_quiz(
         .map(str::to_string);
 
     if kb_id.is_none() && source_text.is_none() {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "quiz requires either kb_id or source_text",
-        );
+        anyhow::bail!("quiz requires either kb_id or source_text");
     }
 
     let config = QuizConfig {
@@ -127,7 +138,7 @@ async fn create_quiz(
         config,
     ) {
         Ok(quiz) => quiz,
-        Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
+        Err(err) => anyhow::bail!("{err}"),
     };
 
     let memory_markdown = if use_memory {
@@ -165,13 +176,9 @@ async fn create_quiz(
                     "memory_used": memory_markdown.as_deref().map(|value| !value.trim().is_empty()).unwrap_or(false),
                 }),
             );
-            (
-                StatusCode::CREATED,
-                Json(serde_json::json!({ "quiz": quiz })),
-            )
-                .into_response()
+            Ok(quiz)
         }
-        Err(err) => error_response(StatusCode::BAD_REQUEST, err),
+        Err(err) => Err(err),
     }
 }
 

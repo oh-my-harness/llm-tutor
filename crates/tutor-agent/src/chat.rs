@@ -102,6 +102,28 @@ pub async fn run_organize_with_session(
     .await
 }
 
+pub async fn run_quiz_with_messages(
+    router: &CapabilityRouter,
+    messages: Vec<AgentMessage>,
+) -> Result<String> {
+    run_chat_inner(router, "quiz", quiz_system_prompt(), Some(messages), None).await
+}
+
+pub async fn run_quiz_with_session(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+) -> Result<String> {
+    run_chat_inner(
+        router,
+        "quiz",
+        quiz_system_prompt(),
+        Some(vec![user_message(question)]),
+        Some(session),
+    )
+    .await
+}
+
 async fn run_chat_inner(
     router: &CapabilityRouter,
     capability: &'static str,
@@ -464,9 +486,22 @@ fn organize_system_prompt() -> String {
         .into()
 }
 
+fn quiz_system_prompt() -> String {
+    "You are a quiz design tutor. Quiz mode is a normal conversation first: help the user decide scope, source material, difficulty, question count, and question style. \
+     Do not create a quiz just because the user selected Quiz mode. Call create_quiz only when the user explicitly asks you to generate questions, create a quiz, test them, or confirms a quiz plan. \
+     When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, call read_space_item before relying on their content. If Notebook is associated, you may use search_notebook to find relevant saved Markdown notes. \
+     If a Knowledge Base is associated and the user wants questions from course documents or indexed material, use rag_search to inspect relevant source chunks before creating the quiz. \
+     If the user provides source material in the conversation or attachments, pass the relevant source text to create_quiz with a clear source_label. \
+     Use read_memory only to adapt difficulty or topic emphasis to the learner; memory is not a factual source. \
+     After create_quiz succeeds, briefly tell the user what was generated and invite them to answer it in the rendered quiz card. If you are missing source material or the user's intent is unclear, ask a concise clarifying question instead of calling create_quiz."
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{chat_system_prompt, organize_system_prompt, research_system_prompt};
+    use super::{
+        chat_system_prompt, organize_system_prompt, quiz_system_prompt, research_system_prompt,
+    };
 
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
@@ -507,5 +542,16 @@ mod tests {
         assert!(prompt.contains("suggested_tags"));
         assert!(prompt.contains("merge_source_entry_ids"));
         assert!(prompt.contains("requires explicit user confirmation"));
+    }
+
+    #[test]
+    fn quiz_prompt_requires_explicit_generation_before_tool_call() {
+        let prompt = quiz_system_prompt();
+        assert!(prompt.contains("normal conversation first"));
+        assert!(prompt.contains("Do not create a quiz just because"));
+        assert!(prompt.contains("Call create_quiz only when"));
+        assert!(prompt.contains("read_space_item"));
+        assert!(prompt.contains("rag_search"));
+        assert!(prompt.contains("source_label"));
     }
 }

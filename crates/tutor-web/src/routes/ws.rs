@@ -17,14 +17,17 @@ use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
 use tutor_agent::event_sink::{EventSink, SharedEventSink};
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig, LlmProviderKind};
-use tokio_util::sync::CancellationToken;
 
+use crate::knowledge_store::KnowledgeStore;
 use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
+use crate::quiz_tool::CreateQuizTool;
+use crate::routes::quiz::CreateLlmConfig;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
 use crate::space_tool::{
@@ -34,6 +37,7 @@ use crate::space_tool::{
 #[derive(Clone)]
 struct WsState {
     pool: Arc<SessionPool>,
+    knowledge: Arc<KnowledgeStore>,
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
@@ -164,6 +168,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                         active_cancel = Some(cancel.clone());
                         active_task = Some(tokio::spawn(run_tutor_message(
                             pool.clone(),
+                            state.knowledge.clone(),
                             state.memory.clone(),
                             state.notebook.clone(),
                             state.quizzes.clone(),
@@ -223,6 +228,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
 
 pub fn ws_router(
     pool: Arc<SessionPool>,
+    knowledge: Arc<KnowledgeStore>,
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
@@ -230,6 +236,7 @@ pub fn ws_router(
 ) -> Router {
     let state = WsState {
         pool,
+        knowledge,
         memory,
         notebook,
         quizzes,
@@ -242,6 +249,7 @@ pub fn ws_router(
 
 async fn run_tutor_message(
     pool: Arc<SessionPool>,
+    knowledge: Arc<KnowledgeStore>,
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
@@ -317,6 +325,17 @@ async fn run_tutor_message(
                 notebook.clone(),
                 quizzes.clone(),
             )));
+        if entry.capability == "quiz" {
+            router = router.with_product_tool(Arc::new(CreateQuizTool::new(
+                quizzes.clone(),
+                knowledge.clone(),
+                notebook.clone(),
+                memory.clone(),
+                rag_root.clone(),
+                entry.kb.clone(),
+                create_quiz_llm_config_for_session(entry.llm.clone()),
+            )));
+        }
         if entry.notebook_enabled {
             router = router
                 .with_product_tool(Arc::new(ListNotebookTreeTool::new(notebook.clone())))
@@ -589,6 +608,17 @@ fn llm_config_for_session(config: Option<LlmSessionConfig>) -> tutor_agent::Resu
         config.chat_path,
         config.context_window_tokens,
     ))
+}
+
+fn create_quiz_llm_config_for_session(config: Option<LlmSessionConfig>) -> Option<CreateLlmConfig> {
+    let config = config?;
+    Some(CreateLlmConfig {
+        provider: config.provider,
+        model: config.model,
+        api_key: config.api_key,
+        base_url: config.base_url,
+        chat_path: config.chat_path,
+    })
 }
 
 #[cfg(test)]

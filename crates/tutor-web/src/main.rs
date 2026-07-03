@@ -11,6 +11,7 @@ mod knowledge_store;
 mod memory_store;
 mod notebook_store;
 mod quiz_store;
+mod quiz_tool;
 mod routes;
 mod session;
 mod settings_store;
@@ -71,9 +72,13 @@ async fn main() -> anyhow::Result<()> {
         ))
         .merge(routes::memory::memory_router(memory.clone()))
         .merge(routes::settings::settings_router(settings))
-        .merge(routes::sessions::sessions_router(pool.clone(), knowledge))
+        .merge(routes::sessions::sessions_router(
+            pool.clone(),
+            knowledge.clone(),
+        ))
         .merge(routes::ws::ws_router(
             pool.clone(),
+            knowledge.clone(),
             memory.clone(),
             notebook.clone(),
             quizzes.clone(),
