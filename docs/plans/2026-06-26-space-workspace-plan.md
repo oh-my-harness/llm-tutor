@@ -92,16 +92,37 @@ Quiz Bank shows historical quizzes and practice records.
 
 Quiz Bank should not be the primary generation surface.
 
-Quiz generation stays in conversation through the composer `Quiz` mode:
+Quiz generation stays in conversation, but Quiz should be treated as an
+enabled agent capability rather than a hard "send means generate immediately"
+mode.
 
 ```text
-User asks in chat -> Agent generates Quiz card -> User answers in chat -> Quiz record appears in Space / Quiz Bank
+User discusses quiz goals in chat
+  -> Agent clarifies scope, source material, difficulty, and question style
+  -> User asks to generate or confirms the plan
+  -> Agent calls create_quiz
+  -> Chat renders an interactive Quiz card
+  -> User answers in chat
+  -> Quiz record appears in Space / Quiz Bank
 ```
 
 Notebook and Research report detail pages should not expose independent Quiz
 generation buttons. Saved notes and reports are durable material; quiz
-generation remains a Chat action so the active mode, model, source selection,
-attachments, and conversation context are explicit.
+generation remains a Chat action so the active model, source selection,
+attachments, references, learner memory, and conversation context are explicit.
+
+The composer may still expose a Quiz-oriented capability selector, but selecting
+it should mean "the agent may plan and create quizzes" rather than "every user
+message immediately posts to `/api/quizzes`". This lets the user refine the
+assessment before committing to generated questions.
+
+Quiz planning should distinguish:
+
+- instruction: the latest user request, such as "make these harder" or "focus on misconceptions",
+- source material: selected knowledge base chunks, attached files, `@` Space
+  references, Notebook material, or prior conversation content,
+- personalization context: learner memory used only to choose focus,
+  difficulty, tags, and explanation style.
 
 Quiz Bank responsibilities:
 
@@ -284,11 +305,11 @@ The standalone Quiz page should be removed from primary navigation.
 
 Quiz remains as:
 
-- a composer capability,
+- an agent capability/tool available from chat,
 - an in-chat interactive Quiz card,
 - historical records in Space / Quiz Bank.
 
-This keeps generation in the conversation and review in the Space.
+This keeps planning and generation in the conversation and review in the Space.
 
 ### Books Page
 
@@ -467,11 +488,15 @@ Do not rush this simplification until Space is useful enough.
 ### Phase 3: Quiz Bank
 
 - [x] Remove standalone Quiz nav entry.
-- [x] Keep composer Quiz mode.
+- [x] Keep composer Quiz mode for the current V1 implementation.
 - [x] Move Quiz history/review UI into Space / Quiz Bank.
 - [x] Keep Quiz generation in chat only.
 - [x] Expose Quiz sessions and questions as Chat `@` mention targets.
 - [x] Add filters by source type later.
+- [ ] Redesign Quiz mode into an enabled Chat capability/tool instead of automatic generation on every send.
+- [ ] Add a `create_quiz` product tool that the agent can call after explicit user intent or plan confirmation.
+- [ ] Keep normal chat behavior while Quiz capability is enabled so the user can discuss quiz scope before generation.
+- [ ] Split latest user instruction from source material before calling quiz generation.
 
 ### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
 

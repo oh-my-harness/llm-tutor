@@ -191,7 +191,7 @@
 
 - REQ-270: Users shall be able to generate a Quiz from a selected knowledge base.
 - REQ-271: Users shall be able to generate a Quiz from conversation material.
-- REQ-272: Users shall generate Quiz content from Chat Quiz mode using conversation context, attachments, selected knowledge sources, or user-referenced saved material; Notebook and Research report pages shall not provide independent Quiz generation entry points. Status: implemented for conversation, attachments, knowledge bases, and `@` Space references.
+- REQ-272: Users shall generate Quiz content from Chat using conversation context, attachments, selected knowledge sources, or user-referenced saved material; Notebook and Research report pages shall not provide independent Quiz generation entry points. Status: implemented for conversation, attachments, knowledge bases, and `@` Space references.
 - REQ-273: Quiz generation shall retrieve source chunks when a knowledge base is selected.
 - REQ-274: Quiz generation shall produce strict structured JSON.
 - REQ-275: Quiz questions shall include answer options.
@@ -207,6 +207,12 @@
 - REQ-285: Quiz shall support short-answer judging. Status: planned.
 - REQ-286: Quiz shall support wrong-answer review records. Status: planned.
 - REQ-287: Quiz shall support adaptive difficulty. Status: planned.
+- REQ-288: Quiz shall be exposed to Chat as an enabled agent capability/tool, not as an automatic "send equals generate" mode. Status: planned redesign.
+- REQ-289: When Quiz capability is enabled, normal chat turns shall allow discussion of scope, source material, difficulty, question type, learner level, citation strictness, and review goals before any Quiz is generated. Status: planned.
+- REQ-290: The agent shall call a dedicated `create_quiz` product tool only after the user explicitly asks to generate, confirms a plan, or provides an unambiguous generation request. Status: planned.
+- REQ-291: Quiz generation shall separate user instruction from source material. The latest user message may guide topic and constraints, but it shall not be treated as factual source material unless no other source is available or the user explicitly says it is source material. Status: planned.
+- REQ-292: A successful `create_quiz` tool call shall save the Quiz into Quiz Bank and render an interactive Quiz card in Chat. Status: planned.
+- REQ-293: Quiz planning may use learner memory for personalization, but generated factual answers and citations shall remain grounded in selected source material. Status: planned.
 
 ## 14. Research
 
