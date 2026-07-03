@@ -101,6 +101,9 @@ User discusses quiz goals in chat
   -> Agent clarifies scope, source material, difficulty, and question style
   -> User asks to generate or confirms the plan
   -> Agent calls create_quiz
+  -> Quiz generator creates candidate questions
+  -> Deterministic validation checks schema and citation shape
+  -> Quiz verifier reviews answer/support/explanation consistency against sources
   -> Chat renders an interactive Quiz card
   -> User answers in chat
   -> Quiz record appears in Space / Quiz Bank
@@ -123,6 +126,21 @@ Quiz planning should distinguish:
   references, Notebook material, or prior conversation content,
 - personalization context: learner memory used only to choose focus,
   difficulty, tags, and explanation style.
+
+Quiz quality should be guarded by a verifier stage inside the same product
+workflow. This verifier is a controlled reviewer agent, not a second free-form
+chat agent. It receives the candidate question JSON plus the cited source chunks
+and returns structured review data. It should check:
+
+- whether the correct answer is directly supported by the cited source chunks,
+- whether the explanation agrees with the selected correct answer,
+- whether the cited chunks are actually evidential rather than merely topical,
+- whether the supporting quote is present in a cited chunk,
+- whether any distractor is equally or more correct than the intended answer.
+
+The verifier must not add external facts, broaden the source set, or rewrite the
+quiz freely. Failed questions should be repaired and re-verified once where
+practical, otherwise discarded before the Quiz is saved.
 
 Quiz Bank responsibilities:
 
@@ -497,6 +515,9 @@ Do not rush this simplification until Space is useful enough.
 - [ ] Add a `create_quiz` product tool that the agent can call after explicit user intent or plan confirmation.
 - [ ] Keep normal chat behavior while Quiz capability is enabled so the user can discuss quiz scope before generation.
 - [ ] Split latest user instruction from source material before calling quiz generation.
+- [ ] Add a controlled Quiz verifier stage after generation and before saving final questions.
+- [ ] Add structured verifier output for pass/revise/reject, issue list, citation support, and explanation consistency.
+- [ ] Add retry-or-discard behavior for failed generated questions.
 
 ### Phase 3A: Chat Mentions and Agent-Assisted Notebook Edits
 

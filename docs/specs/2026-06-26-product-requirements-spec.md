@@ -213,6 +213,12 @@
 - REQ-291: Quiz generation shall separate user instruction from source material. The latest user message may guide topic and constraints, but it shall not be treated as factual source material unless no other source is available or the user explicitly says it is source material. Status: planned.
 - REQ-292: A successful `create_quiz` tool call shall save the Quiz into Quiz Bank and render an interactive Quiz card in Chat. Status: planned.
 - REQ-293: Quiz planning may use learner memory for personalization, but generated factual answers and citations shall remain grounded in selected source material. Status: planned.
+- REQ-294: Quiz generation shall include a verifier stage inside the controlled product flow, not as a separate free-form chat agent. Status: planned.
+- REQ-295: The verifier stage shall receive only the source chunks, candidate question JSON, answer, explanation, citations, and supporting quote needed for review. Status: planned.
+- REQ-296: The verifier stage shall return structured review output such as `verdict`, `issues`, `supported_answer`, `explanation_consistent`, `citation_supports_answer`, and optional repair guidance. Status: planned.
+- REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: planned.
+- REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: planned.
+- REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: planned.
 
 ## 14. Research
 
