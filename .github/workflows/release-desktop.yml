@@ -36,6 +36,13 @@ jobs:
             artifact_name: macos-x64
             artifact_paths: |
               target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          - label: macOS arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            bundles: dmg
+            artifact_name: macos-arm64
+            artifact_paths: |
+              target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
     steps:
       - name: Checkout
