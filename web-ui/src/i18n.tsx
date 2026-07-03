@@ -6,7 +6,6 @@ export type TranslationKey =
   | 'app.subtitle'
   | 'nav.chat'
   | 'nav.tutor'
-  | 'nav.writing'
   | 'nav.knowledge'
   | 'nav.space'
   | 'nav.memory'
@@ -86,7 +85,6 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'app.subtitle': 'AI 学习工作区',
     'nav.chat': '聊天',
     'nav.tutor': '辅导机器人',
-    'nav.writing': '智能写作',
     'nav.knowledge': '知识库',
     'nav.space': '空间',
     'nav.memory': '记忆',
@@ -165,7 +163,6 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'app.subtitle': 'AI learning workspace',
     'nav.chat': 'Chat',
     'nav.tutor': 'Tutor Bot',
-    'nav.writing': 'Writing',
     'nav.knowledge': 'Knowledge',
     'nav.space': 'Space',
     'nav.memory': 'Memory',

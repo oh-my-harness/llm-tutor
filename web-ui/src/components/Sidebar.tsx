@@ -10,7 +10,6 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
-  PencilLine,
   Settings,
   Sparkles,
   Trash2,
@@ -21,7 +20,6 @@ import { useI18n } from '../i18n'
 export type AppView =
   | 'chat'
   | 'tutor'
-  | 'writing'
   | 'knowledge'
   | 'space'
   | 'memory'
@@ -48,7 +46,6 @@ const navItems: Array<{
   labelKey:
     | 'nav.chat'
     | 'nav.tutor'
-    | 'nav.writing'
     | 'nav.knowledge'
     | 'nav.space'
     | 'nav.memory'
@@ -56,7 +53,6 @@ const navItems: Array<{
 }> = [
   { key: 'chat', labelKey: 'nav.chat', icon: MessageSquare },
   { key: 'tutor', labelKey: 'nav.tutor', icon: Bot },
-  { key: 'writing', labelKey: 'nav.writing', icon: PencilLine },
   { key: 'knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
   { key: 'space', labelKey: 'nav.space', icon: Grid2X2 },
   { key: 'memory', labelKey: 'nav.memory', icon: Brain },

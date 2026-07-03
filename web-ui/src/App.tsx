@@ -997,13 +997,6 @@ export default function App() {
           />
         )}
 
-        {view === 'writing' && (
-          <PlaceholderPage
-            title="智能写作"
-            description="用于作文、读书笔记、报告和表达训练，后续可以加入大纲、润色、批改和评分流程。"
-          />
-        )}
-
         {view === 'knowledge' && (
           <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} focusTarget={knowledgeFocusTarget} />
         )}
