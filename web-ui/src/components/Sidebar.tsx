@@ -7,7 +7,6 @@ import {
   Edit3,
   FileText,
   Grid2X2,
-  Library,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,7 +22,6 @@ export type AppView =
   | 'chat'
   | 'tutor'
   | 'writing'
-  | 'books'
   | 'knowledge'
   | 'space'
   | 'memory'
@@ -51,7 +49,6 @@ const navItems: Array<{
     | 'nav.chat'
     | 'nav.tutor'
     | 'nav.writing'
-    | 'nav.books'
     | 'nav.knowledge'
     | 'nav.space'
     | 'nav.memory'
@@ -60,7 +57,6 @@ const navItems: Array<{
   { key: 'chat', labelKey: 'nav.chat', icon: MessageSquare },
   { key: 'tutor', labelKey: 'nav.tutor', icon: Bot },
   { key: 'writing', labelKey: 'nav.writing', icon: PencilLine },
-  { key: 'books', labelKey: 'nav.books', icon: Library },
   { key: 'knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
   { key: 'space', labelKey: 'nav.space', icon: Grid2X2 },
   { key: 'memory', labelKey: 'nav.memory', icon: Brain },

@@ -7,7 +7,6 @@ import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
-import { BooksPage } from './components/BooksPage'
 import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
 import { PlaceholderPage } from './components/PlaceholderPage'
@@ -137,7 +136,6 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(true)
   const [spaceFocusTarget, setSpaceFocusTarget] = useState<Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }> | null>(null)
-  const [bookFocusTarget, setBookFocusTarget] = useState<Extract<SourceTarget, { type: 'book' }> | null>(null)
   const [knowledgeFocusTarget, setKnowledgeFocusTarget] = useState<Extract<SourceTarget, { type: 'kb' }> | null>(null)
   const [latestUsage, setLatestUsage] = useState<TokenUsagePayload | null>(null)
   const contextStats = useMemo<ContextStats>(() => {
@@ -906,17 +904,6 @@ export default function App() {
       return
     }
 
-    if (target.type === 'book') {
-      setBookFocusTarget(target)
-      setView('books')
-      pushStatus({
-        kind: 'done',
-        label: 'Opened source area',
-        detail: sourceTargetDetail(target, reference),
-      })
-      return
-    }
-
     if (target.type === 'kb') {
       setKnowledgeFocusTarget(target)
       setView('knowledge')
@@ -1015,10 +1002,6 @@ export default function App() {
             title="智能写作"
             description="用于作文、读书笔记、报告和表达训练，后续可以加入大纲、润色、批改和评分流程。"
           />
-        )}
-
-        {view === 'books' && (
-          <BooksPage focusTarget={bookFocusTarget} />
         )}
 
         {view === 'knowledge' && (

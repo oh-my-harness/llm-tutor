@@ -22,7 +22,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Send,
   Tags,
   Target,
   Trash2,
@@ -99,11 +98,6 @@ interface NotebookImportResult {
 
 interface NotebookFolder {
   path: string
-}
-
-interface Book {
-  id: string
-  title: string
 }
 
 interface MemoryFile {
@@ -589,48 +583,6 @@ export function SpacePage({
     }
   }
 
-  const sendNotebookEntryToBook = async (entry: NotebookEntry) => {
-    setLoading(true)
-    try {
-      const booksRes = await fetch('/api/books')
-      const booksData = await safeJson(booksRes)
-      if (!booksRes.ok) throw new Error(errorMessage(booksData, booksRes.status))
-      let books = (booksData.books ?? []) as Book[]
-      if (books.length === 0) {
-        const createBookRes = await fetch('/api/books', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: 'Notebook Exports',
-            description: 'Notebook entries promoted into book chapters.',
-          }),
-        })
-        const createBookData = await safeJson(createBookRes)
-        if (!createBookRes.ok) throw new Error(errorMessage(createBookData, createBookRes.status))
-        books = [createBookData.book as Book]
-      }
-      const targetBook = books[0]
-      if (!targetBook) throw new Error('No target book available')
-      const chapterRes = await fetch(`/api/books/${encodeURIComponent(targetBook.id)}/chapters`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: entry.title,
-          markdown: entry.markdown,
-          source_notebook_entry_id: entry.id,
-          source_session_id: entry.source_session_id,
-        }),
-      })
-      const chapterData = await safeJson(chapterRes)
-      if (!chapterRes.ok) throw new Error(errorMessage(chapterData, chapterRes.status))
-      setStatus(`Sent to book: ${targetBook.title}`)
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const deleteQuiz = async (quiz: QuizSession) => {
     if (!window.confirm(`Delete "${quiz.title}"?`)) return
     const previous = quizzes
@@ -779,7 +731,6 @@ export function SpacePage({
             onEditTitleChange={setEditTitle}
             onEditMarkdownChange={setEditMarkdown}
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
-            onSendToBook={(entry) => void sendNotebookEntryToBook(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
             importPreview={importPreview}
             importResult={importResult}
@@ -846,7 +797,6 @@ function NotebookTab({
   onEditTitleChange,
   onEditMarkdownChange,
   onSaveEntry,
-  onSendToBook,
   onCreateLinkedEntry,
   importPreview,
   importResult,
@@ -876,7 +826,6 @@ function NotebookTab({
   onEditTitleChange: (value: string) => void
   onEditMarkdownChange: (value: string) => void
   onSaveEntry: (entry: NotebookEntry) => void
-  onSendToBook: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
   importPreview: NotebookImportPreview | null
   importResult: NotebookImportResult | null
@@ -1220,10 +1169,6 @@ function NotebookTab({
                 </div>
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
-                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onSendToBook(activeEntry)}>
-                    <Send size={16} />
-                    Send to Book
-                  </button>
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onExportEntry(activeEntry)}>
                     <Download size={16} />
                     Export
