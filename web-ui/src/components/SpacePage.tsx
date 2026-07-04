@@ -113,11 +113,18 @@ interface MemoryFile {
   markdown: string
 }
 
-const tabs: Array<{ key: SpaceTab; labelKey: TranslationKey; icon: typeof NotebookPen }> = [
-  { key: 'notebook', labelKey: 'space.tabs.notebook', icon: NotebookPen },
+const notebookTab: { key: SpaceTab; labelKey: TranslationKey; icon: typeof NotebookPen } = {
+  key: 'notebook',
+  labelKey: 'space.tabs.notebook',
+  icon: NotebookPen,
+}
+
+const spaceTabs: Array<{ key: SpaceTab; labelKey: TranslationKey; icon: typeof NotebookPen }> = [
   { key: 'quiz_bank', labelKey: 'space.tabs.quizBank', icon: FileQuestion },
   { key: 'student_profile', labelKey: 'space.tabs.studentProfile', icon: UserRound },
 ]
+
+const allTabs = [notebookTab, ...spaceTabs]
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
 
@@ -134,12 +141,14 @@ type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'res
 export function SpacePage({
   focusTarget,
   onSourceNavigate,
+  mode = 'space',
 }: {
   focusTarget?: SpaceFocusTarget | null
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+  mode?: 'space' | 'notebook'
 }) {
   const { t } = useI18n()
-  const [activeTab, setActiveTab] = useState<SpaceTab>('notebook')
+  const [activeTab, setActiveTab] = useState<SpaceTab>(() => mode === 'notebook' ? 'notebook' : 'quiz_bank')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
@@ -161,6 +170,7 @@ export function SpacePage({
   const [status, setStatus] = useState('Ready')
   const [loading, setLoading] = useState(false)
   const [spaceNavCollapsed, setSpaceNavCollapsed] = useState(false)
+  const visibleTabs = mode === 'notebook' ? [notebookTab] : spaceTabs
 
   const filteredQuizzes = useMemo(
     () => quizzes.filter((quiz) => quizSourceFilter === 'all' || quizSourceType(quiz) === quizSourceFilter),
@@ -252,6 +262,13 @@ export function SpacePage({
     void refreshNotebook()
     void refreshMemory()
   }, [refreshNotebook, refreshQuizzes, refreshMemory])
+
+  useEffect(() => {
+    setActiveTab((current) => {
+      if (mode === 'notebook') return 'notebook'
+      return current === 'notebook' ? 'quiz_bank' : current
+    })
+  }, [mode])
 
   useEffect(() => {
     if (!activeNotebookId) {
@@ -646,6 +663,60 @@ export function SpacePage({
     }
   }
 
+  if (mode === 'notebook') {
+    return (
+      <main className="flex h-full min-h-0 flex-col bg-white">
+        <header className="flex items-center gap-4 border-b border-gray-100 px-8 py-5">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-950">{t('space.tabs.notebook')}</h1>
+            <p className="mt-1 text-sm text-gray-500">{subtitleFor('notebook', t)}</p>
+          </div>
+          <button
+            className="ml-auto inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50"
+            type="button"
+            disabled={loading}
+            onClick={refreshActiveTab}
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            {t('space.refresh')}
+          </button>
+        </header>
+
+        <NotebookTab
+          entries={notebookEntries}
+          folders={notebookFolders}
+          vault={notebookVault}
+          activeEntry={activeNotebookEntry}
+          status={status}
+          loading={loading}
+          editingEntryId={editingNotebookId}
+          editTitle={editTitle}
+          editMarkdown={editMarkdown}
+          onSelectEntry={setActiveNotebookId}
+          onCreateEntry={(folderPath) => void createNotebookEntry(folderPath)}
+          onCreateFolder={(parentPath) => void createNotebookFolder(parentPath)}
+          onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
+          onStartEdit={startEditNotebookEntry}
+          onCancelEdit={cancelEditNotebookEntry}
+          onEditTitleChange={setEditTitle}
+          onEditMarkdownChange={setEditMarkdown}
+          onSaveEntry={(entry) => void saveNotebookEntry(entry)}
+          onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
+          importPreview={importPreview}
+          importResult={importResult}
+          onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
+          onBindVault={(folderPath) => void bindNotebookVault(folderPath)}
+          onConfirmImport={() => void importNotebookFiles()}
+          onCancelImport={cancelNotebookImport}
+          onExportEntry={(entry) => void exportNotebookEntry(entry)}
+          onExportAll={() => void exportNotebookZip()}
+          onExportVault={() => void exportNotebookVault()}
+          onSourceNavigate={onSourceNavigate}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className="flex h-full min-h-0 bg-white">
       <aside className={`flex shrink-0 flex-col border-r border-gray-200 bg-gray-50 transition-[width] duration-200 ${spaceNavCollapsed ? 'w-16' : 'w-72'}`}>
@@ -675,7 +746,7 @@ export function SpacePage({
         </div>
 
         <nav className={`space-y-1 ${spaceNavCollapsed ? 'px-2' : 'px-3'}`}>
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon
             const active = activeTab === tab.key
             const label = t(tab.labelKey)
@@ -706,7 +777,7 @@ export function SpacePage({
         <header className="flex items-center gap-4 border-b border-gray-100 px-8 py-5">
           <div>
             <h2 className="text-xl font-semibold text-gray-950">
-              {t(tabs.find((tab) => tab.key === activeTab)?.labelKey ?? 'space.tabs.notebook')}
+              {t(allTabs.find((tab) => tab.key === activeTab)?.labelKey ?? 'space.tabs.quizBank')}
             </h2>
             <p className="mt-1 text-sm text-gray-500">{subtitleFor(activeTab, t)}</p>
           </div>

@@ -8,6 +8,7 @@ import {
   FileText,
   Grid2X2,
   MessageSquare,
+  NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -21,6 +22,7 @@ export type AppView =
   | 'chat'
   | 'tutor'
   | 'knowledge'
+  | 'notebook'
   | 'space'
   | 'memory'
   | 'settings'
@@ -49,11 +51,13 @@ const navItems: Array<{
     | 'nav.knowledge'
     | 'nav.space'
     | 'nav.memory'
+    | 'space.tabs.notebook'
   icon: typeof MessageSquare
 }> = [
   { key: 'chat', labelKey: 'nav.chat', icon: MessageSquare },
   { key: 'tutor', labelKey: 'nav.tutor', icon: Bot },
   { key: 'knowledge', labelKey: 'nav.knowledge', icon: BookOpen },
+  { key: 'notebook', labelKey: 'space.tabs.notebook', icon: NotebookPen },
   { key: 'space', labelKey: 'nav.space', icon: Grid2X2 },
   { key: 'memory', labelKey: 'nav.memory', icon: Brain },
 ]

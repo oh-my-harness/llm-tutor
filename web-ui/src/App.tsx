@@ -878,7 +878,18 @@ export default function App() {
       return
     }
 
-    if (target.type === 'notebook' || target.type === 'quiz' || target.type === 'research') {
+    if (target.type === 'notebook' || target.type === 'research') {
+      setSpaceFocusTarget(target)
+      setView('notebook')
+      pushStatus({
+        kind: 'done',
+        label: 'Opened source area',
+        detail: sourceTargetDetail(target, reference),
+      })
+      return
+    }
+
+    if (target.type === 'quiz') {
       setSpaceFocusTarget(target)
       setView('space')
       pushStatus({
@@ -984,6 +995,10 @@ export default function App() {
 
         {view === 'knowledge' && (
           <KnowledgePage settings={llmSettings} onChanged={refreshKnowledgeBases} focusTarget={knowledgeFocusTarget} />
+        )}
+
+        {view === 'notebook' && (
+          <SpacePage mode="notebook" focusTarget={spaceFocusTarget} onSourceNavigate={handleSourceNavigate} />
         )}
 
         {view === 'space' && (
