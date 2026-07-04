@@ -217,6 +217,7 @@ export function ChatBox({
   disabled,
   running = false,
 }: Props) {
+  const { t } = useI18n()
   const [input, setInput] = useState('')
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -290,7 +291,7 @@ export function ChatBox({
           <div className="w-full max-w-4xl">
             <div className="mb-10 flex items-center justify-center gap-4 text-center">
               <Sparkles size={42} className="text-gray-800" />
-              <h2 className="text-4xl font-semibold text-gray-900">浣犳兂瀛︾偣浠€涔堬紵</h2>
+              <h2 className="text-4xl font-semibold text-gray-900">{t('chat.empty.title')}</h2>
             </div>
             <Composer
               input={input}

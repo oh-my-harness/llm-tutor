@@ -30,6 +30,7 @@ export type TranslationKey =
   | 'chat.title'
   | 'chat.subtitle'
   | 'chat.new'
+  | 'chat.empty.title'
   | 'chat.input.placeholder'
   | 'chat.attachments'
   | 'chat.knowledge.none'
@@ -109,6 +110,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.title': '聊天',
     'chat.subtitle': '提问、运行工具、查看轨迹。',
     'chat.new': '新对话',
+    'chat.empty.title': '你想学点什么？',
     'chat.input.placeholder': '今天我能帮您什么？',
     'chat.attachments': '附件',
     'chat.knowledge.none': '不关联知识库',
@@ -187,6 +189,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.title': 'Chat',
     'chat.subtitle': 'Ask questions, run tools, and inspect traces.',
     'chat.new': 'New chat',
+    'chat.empty.title': 'What would you like to learn?',
     'chat.input.placeholder': 'How can I help today?',
     'chat.attachments': 'Attachments',
     'chat.knowledge.none': 'No knowledge base',
