@@ -202,23 +202,34 @@
 - REQ-280: Users shall get immediate correctness feedback.
 - REQ-281: Users shall see final score summary.
 - REQ-282: Users shall see missed-question review.
-- REQ-283: Quiz answer and explanation consistency shall be validated. Status: needs hardening.
+- REQ-283: Quiz answer and explanation consistency shall be validated. Status: partially implemented with deterministic schema/citation checks; needs LLM verifier hardening.
 - REQ-284: Quiz shall support multi-select questions. Status: planned.
 - REQ-285: Quiz shall support short-answer judging. Status: planned.
 - REQ-286: Quiz shall support wrong-answer review records. Status: planned.
 - REQ-287: Quiz shall support adaptive difficulty. Status: planned.
-- REQ-288: Quiz shall be exposed to Chat as an enabled agent capability/tool, not as an automatic "send equals generate" mode. Status: planned redesign.
-- REQ-289: When Quiz capability is enabled, normal chat turns shall allow discussion of scope, source material, difficulty, question type, learner level, citation strictness, and review goals before any Quiz is generated. Status: planned.
-- REQ-290: The agent shall call a dedicated `create_quiz` product tool only after the user explicitly asks to generate, confirms a plan, or provides an unambiguous generation request. Status: planned.
-- REQ-291: Quiz generation shall separate user instruction from source material. The latest user message may guide topic and constraints, but it shall not be treated as factual source material unless no other source is available or the user explicitly says it is source material. Status: planned.
-- REQ-292: A successful `create_quiz` tool call shall save the Quiz into Quiz Bank and render an interactive Quiz card in Chat. Status: planned.
-- REQ-293: Quiz planning may use learner memory for personalization, but generated factual answers and citations shall remain grounded in selected source material. Status: planned.
-- REQ-294: Quiz generation shall include a verifier stage inside the controlled product flow, not as a separate free-form chat agent. Status: planned.
-- REQ-295: The verifier stage shall receive only the source chunks, candidate question JSON, answer, explanation, citations, and supporting quote needed for review. Status: planned.
-- REQ-296: The verifier stage shall return structured review output such as `verdict`, `issues`, `supported_answer`, `explanation_consistent`, `citation_supports_answer`, and optional repair guidance. Status: planned.
-- REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: planned.
-- REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: planned.
+- REQ-288: Quiz shall be exposed to Chat as an enabled agent capability/tool, not as an automatic "send equals generate" mode. Status: implemented with `propose_quiz_plan` and `create_quiz` product tools.
+- REQ-289: When Quiz capability is enabled, normal chat turns shall allow discussion of scope, source material, difficulty, question type, learner level, citation strictness, and review goals before any Quiz is generated. Status: implemented through normal Chat plus optional `propose_quiz_plan`.
+- REQ-290: The agent shall call a dedicated `create_quiz` product tool only after the user explicitly asks to generate, confirms a plan, or provides an unambiguous generation request. Status: implemented in tool design/prompt contract; needs behavioral QA across providers.
+- REQ-291: Quiz generation shall separate user instruction from source material. The latest user message may guide topic and constraints, but it shall not be treated as factual source material unless no other source is available or the user explicitly says it is source material. Status: partially implemented through `kb_id`, `notebook_entry_id`, `source_text`, and `source_label`; needs stronger UI/agent guardrails.
+- REQ-292: A successful `create_quiz` tool call shall save the Quiz into Quiz Bank and render an interactive Quiz card in Chat. Status: implemented.
+- REQ-293: Quiz planning may use learner memory for personalization, but generated factual answers and citations shall remain grounded in selected source material. Status: implemented for first slice; L3 memory is passed only for personalization when review/practice intent is detected.
+- REQ-294: Quiz generation shall include a verifier stage inside the controlled product flow, not as a separate free-form chat agent. Status: partially implemented as deterministic validation and citation checks; no LLM/sub-agent verifier yet.
+- REQ-295: The verifier stage shall receive only the source chunks, candidate question JSON, answer, explanation, citations, and supporting quote needed for review. Status: planned for LLM verifier.
+- REQ-296: The verifier stage shall return structured review output such as `verdict`, `issues`, `supported_answer`, `explanation_consistent`, `citation_supports_answer`, and optional repair guidance. Status: planned for LLM verifier.
+- REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: planned for LLM verifier.
+- REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: partially implemented for deterministic validation; planned for LLM verifier failures.
 - REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: planned.
+
+Current Quiz verification flow:
+
+1. `create_quiz` builds source material from one of these sources: selected knowledge base chunks, a Notebook entry, explicit `source_text`, or selected Chat/Space material.
+2. If a usable LLM config exists, `tutor_agent::quiz::generate_quiz_questions` asks the model for structured single-choice question JSON grounded in the supplied chunks.
+3. If no usable LLM config exists, the backend uses a deterministic fallback question generator from source chunks.
+4. The backend converts generated questions into stored `QuizQuestion` records and maps cited source indices to `QuizCitation` metadata.
+5. `validate_quiz_questions_for_storage` rejects empty question sets, empty stems, too-few options, missing correct option IDs, empty explanations, missing citations, and empty citation text.
+6. The stored quiz receives a `QuizVerificationReport` with method `llm_verifier_and_citation_check` or `deterministic_fallback_citation_check`, but this name currently represents the implemented validation/check path rather than a separate LLM reviewer.
+
+There is not yet a child agent or controlled LLM verifier that independently judges whether each answer, explanation, and citation is correct against the source chunks. That remains the next hardening step.
 
 ## 14. Research
 

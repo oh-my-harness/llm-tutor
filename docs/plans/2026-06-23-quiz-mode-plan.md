@@ -1,15 +1,16 @@
 # Quiz Mode Plan
 
-> Status: in progress | Date: 2026-06-23 | Scope: add a knowledge-base driven quiz workspace with structured questions, answers, scoring, explanations, and citations.
+> Status: active / V1 implemented | Date: 2026-06-23 | Last updated: 2026-07-05 | Scope: chat-driven quiz generation plus durable Quiz Bank review with structured questions, answers, scoring, explanations, and citations.
 
 ## 1. Goal
 
-Quiz mode should turn a knowledge base into an interactive assessment workflow.
+Quiz mode should turn selected learning material into an interactive assessment workflow.
 
 The user should be able to:
 
-- choose a knowledge base and quiz settings,
-- generate a small set of questions from indexed material,
+- discuss quiz scope with the agent before generation,
+- generate a small set of questions from a knowledge base, conversation, attachment,
+  Notebook entry, or explicit `@` Space reference,
 - answer questions one by one,
 - get immediate scoring and explanations,
 - see source chunks behind each question,
@@ -17,18 +18,23 @@ The user should be able to:
 
 ## 2. First Version Scope
 
-Start with a dedicated Quiz page, not chat-driven quiz.
+The original V1 started with a dedicated Quiz page. The current product direction
+has changed: quiz generation happens from Chat through the Quiz capability, while
+historical quiz review happens in Space / Quiz Bank.
 
-The Quiz page is a product workspace for assessment. It is different from chat:
+Quiz is different from ordinary chat:
 
 - chat is open-ended conversation,
-- quiz is a structured exercise flow,
+- quiz generation is a structured product tool flow,
 - every question has answer options, scoring, explanation, and source citations,
 - quiz sessions can be resumed and reviewed later.
 
-V1 supports:
+Current V1 supports:
 
-- one selected knowledge base,
+- selected knowledge bases,
+- conversation/attachment/source text material,
+- Notebook entries,
+- `@` referenced Space items,
 - single-choice questions,
 - configurable topic, difficulty, and question count,
 - generated explanations and citations,
@@ -42,6 +48,7 @@ Out of scope for V1:
 - timed exams,
 - spaced repetition,
 - sharing/export,
+- independent generation buttons in Notebook or Research pages,
 - adaptive question generation.
 
 ## 3. Layering
@@ -62,34 +69,37 @@ Do not build a separate agent loop for quiz generation.
 
 Owns quiz generation prompts and structured output parsing.
 
-Expected capability:
+Implemented capabilities:
 
 ```text
-generate_quiz(kb, topic, difficulty, count) -> QuizQuestion[]
+propose_quiz_plan(title, topic, source, difficulty, question_count, notes)
+create_quiz(title?, kb_id?, notebook_entry_id?, source_text?, source_label?, topic?, difficulty?, question_count?)
 ```
 
-For V1, quiz generation can be a small dedicated flow that:
+For V1, quiz generation is a controlled product flow that:
 
 - retrieves source chunks,
 - asks the LLM to generate JSON questions grounded in those chunks,
 - validates the JSON shape,
-- emits trace events for retrieval and generation.
+- stores the Quiz in `QuizStore`,
+- returns quiz details to Chat so the UI can render an interactive card.
 
 ### `tutor-web` Layer
 
 Owns product APIs and persistence:
 
 - quiz session store,
-- generate quiz endpoint,
+- generate quiz endpoint and `create_quiz` product tool,
+- `propose_quiz_plan` product tool,
 - submit answer endpoint,
 - read quiz session endpoint,
 - optional trace events for quiz generation.
 
 ### `web-ui` Layer
 
-Owns the Quiz page:
+Owns the Chat Quiz card and Space / Quiz Bank review UI:
 
-- quiz configuration panel,
+- quiz planning and generation affordances in the composer,
 - question player,
 - answer submission,
 - explanation and citation display,
@@ -150,7 +160,6 @@ QuizAnswer {
 GET    /api/quizzes
 POST   /api/quizzes
 GET    /api/quizzes/{quiz_id}
-POST   /api/quizzes/{quiz_id}/generate
 POST   /api/quizzes/{quiz_id}/answers
 POST   /api/quizzes/{quiz_id}/finish
 DELETE /api/quizzes/{quiz_id}
@@ -161,6 +170,9 @@ Generation request:
 ```json
 {
   "kb_id": "kb_x",
+  "notebook_entry_id": "optional_note_id",
+  "source_text": "optional explicit source text",
+  "source_label": "conversation / attachment / @ item label",
   "topic": "光刻模型",
   "difficulty": "medium",
   "question_count": 5
@@ -178,25 +190,36 @@ Answer request:
 
 ## 6. UI Shape
 
-Add a `测验` item to the left navigation.
+Quiz generation is exposed through the Chat composer Quiz capability. The old
+standalone Quiz navigation was removed after Space / Quiz Bank reached review
+parity.
 
-Quiz page layout:
+Chat generation flow:
 
 ```text
-Quiz
+User discusses quiz goals in Chat
+  -> agent may call propose_quiz_plan
+  -> user confirms or gives unambiguous generation request
+  -> agent calls create_quiz
+  -> backend generates and validates questions
+  -> Chat renders an interactive Quiz card
+  -> Quiz record appears in Space / Quiz Bank
+```
 
-Left / top config
-  Knowledge base
-  Topic
-  Difficulty
-  Question count
-  Generate
+Quiz Bank layout:
+
+```text
+Space / Quiz Bank
+
+Left
+  historical quizzes
+  source filters
+  scores and status
 
 Main
   Question n / total
   Stem
   Options
-  Submit
   Explanation
   Citations
 
@@ -211,19 +234,47 @@ The page should keep the existing blue / white / gray visual style.
 
 V1 UI should stay simple:
 
-- left/top area: quiz configuration,
-- center area: current question and answer options,
-- bottom/right area: explanation, citations, and final review,
+- Chat: planning, generation request, and interactive answering,
+- Space / Quiz Bank: historical review, explanation, citations, and final review,
 - no separate marketing or landing page.
 
-## 7. Implementation Phases
+## 7. Current Verification Flow
+
+The current implementation does not yet have a separate child agent or LLM
+verifier. It has a deterministic validation/check path after generation:
+
+1. `create_quiz` builds source material from a selected KB, Notebook entry,
+   explicit `source_text`, or Chat/Space material resolved before tool call.
+2. If a usable LLM config exists, `tutor_agent::quiz::generate_quiz_questions`
+   requests structured single-choice question JSON grounded in supplied source
+   chunks. Otherwise, the backend uses a deterministic fallback generator.
+3. Generated source indices are mapped to `QuizCitation` metadata. Citation text
+   is derived from the cited chunk and supporting quote when available.
+4. `validate_quiz_questions_for_storage` rejects questions with:
+   - empty stems,
+   - fewer than two options,
+   - a missing/nonexistent correct option,
+   - empty explanations,
+   - missing citations,
+   - empty citation text.
+5. The quiz is stored with a `QuizVerificationReport`. Today this report records
+   the validation method and issues, but it is not the output of an independent
+   LLM reviewer.
+
+The next hardening step is a controlled verifier stage that receives only source
+chunks plus candidate question JSON and returns structured `pass / revise /
+reject` output. It should not browse, introduce external facts, or behave like a
+free-form chat agent.
+
+## 8. Implementation Phases
 
 ### Phase 1: Product Shell
 
-- [x] Add Quiz navigation entry.
-- [x] Add Quiz page route/view.
+- [x] Add initial Quiz navigation entry.
+- [x] Add initial Quiz page route/view.
 - [x] Add configuration panel.
 - [x] Add empty state and generated-question mock view.
+- [x] Remove standalone Quiz navigation after Quiz Bank review parity.
 
 ### Phase 2: Persistence
 
@@ -235,6 +286,9 @@ V1 UI should stay simple:
 ### Phase 3: RAG-backed Generation
 
 - [x] Retrieve source chunks from selected knowledge base.
+- [x] Generate from conversation/source text.
+- [x] Generate from Notebook entries.
+- [x] Generate from `@` referenced Space material.
 - [x] Generate single-choice questions as strict JSON.
 - [x] Validate generated questions.
 - [x] Attach citations to questions.
@@ -254,14 +308,35 @@ V1 UI should stay simple:
 
 Note: V1 does not introduce separate quiz trace persistence. Future quiz generation trace should reuse runtime session/custom entries instead of adding another product-specific trace store.
 
-## 8. Acceptance Criteria
+### Phase 6: Chat Tool Flow
+
+- [x] Add `propose_quiz_plan` product tool.
+- [x] Add `create_quiz` product tool.
+- [x] Let Quiz capability keep normal chat behavior until the agent calls a tool.
+- [x] Save `create_quiz` output into Quiz Bank.
+- [x] Render generated quizzes as interactive Chat cards.
+- [ ] Add stronger provider-behavior QA so agents consistently plan before
+  generating when the request is ambiguous.
+
+### Phase 7: Verification Hardening
+
+- [x] Add deterministic validation before storage.
+- [x] Store `QuizVerificationReport`.
+- [ ] Add controlled LLM verifier stage.
+- [ ] Add structured verifier output.
+- [ ] Repair once and re-verify, then discard unresolved questions.
+- [ ] Add tests for answer/explanation/citation contradiction cases.
+
+## 9. Acceptance Criteria
 
 V1 is complete when:
 
-- a user can open Quiz from the sidebar,
-- create a quiz from an existing knowledge base,
+- a user can select Quiz in Chat,
+- discuss scope before generation,
+- create a quiz from an existing knowledge base, conversation, source text, or
+  Notebook entry,
 - answer every generated single-choice question,
 - see whether each answer is correct,
 - see explanation and citations,
 - finish with a score summary,
-- reload the app and see the quiz session restored.
+- reload the app and see the quiz session restored in Space / Quiz Bank.

@@ -511,11 +511,13 @@ Do not rush this simplification until Space is useful enough.
 - [x] Keep Quiz generation in chat only.
 - [x] Expose Quiz sessions and questions as Chat `@` mention targets.
 - [x] Add filters by source type later.
-- [ ] Redesign Quiz mode into an enabled Chat capability/tool instead of automatic generation on every send.
-- [ ] Add a `create_quiz` product tool that the agent can call after explicit user intent or plan confirmation.
-- [ ] Keep normal chat behavior while Quiz capability is enabled so the user can discuss quiz scope before generation.
-- [ ] Split latest user instruction from source material before calling quiz generation.
-- [ ] Add a controlled Quiz verifier stage after generation and before saving final questions.
+- [x] Redesign Quiz mode into an enabled Chat capability/tool instead of automatic generation on every send.
+- [x] Add a `create_quiz` product tool that the agent can call after explicit user intent or plan confirmation.
+- [x] Add a `propose_quiz_plan` product tool for scope discussion before generation.
+- [x] Keep normal chat behavior while Quiz capability is enabled so the user can discuss quiz scope before generation.
+- [x] Split latest user instruction from source material at the API/tool boundary with `kb_id`, `notebook_entry_id`, `source_text`, and `source_label`.
+- [x] Add deterministic Quiz validation before saving final questions.
+- [ ] Add a controlled LLM Quiz verifier stage after generation and before saving final questions.
 - [ ] Add structured verifier output for pass/revise/reject, issue list, citation support, and explanation consistency.
 - [ ] Add retry-or-discard behavior for failed generated questions.
 
