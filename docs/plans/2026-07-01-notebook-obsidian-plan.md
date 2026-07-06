@@ -770,7 +770,7 @@ and a richer conflict-resolution UI for path collisions.
 - [x] Debounce watcher events and batch index writes.
 - [x] Keep folder expansion and selected note state across tab switches.
 - [x] Add visible indexing status and last-refresh information.
-- [ ] Consider virtualized file-tree rendering once large Vaults are common.
+- [x] Add virtualized visible-row rendering for the Notebook file tree.
 
 ## 9. Open Questions
 

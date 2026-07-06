@@ -369,7 +369,7 @@ There is not yet a child agent or controlled LLM verifier that independently jud
 - REQ-830: The desktop app shall use a file watcher for bound Notebook Vault directories where possible, with debounced index updates. Status: implemented.
 - REQ-831: Notebook shall keep folder expansion state and selected note state stable across tab switches and non-destructive refreshes. Status: implemented.
 - REQ-832: Notebook shall show indexing status such as watching, refreshing, last refreshed time, and changed-file count when available. Status: implemented.
-- REQ-833: Notebook file tree rendering shall be designed to support large Vaults, including lazy folder expansion or virtualization when needed. Status: planned.
+- REQ-833: Notebook file tree rendering shall be designed to support large Vaults, including lazy folder expansion or virtualization when needed. Status: implemented with virtualized visible-row rendering.
 - REQ-834: Notebook shall use an editor-style data model where the Vault files, Notebook index, file watcher, frontend explorer, open note buffer, and relation panels are separate responsibilities. Status: planned.
 - REQ-835: Opening the Notebook page shall render from the current lightweight index first; full Markdown bodies and selected-note relations shall load only after a note is opened. Status: implemented for note body loading; relation-panel loading remains planned.
 - REQ-836: Notebook create-note and create-folder actions shall be scoped to the currently selected folder or an explicit target folder. Status: planned.

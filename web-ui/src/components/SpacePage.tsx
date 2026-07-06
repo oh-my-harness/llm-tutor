@@ -825,7 +825,7 @@ function NotebookTab({
           <div className="text-xs text-gray-500">{status}</div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="min-h-0 flex-1 px-3 py-4">
           {entries.length === 0 ? (
             <div className="rounded-lg px-3 py-8 text-center text-sm text-gray-400">No notebook entries yet</div>
           ) : (
@@ -833,7 +833,6 @@ function NotebookTab({
               nodes={notebookTree}
               activeEntryId={activeEntry?.id ?? null}
               expandedFolders={expandedFolders}
-              depth={0}
               onToggleFolder={toggleFolder}
               onSelectEntry={onSelectEntry}
               onCreateEntry={onCreateEntry}
@@ -1112,11 +1111,18 @@ type NotebookTreeNode =
       entry: NotebookEntry
     }
 
+type FlatNotebookTreeRow = {
+  node: NotebookTreeNode
+  depth: number
+}
+
+const NOTEBOOK_TREE_ROW_HEIGHT = 32
+const NOTEBOOK_TREE_OVERSCAN_ROWS = 12
+
 function NotebookFileTree({
   nodes,
   activeEntryId,
   expandedFolders,
-  depth,
   onToggleFolder,
   onSelectEntry,
   onCreateEntry,
@@ -1126,113 +1132,119 @@ function NotebookFileTree({
   nodes: NotebookTreeNode[]
   activeEntryId: string | null
   expandedFolders: Set<string>
-  depth: number
   onToggleFolder: (folderPath: string) => void
   onSelectEntry: (id: string) => void
   onCreateEntry: (folderPath?: string) => void
   onCreateFolder: (parentPath?: string) => void
   onDeleteEntry: (entry: NotebookEntry) => void
 }) {
-  return (
-    <div className={depth === 0 ? 'space-y-0.5' : 'space-y-0.5'}>
-      {nodes.map((node) => {
-        if (node.type === 'folder') {
-          const expanded = expandedFolders.has(node.path)
-          return (
-            <div key={node.path}>
-              <div
-                className="group flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm text-gray-700 hover:bg-white"
-                style={{ paddingLeft: `${8 + depth * 14}px` }}
-              >
-                <button className="flex min-w-0 flex-1 items-center gap-1.5 text-left" type="button" onClick={() => onToggleFolder(node.path)}>
-                  <ChevronDown
-                    size={14}
-                    className={`shrink-0 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`}
-                  />
-                  {expanded ? (
-                    <FolderOpen size={16} className="shrink-0 text-blue-500" />
-                  ) : (
-                    <Folder size={16} className="shrink-0 text-gray-500" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
-                </button>
-                <button
-                  className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
-                  type="button"
-                  title="New file here"
-                  onClick={() => onCreateEntry(node.path)}
-                >
-                  <FileText size={14} />
-                </button>
-                <button
-                  className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
-                  type="button"
-                  title="New folder here"
-                  onClick={() => onCreateFolder(node.path)}
-                >
-                  <Folder size={14} />
-                </button>
-              </div>
-              {expanded && (
-                <NotebookFileTree
-                  nodes={node.children}
-                  activeEntryId={activeEntryId}
-                  expandedFolders={expandedFolders}
-                  depth={depth + 1}
-                  onToggleFolder={onToggleFolder}
-                  onSelectEntry={onSelectEntry}
-                  onCreateEntry={onCreateEntry}
-                  onCreateFolder={onCreateFolder}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              )}
-            </div>
-          )
-        }
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(360)
+  const visibleRows = useMemo(() => flattenVisibleNotebookTree(nodes, expandedFolders), [nodes, expandedFolders])
+  const totalHeight = visibleRows.length * NOTEBOOK_TREE_ROW_HEIGHT
+  const startIndex = Math.max(0, Math.floor(scrollTop / NOTEBOOK_TREE_ROW_HEIGHT) - NOTEBOOK_TREE_OVERSCAN_ROWS)
+  const endIndex = Math.min(
+    visibleRows.length,
+    Math.ceil((scrollTop + viewportHeight) / NOTEBOOK_TREE_ROW_HEIGHT) + NOTEBOOK_TREE_OVERSCAN_ROWS,
+  )
+  const renderedRows = visibleRows.slice(startIndex, endIndex)
 
-        const entry = node.entry
-        const active = activeEntryId === entry.id
-        return (
-          <button
-            key={entry.id}
-            className={`group flex w-full items-start gap-2 rounded-md py-2 pr-2 text-left text-sm ${
-              active ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
-            }`}
-            style={{ paddingLeft: `${28 + depth * 14}px` }}
-            type="button"
-            title={entry.path ?? entry.title}
-            onClick={() => onSelectEntry(entry.id)}
-          >
-            <FileText size={16} className="mt-0.5 shrink-0 text-blue-600" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium text-gray-900">{entry.title}</span>
-              <span className="mt-0.5 block truncate text-xs text-gray-500">
-                {entry.path ?? entry.entry_type.replaceAll('_', ' ')}
-              </span>
-              {entry.tags && entry.tags.length > 0 && (
-                <span className="mt-1.5 flex flex-wrap gap-1">
-                  {entry.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
-                      #{tag}
-                    </span>
-                  ))}
+  useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+    const measure = () => setViewportHeight(element.clientHeight || 360)
+    measure()
+    const resizeObserver = new ResizeObserver(measure)
+    resizeObserver.observe(element)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full overflow-y-auto"
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+    >
+      <div className="relative" style={{ height: `${totalHeight}px` }}>
+        <div
+          className="absolute left-0 right-0 top-0"
+          style={{ transform: `translateY(${startIndex * NOTEBOOK_TREE_ROW_HEIGHT}px)` }}
+        >
+          {renderedRows.map(({ node, depth }) => {
+            if (node.type === 'folder') {
+              const expanded = expandedFolders.has(node.path)
+              return (
+                <div
+                  key={`folder:${node.path}`}
+                  className="group flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm text-gray-700 hover:bg-white"
+                  style={{ paddingLeft: `${8 + depth * 14}px` }}
+                >
+                  <button className="flex min-w-0 flex-1 items-center gap-1.5 text-left" type="button" onClick={() => onToggleFolder(node.path)}>
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`}
+                    />
+                    {expanded ? (
+                      <FolderOpen size={16} className="shrink-0 text-blue-500" />
+                    ) : (
+                      <Folder size={16} className="shrink-0 text-gray-500" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+                  </button>
+                  <button
+                    className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
+                    type="button"
+                    title="New file here"
+                    onClick={() => onCreateEntry(node.path)}
+                  >
+                    <FileText size={14} />
+                  </button>
+                  <button
+                    className="rounded p-1 text-gray-400 opacity-0 hover:bg-blue-50 hover:text-blue-700 group-hover:opacity-100"
+                    type="button"
+                    title="New folder here"
+                    onClick={() => onCreateFolder(node.path)}
+                  >
+                    <Folder size={14} />
+                  </button>
+                </div>
+              )
+            }
+
+            const entry = node.entry
+            const active = activeEntryId === entry.id
+            return (
+              <button
+                key={entry.id}
+                className={`group flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-sm ${
+                  active ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
+                }`}
+                style={{ paddingLeft: `${28 + depth * 14}px` }}
+                type="button"
+                title={entry.path ?? entry.title}
+                onClick={() => onSelectEntry(entry.id)}
+              >
+                <FileText size={16} className="shrink-0 text-blue-600" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-gray-900">{entry.title}</span>
                 </span>
-              )}
-            </span>
-            <span
-              role="button"
-              tabIndex={0}
-              className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
-              onClick={(event) => {
-                event.stopPropagation()
-                onDeleteEntry(entry)
-              }}
-            >
-              <Trash2 size={15} />
-            </span>
-          </button>
-        )
-      })}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="rounded p-1 text-gray-400 opacity-0 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDeleteEntry(entry)
+                  }}
+                >
+                  <Trash2 size={15} />
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1890,6 +1902,25 @@ function collectNotebookFolderPaths(nodes: NotebookTreeNode[]) {
   }
   visit(nodes)
   return paths
+}
+
+function flattenVisibleNotebookTree(
+  nodes: NotebookTreeNode[],
+  expandedFolders: Set<string>,
+  limit = Number.POSITIVE_INFINITY,
+) {
+  const rows: FlatNotebookTreeRow[] = []
+  const visit = (items: NotebookTreeNode[], depth: number) => {
+    for (const item of items) {
+      if (rows.length >= limit) return
+      rows.push({ node: item, depth })
+      if (item.type === 'folder' && expandedFolders.has(item.path)) {
+        visit(item.children, depth + 1)
+      }
+    }
+  }
+  visit(nodes, 0)
+  return rows
 }
 
 function notebookEntryPathSegments(entry: NotebookEntry) {
