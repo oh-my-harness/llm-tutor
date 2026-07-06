@@ -701,15 +701,15 @@ and a richer conflict-resolution UI for path collisions.
 
 ### Phase 6: Editor-Style Notebook Performance
 
-- [ ] Split Notebook tree/list responses from full note detail responses.
-- [ ] Remove Markdown bodies from the file browser/list payload.
-- [ ] Avoid automatic full Vault rescans on every Notebook tab open.
-- [ ] Add explicit `refresh`/`reconcile` API for the Vault index.
-- [ ] Track file stats in the index so unchanged files are skipped.
+- [x] Split Notebook tree/list responses from full note detail responses.
+- [x] Remove Markdown bodies from the file browser/list payload.
+- [x] Avoid automatic full Vault rescans on every Notebook tab open.
+- [x] Add explicit `refresh`/`reconcile` API for the Vault index.
+- [x] Track file stats in the index so unchanged files are skipped.
 - [ ] Add a desktop file watcher for bound Vault directories.
 - [ ] Debounce watcher events and batch index writes.
-- [ ] Keep folder expansion and selected note state across tab switches.
-- [ ] Add visible indexing status and last-refresh information.
+- [x] Keep folder expansion and selected note state across tab switches.
+- [x] Add visible indexing status and last-refresh information.
 - [ ] Consider virtualized file-tree rendering once large Vaults are common.
 
 ## 9. Open Questions

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -32,6 +33,10 @@ pub struct NotebookEntry {
     pub source_message_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_modified_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,6 +89,8 @@ pub struct NotebookEntryListItem {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub tags: Vec<String>,
+    pub file_size: Option<u64>,
+    pub file_modified_ms: Option<i64>,
 }
 
 pub struct NotebookStore {
@@ -118,6 +125,10 @@ struct NotebookIndexEntry {
     source_message_id: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    #[serde(default)]
+    file_size: Option<u64>,
+    #[serde(default)]
+    file_modified_ms: Option<i64>,
 }
 
 impl NotebookStore {
@@ -161,7 +172,9 @@ impl NotebookStore {
         }
         let root = path.canonicalize()?;
         let previous_items = self.items.lock().unwrap().clone();
-        let (entries, folders) = scan_vault_root(&root, &previous_items)?;
+        let scan = scan_vault_root(&root, &previous_items)?;
+        let entries = scan.entries;
+        let folders = scan.folders;
         fs::create_dir_all(
             self.config_path
                 .parent()
@@ -219,7 +232,9 @@ impl NotebookStore {
     pub fn refresh_from_vault(&self) -> Result<NotebookRefreshResult> {
         let root = self.vault_root.lock().unwrap().clone();
         let previous_items = self.items.lock().unwrap().clone();
-        let (entries, folders) = scan_vault_root(&root, &previous_items)?;
+        let scan = scan_vault_root(&root, &previous_items)?;
+        let entries = scan.entries;
+        let folders = scan.folders;
         let entry_count = entries.len();
         let folder_count = folders.len();
         {
@@ -234,6 +249,10 @@ impl NotebookStore {
         Ok(NotebookRefreshResult {
             entries: entry_count,
             folders: folder_count,
+            added: scan.added,
+            changed: scan.changed,
+            unchanged: scan.unchanged,
+            removed: scan.removed,
         })
     }
 
@@ -257,6 +276,8 @@ impl NotebookStore {
                 source_message_id: entry.source_message_id,
                 created_at: entry.created_at,
                 updated_at: entry.updated_at,
+                file_size: entry.file_size,
+                file_modified_ms: entry.file_modified_ms,
             })
             .collect()
     }
@@ -379,6 +400,8 @@ impl NotebookStore {
                 return Err(anyhow!("notebook markdown is empty"));
             }
             entry.markdown = markdown;
+            entry.file_size = None;
+            entry.file_modified_ms = None;
         }
         if let Some(metadata) = input.metadata {
             entry.metadata = Some(metadata);
@@ -425,7 +448,7 @@ impl NotebookStore {
             if let Some(parent) = markdown_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            if entry.markdown.is_empty() && markdown_path.exists() {
+            if should_skip_markdown_write(entry, &markdown_path) {
                 continue;
             }
             fs::write(markdown_path, &entry.markdown)?;
@@ -477,6 +500,10 @@ pub struct NotebookVaultMount {
 pub struct NotebookRefreshResult {
     pub entries: usize,
     pub folders: usize,
+    pub added: usize,
+    pub changed: usize,
+    pub unchanged: usize,
+    pub removed: usize,
 }
 
 impl NotebookIndexEntry {
@@ -492,6 +519,8 @@ impl NotebookIndexEntry {
             source_message_id: entry.source_message_id.clone(),
             created_at: entry.created_at,
             updated_at: entry.updated_at,
+            file_size: entry.file_size,
+            file_modified_ms: entry.file_modified_ms,
         }
     }
 
@@ -508,6 +537,8 @@ impl NotebookIndexEntry {
             source_message_id: self.source_message_id,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            file_size: self.file_size,
+            file_modified_ms: self.file_modified_ms,
         }
     }
 }
@@ -531,6 +562,8 @@ fn entry_from_input(
         source_message_id: clean_optional(input.source_message_id),
         created_at: now,
         updated_at: now,
+        file_size: None,
+        file_modified_ms: None,
     }
 }
 
@@ -566,13 +599,26 @@ fn load_config(config_path: &Path) -> Option<NotebookConfig> {
         .and_then(|text| serde_json::from_str::<NotebookConfig>(&text).ok())
 }
 
-fn scan_vault_root(
-    root: &Path,
-    previous_items: &[NotebookEntry],
-) -> Result<(Vec<NotebookEntry>, Vec<String>)> {
+struct VaultScan {
+    entries: Vec<NotebookEntry>,
+    folders: Vec<String>,
+    added: usize,
+    changed: usize,
+    unchanged: usize,
+    removed: usize,
+}
+
+#[derive(Debug, Clone)]
+struct VaultFile {
+    relative_path: String,
+    size: Option<u64>,
+    modified_ms: Option<i64>,
+}
+
+fn scan_vault_root(root: &Path, previous_items: &[NotebookEntry]) -> Result<VaultScan> {
     let mut files = Vec::new();
     collect_markdown_files(root, root, &mut files)?;
-    files.sort();
+    files.sort_by_key(|file| file.relative_path.to_lowercase());
 
     let previous_by_path = previous_items
         .iter()
@@ -586,21 +632,38 @@ fn scan_vault_root(
     let now = Utc::now();
     let mut entries = Vec::with_capacity(files.len());
     let mut folders = HashSet::new();
+    let mut seen_paths = HashSet::new();
+    let mut added = 0usize;
+    let mut changed = 0usize;
+    let mut unchanged = 0usize;
 
-    for relative_path in files {
-        let markdown = fs::read_to_string(root.join(&relative_path))?;
-        let title = title_from_note_path(&relative_path);
+    for file in files {
+        let relative_path = file.relative_path;
         let lower_path = relative_path.to_lowercase();
-        let mut entry = previous_by_path
-            .get(&lower_path)
-            .cloned()
-            .unwrap_or_else(|| NotebookEntry {
+        seen_paths.insert(lower_path.clone());
+        let title = title_from_note_path(&relative_path);
+        let previous = previous_by_path.get(&lower_path).cloned();
+        let unchanged_file = previous.as_ref().is_some_and(|entry| {
+            entry.file_size == file.size && entry.file_modified_ms == file.modified_ms
+        });
+        let mut entry = if let Some(mut entry) = previous {
+            if unchanged_file {
+                unchanged += 1;
+            } else {
+                changed += 1;
+                entry.markdown = fs::read_to_string(root.join(&relative_path))?;
+                entry.updated_at = now;
+            }
+            entry
+        } else {
+            added += 1;
+            NotebookEntry {
                 id: uuid::Uuid::new_v4().to_string(),
                 space_id: "default".into(),
                 entry_type: NotebookEntryType::Note,
                 title: title.clone(),
                 path: Some(relative_path.clone()),
-                markdown: String::new(),
+                markdown: fs::read_to_string(root.join(&relative_path))?,
                 metadata: Some(serde_json::json!({
                     "source": "external_vault",
                     "source_path": relative_path,
@@ -609,21 +672,35 @@ fn scan_vault_root(
                 source_message_id: None,
                 created_at: now,
                 updated_at: now,
-            });
+                file_size: None,
+                file_modified_ms: None,
+            }
+        };
         entry.title = title;
         entry.path = Some(relative_path);
-        entry.markdown = markdown;
-        entry.updated_at = now;
+        entry.file_size = file.size;
+        entry.file_modified_ms = file.modified_ms;
         add_parent_folders(&entry, &mut folders);
         entries.push(entry);
     }
 
     let mut folders = folders.into_iter().collect::<Vec<_>>();
     folders.sort_by_key(|folder| folder.to_lowercase());
-    Ok((entries, folders))
+    let removed = previous_by_path
+        .keys()
+        .filter(|path| !seen_paths.contains(*path))
+        .count();
+    Ok(VaultScan {
+        entries,
+        folders,
+        added,
+        changed,
+        unchanged,
+        removed,
+    })
 }
 
-fn collect_markdown_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<()> {
+fn collect_markdown_files(root: &Path, dir: &Path, files: &mut Vec<VaultFile>) -> Result<()> {
     for item in fs::read_dir(dir)? {
         let item = item?;
         let path = item.path();
@@ -642,10 +719,54 @@ fn collect_markdown_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> R
             .replace('\\', "/");
         let lower = relative_path.to_lowercase();
         if lower.ends_with(".md") || lower.ends_with(".markdown") {
-            files.push(relative_path);
+            let metadata = item.metadata().ok();
+            files.push(VaultFile {
+                relative_path,
+                size: metadata.as_ref().map(|metadata| metadata.len()),
+                modified_ms: metadata
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(system_time_to_epoch_ms),
+            });
         }
     }
     Ok(())
+}
+
+fn should_skip_markdown_write(entry: &NotebookEntry, path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    if entry.markdown.is_empty() {
+        return true;
+    }
+    let Some(expected_size) = entry.file_size else {
+        return false;
+    };
+    let Some(expected_modified_ms) = entry.file_modified_ms else {
+        return false;
+    };
+    let Some(stats) = vault_file_stats(path) else {
+        return false;
+    };
+    stats.size == Some(expected_size) && stats.modified_ms == Some(expected_modified_ms)
+}
+
+fn vault_file_stats(path: &Path) -> Option<VaultFileStats> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(VaultFileStats {
+        size: Some(metadata.len()),
+        modified_ms: metadata.modified().ok().and_then(system_time_to_epoch_ms),
+    })
+}
+
+struct VaultFileStats {
+    size: Option<u64>,
+    modified_ms: Option<i64>,
+}
+
+fn system_time_to_epoch_ms(time: SystemTime) -> Option<i64> {
+    let duration = time.duration_since(UNIX_EPOCH).ok()?;
+    i64::try_from(duration.as_millis()).ok()
 }
 
 fn title_from_note_path(path: &str) -> String {
@@ -1267,9 +1388,21 @@ mod tests {
         assert!(!listed.iter().any(|item| item.title == "External"));
         let refreshed = store.refresh_from_vault().unwrap();
         assert_eq!(refreshed.entries, 3);
+        assert_eq!(refreshed.added, 1);
+        assert!(refreshed.unchanged >= 1);
         let listed = store.list(Some("default"));
         assert!(listed.iter().any(|item| item.title == "External"));
         assert!(listed.iter().any(|item| item.id == entry.id));
+
+        let refreshed = store.refresh_from_vault().unwrap();
+        assert_eq!(refreshed.added, 0);
+        assert_eq!(refreshed.changed, 0);
+        assert_eq!(refreshed.unchanged, 3);
+
+        std::fs::remove_file(vault_root.join("External.md")).unwrap();
+        let refreshed = store.refresh_from_vault().unwrap();
+        assert_eq!(refreshed.entries, 2);
+        assert_eq!(refreshed.removed, 1);
     }
 
     #[test]
@@ -1307,6 +1440,8 @@ mod tests {
             source_message_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            file_size: None,
+            file_modified_ms: None,
         };
         let source = NotebookEntry {
             id: "source-1".into(),
@@ -1320,6 +1455,8 @@ mod tests {
             source_message_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            file_size: None,
+            file_modified_ms: None,
         };
         let entries = vec![target.clone(), source.clone()];
         let target_view = entry_view(target, &entries);

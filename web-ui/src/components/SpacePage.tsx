@@ -47,6 +47,8 @@ interface NotebookEntry {
   source_message_id?: string | null
   created_at: string
   updated_at: string
+  file_size?: number | null
+  file_modified_ms?: number | null
   tags?: string[]
   links?: NotebookLink[]
   backlinks?: NotebookBacklink[]
@@ -189,8 +191,19 @@ export function SpacePage({
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
       setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : null)
       if (forceVaultRefresh && data.refresh) {
-        const refresh = data.refresh as { entries?: number; folders?: number }
-        setStatus(`Vault refreshed: ${refresh.entries ?? entries.length} notes, ${refresh.folders ?? 0} folders`)
+        const refresh = data.refresh as {
+          entries?: number
+          folders?: number
+          added?: number
+          changed?: number
+          unchanged?: number
+          removed?: number
+        }
+        setStatus(
+          `Vault refreshed: ${refresh.entries ?? entries.length} notes, `
+          + `${refresh.added ?? 0} added, ${refresh.changed ?? 0} changed, `
+          + `${refresh.unchanged ?? 0} skipped, ${refresh.removed ?? 0} removed`,
+        )
       } else {
         setStatus(entries.length ? 'Notebook index loaded' : 'No notebook entries yet')
       }
