@@ -247,11 +247,79 @@ Notebook storage should use the file-backed vault layout directly:
 The old single-file `notebook_entries.json` format is not a supported storage
 format for this product direction.
 
+### Editor-Style File Browser and Indexing
+
+The Notebook UI should behave more like a local Markdown editor than a saved
+record list. The file browser must stay fast even when the bound Vault contains
+many folders and notes.
+
+Current first-slice behavior is intentionally simple but too expensive for a
+real Vault:
+
+- the Notebook list API refreshes from the Vault on each list call,
+- refresh recursively scans the whole Vault directory,
+- refresh reads every Markdown file body,
+- list summaries can trigger more than one full refresh,
+- the list payload still carries note Markdown in the flattened entry object,
+- detail loading and relation calculation can repeat the same broad work.
+
+This is acceptable for small demos, but it is not the target editor model.
+
+Target behavior:
+
+- file tree listing returns lightweight metadata only:
+  `id`, `title`, `path`, `entry_type`, `updated_at`, `size`, `mtime`, and basic
+  tag/frontmatter summary where already indexed;
+- note Markdown is loaded only when the user opens a note detail;
+- link, backlink, tag, and graph data are derived indexes that can be refreshed
+  separately from the visible file tree;
+- opening the Notebook tab should use the current in-memory index immediately
+  and avoid a blocking full Vault scan;
+- external Vault changes should be detected through a file watcher or explicit
+  refresh, not by rescanning the entire Vault for every UI navigation;
+- large folder trees should support lazy expansion and virtualized rendering if
+  the note count becomes large.
+
+Backend direction:
+
+- split the list API from the detail API:
+  - `GET /api/notebook/tree` returns folders and lightweight note summaries,
+  - `GET /api/notebook/entries/{id}` returns full Markdown and relation detail,
+  - `POST /api/notebook/refresh` explicitly refreshes or reconciles the Vault;
+- keep a `NotebookIndex` in memory with path, id, title, timestamps, file size,
+  and known derived metadata;
+- store enough file stat data in `index.json` to skip unchanged files during
+  refresh;
+- read changed Markdown files only when `mtime` or size changes, or when a file
+  is opened and no fresh content cache exists;
+- use a file watcher such as Rust `notify` for bound Vault directories when the
+  desktop backend is running;
+- debounce watcher events and batch index writes to avoid rewriting
+  `index.json` for every low-level file-system event.
+
+Frontend direction:
+
+- do not refresh the Notebook list every time the tab becomes visible if a
+  recent tree is already loaded;
+- keep the expanded folder state and selected note stable across tab switches;
+- render the file tree from lightweight summaries;
+- load note body, backlinks, and local graph data only after note selection;
+- provide a visible manual refresh action for users who suspect external file
+  changes have not been picked up yet;
+- surface indexing state such as `watching`, `refreshing`, `last refreshed`,
+  and `N changed files indexed`.
+
+Mature editors such as VS Code follow this split: the explorer is a metadata
+view over the file system, while file content, search indexes, symbols, and
+graph-like relations are loaded lazily or maintained by background watchers.
+Tutor Agent should adopt the same shape for Notebook instead of treating list
+navigation as an opportunity to fully rebuild the Vault.
+
 ## 4. UI Direction
 
 Notebook should feel like a compact knowledge workspace:
 
-- left pane: notes, filters, tags, import/export actions,
+- left pane: fast file tree, filters, and tags,
 - center pane: Markdown editor/preview,
 - right pane: backlinks, outgoing links, source metadata, agent edit proposal.
 
@@ -262,7 +330,7 @@ Near-term views:
 - edit,
 - backlinks,
 - tags,
-- import/export dialogs.
+- manual refresh and indexing status.
 
 Later views:
 
@@ -631,6 +699,19 @@ File-backed vault mode first implementation is now active. The remaining gaps
 are external file watching, attachment storage, link updates on path rename,
 and a richer conflict-resolution UI for path collisions.
 
+### Phase 6: Editor-Style Notebook Performance
+
+- [ ] Split Notebook tree/list responses from full note detail responses.
+- [ ] Remove Markdown bodies from the file browser/list payload.
+- [ ] Avoid automatic full Vault rescans on every Notebook tab open.
+- [ ] Add explicit `refresh`/`reconcile` API for the Vault index.
+- [ ] Track file stats in the index so unchanged files are skipped.
+- [ ] Add a desktop file watcher for bound Vault directories.
+- [ ] Debounce watcher events and batch index writes.
+- [ ] Keep folder expansion and selected note state across tab switches.
+- [ ] Add visible indexing status and last-refresh information.
+- [ ] Consider virtualized file-tree rendering once large Vaults are common.
+
 ## 9. Open Questions
 
 - Should note titles be globally unique inside one Space?
@@ -638,3 +719,5 @@ and a richer conflict-resolution UI for path collisions.
 - Should imported folders become tag prefixes, source metadata, or both?
 - Should attachments/assets live inside Notebook storage or a shared Space asset store?
 - Should Notebook export include Memory references, or only note content?
+- Should the first watcher implementation be desktop-only, or should server
+  deployments use periodic refresh plus explicit user refresh?

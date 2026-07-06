@@ -361,6 +361,15 @@ There is not yet a child agent or controlled LLM verifier that independently jud
 - REQ-822: Non-Organize modes may answer from explicitly referenced or associated Notebook content, but shall not initiate Notebook maintenance proposals unless the session is switched to Organize mode. Status: planned.
 - REQ-823: Notebook exploration tools shall be vault-aware and return stable ids together with paths, titles, entry types, tags, snippets, and link/backlink metadata where available. Status: planned.
 - REQ-824: Notebook maintenance tools shall remain proposal-only; applying changes shall require user confirmation and shall execute through product Notebook APIs, not direct agent file-system writes. Status: planned.
+- REQ-825: Notebook file browsing shall use lightweight tree/list metadata and shall not return full Markdown bodies in the file browser payload. Status: planned.
+- REQ-826: Notebook shall load full Markdown content only when a note is opened or explicitly read by an agent/product tool. Status: planned.
+- REQ-827: Notebook shall avoid a blocking full Vault rescan every time the Notebook tab is opened or revisited. Status: planned.
+- REQ-828: Notebook shall provide an explicit Vault refresh/reconcile operation for users to force external file changes to be indexed. Status: planned.
+- REQ-829: Notebook indexing shall track file stats such as relative path, modified time, and size so unchanged files can be skipped during refresh. Status: planned.
+- REQ-830: The desktop app shall use a file watcher for bound Notebook Vault directories where possible, with debounced index updates. Status: planned.
+- REQ-831: Notebook shall keep folder expansion state and selected note state stable across tab switches and non-destructive refreshes. Status: planned.
+- REQ-832: Notebook shall show indexing status such as watching, refreshing, last refreshed time, and changed-file count when available. Status: planned.
+- REQ-833: Notebook file tree rendering shall be designed to support large Vaults, including lazy folder expansion or virtualization when needed. Status: planned.
 
 ## 18. Quiz Bank
 
