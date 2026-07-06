@@ -315,6 +315,66 @@ graph-like relations are loaded lazily or maintained by background watchers.
 Tutor Agent should adopt the same shape for Notebook instead of treating list
 navigation as an opportunity to fully rebuild the Vault.
 
+### Mature Editor Model
+
+The Notebook editor should use an editor-style data model instead of a
+record-list model.
+
+In this model, the Vault is the source of truth for Markdown files, while the
+backend maintains a lightweight index and the frontend maintains UI state for
+open documents. Each layer has a separate responsibility:
+
+- file system: stores folders, Markdown files, and future assets;
+- Notebook index: stores stable ids, relative paths, file stats, titles, tags,
+  aliases, parsed links, backlinks, and product metadata;
+- file watcher: observes external changes and schedules debounced index
+  updates;
+- frontend explorer: renders folder and note metadata without reading note
+  bodies;
+- editor tabs or current document state: load and keep only opened note bodies;
+- relation panels: request backlinks, outgoing links, local graph, and metadata
+  for the selected note only.
+
+Expected lifecycle:
+
+1. App startup loads `notebook/index.json` and starts the watcher for the bound
+   Vault if available.
+2. Opening Notebook asks for the current tree from memory/index and should not
+   perform a blocking recursive scan.
+3. Expanding folders and filtering notes operate on lightweight tree metadata.
+4. Selecting a note loads that note's Markdown body and selected-note relation
+   detail.
+5. External file changes trigger watcher events, which are debounced, batched,
+   and reconciled into the index.
+6. Manual refresh remains available as a fallback when watcher events are missed
+   or the user changes files while the backend is not running.
+
+This is close to how mature local editors work: VS Code keeps an explorer model
+and file watcher, opens document buffers lazily, and runs heavier search or
+symbol work separately from ordinary navigation. Tutor Agent should follow this
+shape even if the first UI has only one visible editor pane.
+
+### Editor UX Target
+
+The first production-ready Notebook editor should provide:
+
+- a persistent folder tree with stable expansion and selection state;
+- a single-note Markdown editor/preview area, with room to evolve into tabs;
+- fast title/path rename flows that update the file path and index together;
+- create note and create folder actions scoped to the selected folder;
+- move/delete actions that update links or at least report affected links;
+- Obsidian-style `[[wiki links]]` rendering and navigation;
+- clear unresolved-link behavior, such as offering to create the target note;
+- a collapsible right panel for backlinks, outgoing links, tags, source
+  metadata, and local graph;
+- a compact status line for watcher/index state, current path, unsaved state,
+  and last saved time.
+
+The editor should prefer preserving user files over imposing product-specific
+serialization. Unknown frontmatter, comments, aliases, and Obsidian-compatible
+syntax should remain in the Markdown unless the user explicitly applies a
+normalization or organization proposal.
+
 ## 4. UI Direction
 
 Notebook should feel like a compact knowledge workspace:
@@ -706,8 +766,8 @@ and a richer conflict-resolution UI for path collisions.
 - [x] Avoid automatic full Vault rescans on every Notebook tab open.
 - [x] Add explicit `refresh`/`reconcile` API for the Vault index.
 - [x] Track file stats in the index so unchanged files are skipped.
-- [ ] Add a desktop file watcher for bound Vault directories.
-- [ ] Debounce watcher events and batch index writes.
+- [x] Add a desktop file watcher for bound Vault directories.
+- [x] Debounce watcher events and batch index writes.
 - [x] Keep folder expansion and selected note state across tab switches.
 - [x] Add visible indexing status and last-refresh information.
 - [ ] Consider virtualized file-tree rendering once large Vaults are common.

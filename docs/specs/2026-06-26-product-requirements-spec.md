@@ -366,10 +366,17 @@ There is not yet a child agent or controlled LLM verifier that independently jud
 - REQ-827: Notebook shall avoid a blocking full Vault rescan every time the Notebook tab is opened or revisited. Status: implemented.
 - REQ-828: Notebook shall provide an explicit Vault refresh/reconcile operation for users to force external file changes to be indexed. Status: implemented.
 - REQ-829: Notebook indexing shall track file stats such as relative path, modified time, and size so unchanged files can be skipped during refresh. Status: implemented.
-- REQ-830: The desktop app shall use a file watcher for bound Notebook Vault directories where possible, with debounced index updates. Status: planned.
+- REQ-830: The desktop app shall use a file watcher for bound Notebook Vault directories where possible, with debounced index updates. Status: implemented.
 - REQ-831: Notebook shall keep folder expansion state and selected note state stable across tab switches and non-destructive refreshes. Status: implemented.
-- REQ-832: Notebook shall show indexing status such as watching, refreshing, last refreshed time, and changed-file count when available. Status: partially implemented; explicit refresh shows changed-file counts, while watcher state remains planned.
+- REQ-832: Notebook shall show indexing status such as watching, refreshing, last refreshed time, and changed-file count when available. Status: implemented.
 - REQ-833: Notebook file tree rendering shall be designed to support large Vaults, including lazy folder expansion or virtualization when needed. Status: planned.
+- REQ-834: Notebook shall use an editor-style data model where the Vault files, Notebook index, file watcher, frontend explorer, open note buffer, and relation panels are separate responsibilities. Status: planned.
+- REQ-835: Opening the Notebook page shall render from the current lightweight index first; full Markdown bodies and selected-note relations shall load only after a note is opened. Status: implemented for note body loading; relation-panel loading remains planned.
+- REQ-836: Notebook create-note and create-folder actions shall be scoped to the currently selected folder or an explicit target folder. Status: planned.
+- REQ-837: Notebook rename, move, and delete actions shall update the Markdown file path and Notebook index together and shall report affected links when link rewriting is not performed automatically. Status: planned.
+- REQ-838: Notebook shall render Obsidian-style `[[wiki links]]` as navigable internal links and shall provide a clear unresolved-link path such as creating the missing target note. Status: partially implemented; link parsing and basic navigation exist, unresolved-link creation remains planned.
+- REQ-839: Notebook shall provide a collapsible selected-note information panel for backlinks, outgoing links, tags, source metadata, and local graph. Status: partially implemented; panel and collapse behavior exist, richer relation detail remains planned.
+- REQ-840: Notebook shall preserve user Markdown as much as possible, including unknown frontmatter, comments, aliases, and Obsidian-compatible syntax, unless the user explicitly applies a normalization or organization proposal. Status: planned.
 
 ## 18. Quiz Bank
 

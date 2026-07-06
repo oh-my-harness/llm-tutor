@@ -35,6 +35,9 @@ async fn main() -> anyhow::Result<()> {
     let notebook = std::sync::Arc::new(notebook_store::NotebookStore::new_with_path(
         config.data_dir.join("notebook"),
     ));
+    if let Err(error) = notebook.start_watcher() {
+        eprintln!("failed to start notebook vault watcher: {error}");
+    }
     let memory = std::sync::Arc::new(memory_store::MemoryStore::new_with_root(
         config.data_dir.join("memory"),
     ));

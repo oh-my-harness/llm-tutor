@@ -75,6 +75,21 @@ interface NotebookFolder {
   path: string
 }
 
+interface NotebookWatchInfo {
+  watching?: boolean
+  root?: string | null
+  last_refreshed_at?: string | null
+  last_result?: {
+    entries?: number
+    folders?: number
+    added?: number
+    changed?: number
+    unchanged?: number
+    removed?: number
+  } | null
+  last_error?: string | null
+}
+
 interface MemoryFile {
   path: string
   level: string
@@ -186,6 +201,7 @@ export function SpacePage({
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
+      const watch = (data.watch ?? null) as NotebookWatchInfo | null
       setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
       setNotebookEntries(entries)
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
@@ -205,7 +221,12 @@ export function SpacePage({
           + `${refresh.unchanged ?? 0} skipped, ${refresh.removed ?? 0} removed`,
         )
       } else {
-        setStatus(entries.length ? 'Notebook index loaded' : 'No notebook entries yet')
+        const watchText = watch?.last_error
+          ? `watch error: ${watch.last_error}`
+          : watch?.watching
+            ? 'watching vault'
+            : 'watcher off'
+        setStatus(entries.length ? `Notebook index loaded · ${watchText}` : `No notebook entries yet · ${watchText}`)
       }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))

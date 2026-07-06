@@ -81,6 +81,7 @@ async fn list_entries(
             "entries": state.store.list_summaries(space_id),
             "folders": state.store.list_folders(),
             "vault": state.store.vault_info(),
+            "watch": state.store.watch_info(),
         })),
     )
 }
@@ -96,6 +97,7 @@ async fn list_tree(
             "entries": state.store.list_items(space_id),
             "folders": state.store.list_folders(),
             "vault": state.store.vault_info(),
+            "watch": state.store.watch_info(),
         })),
     )
 }
@@ -109,6 +111,7 @@ async fn refresh_vault(State(state): State<NotebookState>) -> impl IntoResponse 
                 "entries": state.store.list_items(Some("default")),
                 "folders": state.store.list_folders(),
                 "vault": state.store.vault_info(),
+                "watch": state.store.watch_info(),
             })),
         )
             .into_response(),
@@ -121,6 +124,7 @@ async fn get_vault(State(state): State<NotebookState>) -> impl IntoResponse {
         StatusCode::OK,
         Json(serde_json::json!({
             "vault": state.store.vault_info(),
+            "watch": state.store.watch_info(),
         })),
     )
 }
@@ -131,6 +135,7 @@ async fn bind_vault(
 ) -> impl IntoResponse {
     match state.store.set_vault_root(PathBuf::from(req.path)) {
         Ok(mount) => {
+            let watch = state.store.start_watcher().ok();
             let _ = state.memory.record_event(
                 MemoryEventCategory::Notebook,
                 "bound_vault",
@@ -147,6 +152,7 @@ async fn bind_vault(
                     "vault": mount.vault,
                     "entries": mount.entries,
                     "folders": mount.folders,
+                    "watch": watch.unwrap_or_else(|| state.store.watch_info()),
                 })),
             )
                 .into_response()

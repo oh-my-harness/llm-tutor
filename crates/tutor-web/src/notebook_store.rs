@@ -1,11 +1,18 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+    mpsc,
+};
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,6 +106,9 @@ pub struct NotebookStore {
     vault_root: Mutex<PathBuf>,
     items: Mutex<Vec<NotebookEntry>>,
     folders: Mutex<HashSet<String>>,
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    watcher_generation: AtomicU64,
+    watch_status: Mutex<NotebookWatchStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -150,6 +160,9 @@ impl NotebookStore {
             vault_root: Mutex::new(vault_root),
             items: Mutex::new(items),
             folders: Mutex::new(folders.into_iter().collect()),
+            watcher: Mutex::new(None),
+            watcher_generation: AtomicU64::new(0),
+            watch_status: Mutex::new(NotebookWatchStatus::default()),
         }
     }
 
@@ -254,6 +267,71 @@ impl NotebookStore {
             unchanged: scan.unchanged,
             removed: scan.removed,
         })
+    }
+
+    pub fn start_watcher(self: &Arc<Self>) -> Result<NotebookWatchInfo> {
+        let root = self.vault_root.lock().unwrap().clone();
+        let generation = self.watcher_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let (tx, rx) = mpsc::channel::<()>();
+        let store = Arc::downgrade(self);
+        thread::spawn(move || {
+            while rx.recv().is_ok() {
+                thread::sleep(Duration::from_millis(350));
+                while rx.try_recv().is_ok() {}
+                let Some(store) = store.upgrade() else {
+                    break;
+                };
+                if store.watcher_generation.load(Ordering::SeqCst) != generation {
+                    break;
+                }
+                let result = store.refresh_from_vault();
+                let mut status = store.watch_status.lock().unwrap();
+                match result {
+                    Ok(refresh) => {
+                        status.watching = true;
+                        status.root = Some(
+                            store
+                                .vault_root
+                                .lock()
+                                .unwrap()
+                                .to_string_lossy()
+                                .to_string(),
+                        );
+                        status.last_refreshed_at = Some(Utc::now());
+                        status.last_result = Some(refresh);
+                        status.last_error = None;
+                    }
+                    Err(error) => {
+                        status.last_error = Some(error.to_string());
+                    }
+                }
+            }
+        });
+
+        let mut watcher = RecommendedWatcher::new(
+            move |event: notify::Result<notify::Event>| {
+                if event.is_ok() {
+                    let _ = tx.send(());
+                }
+            },
+            Config::default(),
+        )?;
+        watcher.watch(&root, RecursiveMode::Recursive)?;
+        {
+            let mut status = self.watch_status.lock().unwrap();
+            status.watching = true;
+            status.root = Some(root.to_string_lossy().to_string());
+            status.last_error = None;
+        }
+        {
+            let mut current = self.watcher.lock().unwrap();
+            *current = Some(watcher);
+        }
+        Ok(self.watch_info())
+    }
+
+    pub fn watch_info(&self) -> NotebookWatchInfo {
+        self.watch_status.lock().unwrap().clone().into()
     }
 
     pub fn list_views(&self, space_id: Option<&str>) -> Vec<NotebookEntryView> {
@@ -504,6 +582,36 @@ pub struct NotebookRefreshResult {
     pub changed: usize,
     pub unchanged: usize,
     pub removed: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct NotebookWatchStatus {
+    watching: bool,
+    root: Option<String>,
+    last_refreshed_at: Option<DateTime<Utc>>,
+    last_result: Option<NotebookRefreshResult>,
+    last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NotebookWatchInfo {
+    pub watching: bool,
+    pub root: Option<String>,
+    pub last_refreshed_at: Option<DateTime<Utc>>,
+    pub last_result: Option<NotebookRefreshResult>,
+    pub last_error: Option<String>,
+}
+
+impl From<NotebookWatchStatus> for NotebookWatchInfo {
+    fn from(value: NotebookWatchStatus) -> Self {
+        Self {
+            watching: value.watching,
+            root: value.root,
+            last_refreshed_at: value.last_refreshed_at,
+            last_result: value.last_result,
+            last_error: value.last_error,
+        }
+    }
 }
 
 impl NotebookIndexEntry {
@@ -1403,6 +1511,36 @@ mod tests {
         let refreshed = store.refresh_from_vault().unwrap();
         assert_eq!(refreshed.entries, 2);
         assert_eq!(refreshed.removed, 1);
+    }
+
+    #[test]
+    fn notebook_store_watcher_indexes_external_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_root = dir.path().join("watched-vault");
+        std::fs::create_dir_all(&vault_root).unwrap();
+        let store = std::sync::Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
+        store.set_vault_root(vault_root.clone()).unwrap();
+        let watch = store.start_watcher().unwrap();
+        assert!(watch.watching);
+
+        std::fs::write(vault_root.join("Watched.md"), "# Watched").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if store
+                .list(Some("default"))
+                .iter()
+                .any(|entry| entry.title == "Watched")
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "watcher did not index created note"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+        let watch = store.watch_info();
+        assert!(watch.last_result.is_some());
     }
 
     #[test]
