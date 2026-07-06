@@ -71,6 +71,21 @@ pub struct NotebookEntrySummary {
     pub backlinks: Vec<NotebookBacklink>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct NotebookEntryListItem {
+    pub id: String,
+    pub space_id: String,
+    pub entry_type: NotebookEntryType,
+    pub title: String,
+    pub path: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub source_session_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub tags: Vec<String>,
+}
+
 pub struct NotebookStore {
     index_path: PathBuf,
     config_path: PathBuf,
@@ -179,7 +194,6 @@ impl NotebookStore {
     }
 
     pub fn list(&self, space_id: Option<&str>) -> Vec<NotebookEntry> {
-        let _ = self.refresh_from_vault();
         let mut items: Vec<_> = self
             .items
             .lock()
@@ -193,19 +207,21 @@ impl NotebookStore {
     }
 
     pub fn get(&self, id: &str) -> Option<NotebookEntry> {
-        let _ = self.refresh_from_vault();
         self.items
             .lock()
             .unwrap()
             .iter()
             .find(|item| item.id == id)
             .cloned()
+            .map(|entry| self.hydrate_entry(entry))
     }
 
-    fn refresh_from_vault(&self) -> Result<()> {
+    pub fn refresh_from_vault(&self) -> Result<NotebookRefreshResult> {
         let root = self.vault_root.lock().unwrap().clone();
         let previous_items = self.items.lock().unwrap().clone();
         let (entries, folders) = scan_vault_root(&root, &previous_items)?;
+        let entry_count = entries.len();
+        let folder_count = folders.len();
         {
             let mut items = self.items.lock().unwrap();
             *items = entries.clone();
@@ -215,17 +231,39 @@ impl NotebookStore {
             stored_folders.extend(folders);
             self.save_index_locked(&entries, &stored_folders)?;
         }
-        Ok(())
+        Ok(NotebookRefreshResult {
+            entries: entry_count,
+            folders: folder_count,
+        })
     }
 
     pub fn list_views(&self, space_id: Option<&str>) -> Vec<NotebookEntryView> {
-        let entries = self.list(space_id);
+        let entries = self.list_hydrated(space_id);
         entry_views(&entries)
     }
 
+    pub fn list_items(&self, space_id: Option<&str>) -> Vec<NotebookEntryListItem> {
+        self.list(space_id)
+            .into_iter()
+            .map(|entry| NotebookEntryListItem {
+                tags: metadata_tags(entry.metadata.as_ref()),
+                id: entry.id,
+                space_id: entry.space_id,
+                entry_type: entry.entry_type,
+                title: entry.title,
+                path: entry.path,
+                metadata: entry.metadata,
+                source_session_id: entry.source_session_id,
+                source_message_id: entry.source_message_id,
+                created_at: entry.created_at,
+                updated_at: entry.updated_at,
+            })
+            .collect()
+    }
+
     pub fn list_summaries(&self, space_id: Option<&str>) -> Vec<NotebookEntrySummary> {
-        let entries = self.list(space_id);
-        let all_entries = self.list(None);
+        let entries = self.list_hydrated(space_id);
+        let all_entries = self.list_hydrated(None);
         entries
             .into_iter()
             .map(|entry| entry_summary(entry, &all_entries))
@@ -233,9 +271,26 @@ impl NotebookStore {
     }
 
     pub fn get_view(&self, id: &str) -> Option<NotebookEntryView> {
-        let entries = self.list(None);
+        let entries = self.list_hydrated(None);
         let entry = entries.iter().find(|item| item.id == id)?.clone();
         Some(entry_view(entry, &entries))
+    }
+
+    fn list_hydrated(&self, space_id: Option<&str>) -> Vec<NotebookEntry> {
+        self.list(space_id)
+            .into_iter()
+            .map(|entry| self.hydrate_entry(entry))
+            .collect()
+    }
+
+    fn hydrate_entry(&self, mut entry: NotebookEntry) -> NotebookEntry {
+        if let Some(path) = entry.path.as_ref() {
+            let vault_root = self.vault_root.lock().unwrap().clone();
+            if let Ok(markdown) = fs::read_to_string(vault_root.join(path)) {
+                entry.markdown = markdown;
+            }
+        }
+        entry
     }
 
     pub fn list_folders(&self) -> Vec<String> {
@@ -259,7 +314,7 @@ impl NotebookStore {
         let items = self.items.lock().unwrap();
         let mut folders = self.folders.lock().unwrap();
         folders.insert(folder.clone());
-        self.save_locked(&items, &folders)?;
+        self.save_index_locked(&items, &folders)?;
         Ok(folder)
     }
 
@@ -370,6 +425,9 @@ impl NotebookStore {
             if let Some(parent) = markdown_path.parent() {
                 fs::create_dir_all(parent)?;
             }
+            if entry.markdown.is_empty() && markdown_path.exists() {
+                continue;
+            }
             fs::write(markdown_path, &entry.markdown)?;
         }
         self.save_index_locked(items, folders)?;
@@ -413,6 +471,12 @@ pub struct NotebookVaultMount {
     pub vault: NotebookVaultInfo,
     pub entries: Vec<NotebookEntry>,
     pub folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NotebookRefreshResult {
+    pub entries: usize,
+    pub folders: usize,
 }
 
 impl NotebookIndexEntry {
@@ -472,7 +536,7 @@ fn entry_from_input(
 
 fn load_file_backed_entries(
     index_path: &Path,
-    vault_root: &Path,
+    _vault_root: &Path,
 ) -> Result<(Vec<NotebookEntry>, Vec<String>)> {
     if !index_path.exists() {
         return Err(anyhow!("notebook index not found"));
@@ -481,8 +545,7 @@ fn load_file_backed_entries(
     let index = parse_notebook_index(&text)?;
     let mut entries = Vec::with_capacity(index.entries.len());
     for item in index.entries {
-        let markdown = fs::read_to_string(vault_root.join(&item.path)).unwrap_or_default();
-        entries.push(item.into_entry(markdown));
+        entries.push(item.into_entry(String::new()));
     }
     Ok((entries, normalize_folder_paths(index.folders)))
 }
@@ -1200,6 +1263,10 @@ mod tests {
         assert!(!app_root.join("vault").join("new").join("OPC.md").exists());
 
         std::fs::write(vault_root.join("External.md"), "# External").unwrap();
+        let listed = store.list(Some("default"));
+        assert!(!listed.iter().any(|item| item.title == "External"));
+        let refreshed = store.refresh_from_vault().unwrap();
+        assert_eq!(refreshed.entries, 3);
         let listed = store.list(Some("default"));
         assert!(listed.iter().any(|item| item.title == "External"));
         assert!(listed.iter().any(|item| item.id == entry.id));

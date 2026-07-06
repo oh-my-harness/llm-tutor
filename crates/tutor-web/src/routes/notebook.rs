@@ -85,6 +85,37 @@ async fn list_entries(
     )
 }
 
+async fn list_tree(
+    State(state): State<NotebookState>,
+    Query(query): Query<ListNotebookQuery>,
+) -> impl IntoResponse {
+    let space_id = query.space_id.as_deref();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "entries": state.store.list_items(space_id),
+            "folders": state.store.list_folders(),
+            "vault": state.store.vault_info(),
+        })),
+    )
+}
+
+async fn refresh_vault(State(state): State<NotebookState>) -> impl IntoResponse {
+    match state.store.refresh_from_vault() {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "refresh": result,
+                "entries": state.store.list_items(Some("default")),
+                "folders": state.store.list_folders(),
+                "vault": state.store.vault_info(),
+            })),
+        )
+            .into_response(),
+        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    }
+}
+
 async fn get_vault(State(state): State<NotebookState>) -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -462,10 +493,9 @@ async fn export_obsidian_vault_zip(
 pub fn notebook_router(store: Arc<NotebookStore>, memory: Arc<MemoryStore>) -> Router {
     let state = NotebookState { store, memory };
     Router::new()
-        .route(
-            "/api/notebook/entries",
-            get(list_entries).post(create_entry),
-        )
+        .route("/api/notebook/entries", get(list_tree).post(create_entry))
+        .route("/api/notebook/entries/full", get(list_entries))
+        .route("/api/notebook/refresh", axum::routing::post(refresh_vault))
         .route(
             "/api/notebook/entries/{entry_id}",
             get(get_entry).patch(update_entry).delete(delete_entry),
@@ -1103,6 +1133,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(body["entries"][0]["title"], "Report");
+        assert!(body["entries"][0].get("markdown").is_none());
         assert_eq!(body["folders"][0], "concepts");
         assert_eq!(body["folders"][1], "concepts/lithography");
 
@@ -1181,7 +1213,29 @@ mod tests {
         let body = response_json(response).await;
         assert_eq!(body["entries"][0]["tags"][0], "opc");
         assert_eq!(body["entries"][0]["tags"][1], "optics");
-        assert_eq!(body["entries"][0]["links"][0]["target"], "Lithography");
+        assert!(body["entries"][0].get("markdown").is_none());
+
+        let entry_id = body["entries"][0]["id"].as_str().unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/api/notebook/entries/{entry_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert!(
+            body["entry"]["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("[[Lithography]]")
+        );
+        assert_eq!(body["entry"]["links"][0]["target"], "Lithography");
         assert!(!memory.recent_events(10).unwrap().is_empty());
     }
 

@@ -41,7 +41,7 @@ interface NotebookEntry {
   entry_type: 'note' | 'research_report' | 'chat_answer' | 'source_snippet' | 'quiz_summary' | 'deep_solve_result'
   title: string
   path?: string | null
-  markdown: string
+  markdown?: string
   metadata?: Record<string, unknown> | null
   source_session_id?: string | null
   source_message_id?: string | null
@@ -172,18 +172,28 @@ export function SpacePage({
     }
   }, [])
 
-  const refreshNotebook = useCallback(async () => {
+  const refreshNotebook = useCallback(async (forceVaultRefresh = false) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/notebook/entries?space_id=default')
+      const res = await fetch(
+        forceVaultRefresh
+          ? '/api/notebook/refresh'
+          : '/api/notebook/entries?space_id=default',
+        forceVaultRefresh ? { method: 'POST' } : undefined,
+      )
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
       setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
       setNotebookEntries(entries)
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
-      setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
-      setStatus(entries.length ? 'Notebook entries loaded' : 'No notebook entries yet')
+      setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : null)
+      if (forceVaultRefresh && data.refresh) {
+        const refresh = data.refresh as { entries?: number; folders?: number }
+        setStatus(`Vault refreshed: ${refresh.entries ?? entries.length} notes, ${refresh.folders ?? 0} folders`)
+      } else {
+        setStatus(entries.length ? 'Notebook index loaded' : 'No notebook entries yet')
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -278,7 +288,7 @@ export function SpacePage({
   }, [focusTarget, notebookEntries, quizzes])
 
   const refreshActiveTab = () => {
-    if (activeTab === 'notebook') void refreshNotebook()
+    if (activeTab === 'notebook') void refreshNotebook(true)
     else if (activeTab === 'quiz_bank') void refreshQuizzes()
     else void refreshMemory()
   }
@@ -388,7 +398,7 @@ export function SpacePage({
   const startEditNotebookEntry = (entry: NotebookEntry) => {
     setEditingNotebookId(entry.id)
     setEditTitle(entry.title)
-    setEditMarkdown(entry.markdown)
+    setEditMarkdown(entry.markdown ?? '')
   }
 
   const cancelEditNotebookEntry = () => {
