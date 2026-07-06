@@ -1,14 +1,17 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity,
+  BookMarked,
   Brain,
   Database,
+  Download,
   FolderOpen,
   Globe2,
   Palette,
   Plus,
   SlidersHorizontal,
   Trash2,
+  Upload,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -47,10 +50,41 @@ const providerOptions: { value: LlmProvider; label: string; description: string 
   },
 ]
 
-type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'governance'
+type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'notebook' | 'governance'
 type ConfigTestState = {
   status: 'running' | 'ok' | 'error'
   message: string
+}
+
+interface NotebookImportPreviewItem {
+  source_path: string
+  title: string
+  markdown_chars: number
+  tags: string[]
+  duplicate_title_entry_id?: string | null
+  duplicate_title?: string | null
+}
+
+interface NotebookImportSkipped {
+  file_name: string
+  reason: string
+}
+
+interface NotebookImportPreview {
+  items: NotebookImportPreviewItem[]
+  skipped: NotebookImportSkipped[]
+  conflict_count: number
+}
+
+interface NotebookImportResult {
+  imported_count: number
+  skipped: NotebookImportSkipped[]
+}
+
+interface NotebookVault {
+  root: string
+  external: boolean
+  entries: number
 }
 
 const settingsTabs: Array<{
@@ -61,12 +95,14 @@ const settingsTabs: Array<{
     | 'settings.tabs.embedding'
     | 'settings.tabs.search'
     | 'settings.tabs.governance'
+    | 'space.tabs.notebook'
   icon: LucideIcon
 }> = [
   { key: 'appearance', labelKey: 'settings.tabs.appearance', icon: Palette },
   { key: 'llm', labelKey: 'settings.tabs.llm', icon: Brain },
   { key: 'embedding', labelKey: 'settings.tabs.embedding', icon: Database },
   { key: 'search', labelKey: 'settings.tabs.search', icon: Globe2 },
+  { key: 'notebook', labelKey: 'space.tabs.notebook', icon: BookMarked },
   { key: 'governance', labelKey: 'settings.tabs.governance', icon: SlidersHorizontal },
 ]
 
@@ -76,6 +112,13 @@ export function SettingsPage({ settings, onChange }: Props) {
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
   const [dataDir, setDataDir] = useState<string | null>(null)
   const [dataDirError, setDataDirError] = useState('')
+  const [notebookVault, setNotebookVault] = useState<NotebookVault | null>(null)
+  const [notebookStatus, setNotebookStatus] = useState('Notebook settings ready')
+  const [notebookLoading, setNotebookLoading] = useState(false)
+  const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([])
+  const [importPreview, setImportPreview] = useState<NotebookImportPreview | null>(null)
+  const [importResult, setImportResult] = useState<NotebookImportResult | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -91,12 +134,153 @@ export function SettingsPage({ settings, onChange }: Props) {
     }
   }, [])
 
+  const refreshNotebookStatus = async () => {
+    setNotebookLoading(true)
+    try {
+      const res = await fetch('/api/notebook/entries?space_id=default')
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      setNotebookVault((data.vault ?? null) as NotebookVault | null)
+      const entries = Array.isArray(data.entries) ? data.entries.length : 0
+      setNotebookStatus(entries ? `${entries} notes loaded` : 'No notebook notes yet')
+    } catch (err) {
+      setNotebookStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNotebookLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshNotebookStatus()
+  }, [])
+
   const update = <K extends keyof LlmSettings>(key: K, value: LlmSettings[K]) => {
     onChange({ ...settings, [key]: value })
   }
 
   const setLanguage = (language: UiLanguage) => {
     onChange({ ...settings, language })
+  }
+
+  const previewNotebookFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const nextFiles = Array.from(files)
+    const form = new FormData()
+    form.append('space_id', 'default')
+    nextFiles.forEach((file) => form.append('file', file))
+    setPendingImportFiles(nextFiles)
+    setImportPreview(null)
+    setImportResult(null)
+    setNotebookLoading(true)
+    try {
+      const res = await fetch('/api/notebook/import/preview', {
+        method: 'POST',
+        body: form,
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const preview = data as unknown as NotebookImportPreview
+      setImportPreview(preview)
+      setNotebookStatus(`Previewed ${preview.items.length} note${preview.items.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      setPendingImportFiles([])
+      setNotebookStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNotebookLoading(false)
+    }
+  }
+
+  const importNotebookFiles = async () => {
+    if (pendingImportFiles.length === 0) return
+    const form = new FormData()
+    form.append('space_id', 'default')
+    pendingImportFiles.forEach((file) => form.append('file', file))
+    setNotebookLoading(true)
+    try {
+      const res = await fetch('/api/notebook/import', {
+        method: 'POST',
+        body: form,
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const imported = Array.isArray(data.entries) ? data.entries.length : 0
+      const skippedItems = Array.isArray(data.skipped) ? data.skipped as NotebookImportSkipped[] : []
+      setImportResult({ imported_count: imported, skipped: skippedItems })
+      setPendingImportFiles([])
+      setImportPreview(null)
+      setNotebookStatus(`Imported ${imported} note${imported === 1 ? '' : 's'}${skippedItems.length ? `, skipped ${skippedItems.length}` : ''}`)
+      await refreshNotebookStatus()
+    } catch (err) {
+      setNotebookStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNotebookLoading(false)
+    }
+  }
+
+  const bindNotebookVault = async (folderPath: string) => {
+    if (!folderPath.trim()) return
+    setPendingImportFiles([])
+    setImportPreview(null)
+    setImportResult(null)
+    setNotebookLoading(true)
+    try {
+      const res = await fetch('/api/notebook/vault', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: folderPath }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      setNotebookVault((data.vault ?? null) as NotebookVault | null)
+      setNotebookStatus(`Bound notebook vault: ${(data.vault as NotebookVault | undefined)?.root ?? folderPath}`)
+    } catch (err) {
+      setNotebookStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNotebookLoading(false)
+    }
+  }
+
+  const chooseNotebookFolder = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Bind Notebook Vault folder',
+      })
+      if (typeof selected === 'string') {
+        await bindNotebookVault(selected)
+      }
+    } catch {
+      window.alert('Vault folder binding is available in the Tauri desktop app.')
+    }
+  }
+
+  const cancelNotebookImport = () => {
+    setPendingImportFiles([])
+    setImportPreview(null)
+    setNotebookStatus('Import cancelled')
+  }
+
+  const exportNotebookArchive = async (kind: 'backup' | 'vault') => {
+    setNotebookLoading(true)
+    try {
+      const path = kind === 'backup'
+        ? '/api/notebook/export.zip?space_id=default'
+        : '/api/notebook/export-vault.zip?space_id=default'
+      const res = await fetch(path)
+      if (!res.ok) {
+        const data = await safeJson(res)
+        throw new Error(errorMessage(data, res.status))
+      }
+      const blob = await res.blob()
+      downloadBlob(blob, kind === 'backup' ? 'notebook-export.zip' : 'notebook-vault.zip')
+      setNotebookStatus(kind === 'backup' ? 'Exported notebook backup' : 'Exported Obsidian vault')
+    } catch (err) {
+      setNotebookStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNotebookLoading(false)
+    }
   }
 
   const activeLlmConfig =
@@ -798,6 +982,189 @@ export function SettingsPage({ settings, onChange }: Props) {
             </SettingsPanel>
           )}
 
+          {activeTab === 'notebook' && (
+            <SettingsPanel icon={BookMarked} title="笔记本" description="管理 Notebook 根目录、导入、导出和备份。">
+              <input
+                ref={importInputRef}
+                className="hidden"
+                type="file"
+                accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
+                multiple
+                onChange={(event) => {
+                  void previewNotebookFiles(event.currentTarget.files)
+                  event.currentTarget.value = ''
+                }}
+              />
+
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-4">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                    <FolderOpen size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900">笔记本根目录</div>
+                    <div className="mt-1 break-all font-mono text-xs text-gray-500">
+                      {notebookVault?.root ?? '未绑定外部 Vault，使用应用本地 Notebook 存储。'}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5">
+                        {notebookVault?.external ? 'Bound vault' : 'Local vault'}
+                      </span>
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5">
+                        {notebookVault?.entries ?? 0} notes
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={notebookLoading}
+                    onClick={() => void chooseNotebookFolder()}
+                  >
+                    <FolderOpen size={15} />
+                    选择文件夹
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={notebookLoading}
+                    onClick={() => void refreshNotebookStatus()}
+                  >
+                    刷新
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <section className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                      <Upload size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900">导入 Notebook</h4>
+                      <p className="mt-1 text-sm text-gray-500">导入 Markdown 文件或 zip。桌面端推荐直接绑定 Vault 文件夹。</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-4 inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
+                    disabled={notebookLoading}
+                    onClick={() => importInputRef.current?.click()}
+                  >
+                    <Upload size={15} />
+                    选择文件或 zip
+                  </button>
+                </section>
+
+                <section className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                      <Download size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900">导出 Notebook</h4>
+                      <p className="mt-1 text-sm text-gray-500">导出备份包，或导出 Obsidian 风格 Vault zip。</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={notebookLoading}
+                      onClick={() => void exportNotebookArchive('backup')}
+                    >
+                      <Download size={15} />
+                      备份 zip
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={notebookLoading}
+                      onClick={() => void exportNotebookArchive('vault')}
+                    >
+                      <BookMarked size={15} />
+                      Obsidian Vault
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              {importPreview && (
+                <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="font-medium text-gray-900">
+                      Import preview · {importPreview.items.length} note{importPreview.items.length === 1 ? '' : 's'}
+                    </span>
+                    {importPreview.conflict_count > 0 && (
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">
+                        {importPreview.conflict_count} conflict{importPreview.conflict_count === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                    {importPreview.items.map((item) => (
+                      <div key={item.source_path} className="rounded-md bg-white p-2">
+                        <div className="truncate font-medium text-gray-800">{item.title}</div>
+                        <div className="mt-0.5 truncate text-xs text-gray-500">{item.source_path} · {item.markdown_chars} chars</div>
+                        {item.duplicate_title_entry_id && (
+                          <div className="mt-1 text-xs text-red-600">Same title as "{item.duplicate_title}"</div>
+                        )}
+                      </div>
+                    ))}
+                    {importPreview.skipped.map((item) => (
+                      <div key={`${item.file_name}-${item.reason}`} className="rounded-md bg-red-50 p-2 text-xs text-red-600">
+                        {item.file_name}: {item.reason}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200"
+                      disabled={notebookLoading || importPreview.items.length === 0}
+                      onClick={() => void importNotebookFiles()}
+                    >
+                      导入
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                      disabled={notebookLoading}
+                      onClick={cancelNotebookImport}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {importResult && importResult.skipped.length > 0 && (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <div className="font-medium">
+                    Imported {importResult.imported_count} note{importResult.imported_count === 1 ? '' : 's'}, skipped {importResult.skipped.length}
+                  </div>
+                  <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                    {importResult.skipped.map((item, index) => (
+                      <div key={`${item.file_name}-${item.reason}-${index}`} className="rounded-md bg-white/70 px-2 py-1.5">
+                        <div className="truncate font-medium">{item.file_name}</div>
+                        <div className="mt-0.5 text-xs text-amber-700">{item.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className={`rounded-md border px-3 py-2 text-sm ${
+                notebookStatus.toLowerCase().includes('failed') || notebookStatus.toLowerCase().includes('error')
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-600'
+              }`}>
+                {notebookLoading ? '处理中...' : notebookStatus}
+              </div>
+            </SettingsPanel>
+          )}
+
           {activeTab === 'governance' && (
             <SettingsPanel icon={Activity} title="能力" description="预算和工具执行审批会影响新建会话。">
               <Field label="Session budget">
@@ -861,9 +1228,37 @@ function tabDescription(tab: SettingsTab, t: (key: TranslationKey) => string) {
     llm: 'settings.llm.description',
     embedding: 'settings.embedding.description',
     search: 'settings.search.description',
+    notebook: 'space.tabs.notebook.description',
     governance: 'settings.governance.description',
   }
   return t(keyByTab[tab])
+}
+
+async function safeJson(response: Response): Promise<Record<string, unknown>> {
+  try {
+    return await response.json() as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function errorMessage(data: Record<string, unknown>, status: number) {
+  const error = data.error
+  if (typeof error === 'string' && error.trim()) return error
+  const message = data.message
+  if (typeof message === 'string' && message.trim()) return message
+  return `HTTP ${status}`
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function EmptyConfig({ label, onAdd }: { label: string; onAdd: () => void }) {

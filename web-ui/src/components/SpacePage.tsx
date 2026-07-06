@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Download,
   Edit3,
   FileQuestion,
   FileText,
@@ -25,7 +24,6 @@ import {
   Tags,
   Target,
   Trash2,
-  Upload,
   UserRound,
   X,
 } from 'lucide-react'
@@ -71,39 +69,8 @@ interface NotebookBacklink {
   snippet: string
 }
 
-interface NotebookImportPreviewItem {
-  source_path: string
-  title: string
-  markdown_chars: number
-  tags: string[]
-  duplicate_title_entry_id?: string | null
-  duplicate_title?: string | null
-}
-
-interface NotebookImportSkipped {
-  file_name: string
-  reason: string
-}
-
-interface NotebookImportPreview {
-  items: NotebookImportPreviewItem[]
-  skipped: NotebookImportSkipped[]
-  conflict_count: number
-}
-
-interface NotebookImportResult {
-  imported_count: number
-  skipped: NotebookImportSkipped[]
-}
-
 interface NotebookFolder {
   path: string
-}
-
-interface NotebookVault {
-  root: string
-  external: boolean
-  entries: number
 }
 
 interface MemoryFile {
@@ -154,16 +121,12 @@ export function SpacePage({
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [notebookFolders, setNotebookFolders] = useState<string[]>([])
-  const [notebookVault, setNotebookVault] = useState<NotebookVault | null>(null)
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [activeNotebookDetail, setActiveNotebookDetail] = useState<NotebookEntry | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editMarkdown, setEditMarkdown] = useState('')
-  const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([])
-  const [importPreview, setImportPreview] = useState<NotebookImportPreview | null>(null)
-  const [importResult, setImportResult] = useState<NotebookImportResult | null>(null)
   const [editingMemoryPath, setEditingMemoryPath] = useState<string | null>(null)
   const [memoryDraft, setMemoryDraft] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
@@ -217,7 +180,6 @@ export function SpacePage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entries = (data.entries ?? []) as NotebookEntry[]
       setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
-      setNotebookVault((data.vault ?? null) as NotebookVault | null)
       setNotebookEntries(entries)
       setActiveNotebookDetail((current) => current && entries.some((entry) => entry.id === current.id) ? current : null)
       setActiveNotebookId((current) => current && entries.some((entry) => entry.id === current) ? current : entries[0]?.id ?? null)
@@ -405,152 +367,6 @@ export function SpacePage({
     }
   }
 
-  const previewNotebookFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const nextFiles = Array.from(files)
-    const form = new FormData()
-    form.append('space_id', 'default')
-    nextFiles.forEach((file) => form.append('file', file))
-    setPendingImportFiles(nextFiles)
-    setImportPreview(null)
-    setImportResult(null)
-    setLoading(true)
-    try {
-      const res = await fetch('/api/notebook/import/preview', {
-        method: 'POST',
-        body: form,
-      })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const preview = data as unknown as NotebookImportPreview
-      setImportPreview(preview)
-      setStatus(`Previewed ${preview.items.length} note${preview.items.length === 1 ? '' : 's'}`)
-    } catch (err) {
-      setPendingImportFiles([])
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const importNotebookFiles = async () => {
-    if (pendingImportFiles.length === 0) return
-    const form = new FormData()
-    form.append('space_id', 'default')
-    pendingImportFiles.forEach((file) => form.append('file', file))
-    setLoading(true)
-    try {
-      const res = await fetch('/api/notebook/import', {
-        method: 'POST',
-        body: form,
-      })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const imported = (data.entries ?? []) as NotebookEntry[]
-      await refreshNotebook()
-      if (imported[0]?.id) setActiveNotebookId(imported[0].id)
-      const skippedItems = Array.isArray(data.skipped) ? data.skipped as NotebookImportSkipped[] : []
-      const skipped = skippedItems.length
-      setImportResult({ imported_count: imported.length, skipped: skippedItems })
-      setPendingImportFiles([])
-      setImportPreview(null)
-      setStatus(`Imported ${imported.length} note${imported.length === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`)
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const bindNotebookVault = async (folderPath: string) => {
-    if (!folderPath.trim()) return
-    setPendingImportFiles([])
-    setImportPreview(null)
-    setImportResult(null)
-    setLoading(true)
-    try {
-      const res = await fetch('/api/notebook/vault', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: folderPath }),
-      })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const entries = (data.entries ?? []) as NotebookEntry[]
-      setNotebookEntries(entries)
-      setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
-      setNotebookVault((data.vault ?? null) as NotebookVault | null)
-      setActiveNotebookDetail(null)
-      setActiveNotebookId(entries[0]?.id ?? null)
-      setStatus(`Bound notebook vault: ${(data.vault as NotebookVault | undefined)?.root ?? folderPath}`)
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const cancelNotebookImport = () => {
-    setPendingImportFiles([])
-    setImportPreview(null)
-    setImportResult(null)
-    setStatus('Import cancelled')
-  }
-
-  const exportNotebookEntry = async (entry: NotebookEntry) => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/notebook/entries/${encodeURIComponent(entry.id)}/export.md`)
-      if (!res.ok) {
-        const data = await safeJson(res)
-        throw new Error(errorMessage(data, res.status))
-      }
-      const blob = await res.blob()
-      downloadBlob(blob, `${safeDownloadName(entry.title)}.md`)
-      setStatus(`Exported note: ${entry.title}`)
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const exportNotebookZip = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/notebook/export.zip?space_id=default')
-      if (!res.ok) {
-        const data = await safeJson(res)
-        throw new Error(errorMessage(data, res.status))
-      }
-      const blob = await res.blob()
-      downloadBlob(blob, 'notebook-export.zip')
-      setStatus('Exported notebook zip')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const exportNotebookVault = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/notebook/export-vault.zip?space_id=default')
-      if (!res.ok) {
-        const data = await safeJson(res)
-        throw new Error(errorMessage(data, res.status))
-      }
-      const blob = await res.blob()
-      downloadBlob(blob, 'notebook-vault.zip')
-      setStatus('Exported Obsidian vault zip')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const deleteNotebookEntry = async (entry: NotebookEntry) => {
     if (!window.confirm(`Delete "${entry.title}"?`)) return
     const previous = notebookEntries
@@ -685,7 +501,6 @@ export function SpacePage({
         <NotebookTab
           entries={notebookEntries}
           folders={notebookFolders}
-          vault={notebookVault}
           activeEntry={activeNotebookEntry}
           status={status}
           loading={loading}
@@ -702,15 +517,6 @@ export function SpacePage({
           onEditMarkdownChange={setEditMarkdown}
           onSaveEntry={(entry) => void saveNotebookEntry(entry)}
           onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
-          importPreview={importPreview}
-          importResult={importResult}
-          onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
-          onBindVault={(folderPath) => void bindNotebookVault(folderPath)}
-          onConfirmImport={() => void importNotebookFiles()}
-          onCancelImport={cancelNotebookImport}
-          onExportEntry={(entry) => void exportNotebookEntry(entry)}
-          onExportAll={() => void exportNotebookZip()}
-          onExportVault={() => void exportNotebookVault()}
           onSourceNavigate={onSourceNavigate}
         />
       </main>
@@ -796,7 +602,6 @@ export function SpacePage({
           <NotebookTab
             entries={notebookEntries}
             folders={notebookFolders}
-            vault={notebookVault}
             activeEntry={activeNotebookEntry}
             status={status}
             loading={loading}
@@ -813,15 +618,6 @@ export function SpacePage({
             onEditMarkdownChange={setEditMarkdown}
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
-            importPreview={importPreview}
-            importResult={importResult}
-            onPreviewImportFiles={(files) => void previewNotebookFiles(files)}
-            onBindVault={(folderPath) => void bindNotebookVault(folderPath)}
-            onConfirmImport={() => void importNotebookFiles()}
-            onCancelImport={cancelNotebookImport}
-            onExportEntry={(entry) => void exportNotebookEntry(entry)}
-            onExportAll={() => void exportNotebookZip()}
-            onExportVault={() => void exportNotebookVault()}
             onSourceNavigate={onSourceNavigate}
           />
         )}
@@ -863,7 +659,6 @@ export function SpacePage({
 function NotebookTab({
   entries,
   folders,
-  vault,
   activeEntry,
   status,
   loading,
@@ -880,20 +675,10 @@ function NotebookTab({
   onEditMarkdownChange,
   onSaveEntry,
   onCreateLinkedEntry,
-  importPreview,
-  importResult,
-  onPreviewImportFiles,
-  onBindVault,
-  onConfirmImport,
-  onCancelImport,
-  onExportEntry,
-  onExportAll,
-  onExportVault,
   onSourceNavigate,
 }: {
   entries: NotebookEntry[]
   folders: string[]
-  vault: NotebookVault | null
   activeEntry: NotebookEntry | null
   status: string
   loading: boolean
@@ -910,22 +695,10 @@ function NotebookTab({
   onEditMarkdownChange: (value: string) => void
   onSaveEntry: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
-  importPreview: NotebookImportPreview | null
-  importResult: NotebookImportResult | null
-  onPreviewImportFiles: (files: FileList | null) => void
-  onBindVault: (folderPath: string) => void
-  onConfirmImport: () => void
-  onCancelImport: () => void
-  onExportEntry: (entry: NotebookEntry) => void
-  onExportAll: () => void
-  onExportVault: () => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
-  const importInputRef = useRef<HTMLInputElement | null>(null)
   const [relationsCollapsed, setRelationsCollapsed] = useState(true)
-  const [importMenuOpen, setImportMenuOpen] = useState(false)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const notebookTree = useMemo(() => buildNotebookTree(entries, folders), [entries, folders])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const folderPaths = useMemo(() => collectNotebookFolderPaths(notebookTree), [notebookTree])
@@ -980,40 +753,12 @@ function NotebookTab({
       metadata: { missingReason: 'Create linked notebook entry' },
     }
   }, [activeEntry])
-  const chooseNotebookFolder = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Bind Notebook Vault folder',
-      })
-      if (typeof selected === 'string') {
-        onBindVault(selected)
-      }
-    } catch {
-      window.alert('Vault folder binding is available in the Tauri desktop app. In the web app, import Markdown files or a zip archive instead.')
-    }
-  }
 
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-80 shrink-0 flex-col border-r border-gray-100 bg-gray-50/70">
         <div className="space-y-3 border-b border-gray-100 p-4">
-          <input
-            ref={importInputRef}
-            className="hidden"
-            type="file"
-            accept=".md,.markdown,.zip,text/markdown,text/plain,application/zip"
-            multiple
-            onChange={(event) => {
-              setImportMenuOpen(false)
-              setExportMenuOpen(false)
-              onPreviewImportFiles(event.currentTarget.files)
-              event.currentTarget.value = ''
-            }}
-          />
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             <button
               className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
               type="button"
@@ -1032,173 +777,7 @@ function NotebookTab({
               <Folder size={14} />
               Folder
             </button>
-            <div className="relative">
-              <button
-                className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setExportMenuOpen(false)
-                  setImportMenuOpen((value) => !value)
-                }}
-              >
-                <Upload size={14} />
-                Import
-              </button>
-              {importMenuOpen && (
-                <div className="absolute left-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 text-sm shadow-lg shadow-gray-950/10">
-                  <button
-                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
-                    type="button"
-                    onClick={() => {
-                      setImportMenuOpen(false)
-                      setExportMenuOpen(false)
-                      importInputRef.current?.click()
-                    }}
-                  >
-                    <Upload size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                    <span>
-                      <span className="block font-medium text-gray-900">Files or zip</span>
-                      <span className="block text-xs text-gray-500">Markdown files or zipped vault</span>
-                    </span>
-                  </button>
-                  <button
-                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
-                    type="button"
-                    onClick={() => {
-                      setImportMenuOpen(false)
-                      setExportMenuOpen(false)
-                      void chooseNotebookFolder()
-                    }}
-                  >
-                    <BookMarked size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                    <span>
-                      <span className="block font-medium text-gray-900">Bind vault folder</span>
-                      <span className="block text-xs text-gray-500">Desktop only, read and write this folder directly</span>
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="relative">
-              <button
-                className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:bg-gray-100 disabled:text-gray-400"
-                type="button"
-                disabled={loading || entries.length === 0}
-                onClick={() => {
-                  setImportMenuOpen(false)
-                  setExportMenuOpen((value) => !value)
-                }}
-              >
-                <Download size={14} />
-                Export
-              </button>
-              {exportMenuOpen && (
-                <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 text-sm shadow-lg shadow-gray-950/10">
-                  <button
-                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      onExportAll()
-                    }}
-                  >
-                    <Download size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                    <span>
-                      <span className="block font-medium text-gray-900">Notebook backup</span>
-                      <span className="block text-xs text-gray-500">For llm-tutor import and backup</span>
-                    </span>
-                  </button>
-                  <button
-                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left hover:bg-blue-50"
-                    type="button"
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      onExportVault()
-                    }}
-                  >
-                    <BookMarked size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                    <span>
-                      <span className="block font-medium text-gray-900">Obsidian vault</span>
-                      <span className="block text-xs text-gray-500">Markdown vault with Obsidian config</span>
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
-          {vault && (
-            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-gray-700">{vault.external ? 'Bound vault' : 'Local vault'}</span>
-                <span>{vault.entries} notes</span>
-              </div>
-              <div className="mt-1 truncate" title={vault.root}>{vault.root}</div>
-            </div>
-          )}
-          {importPreview && (
-            <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-3 text-xs shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-medium text-gray-900">
-                  Import preview · {importPreview.items.length} note{importPreview.items.length === 1 ? '' : 's'}
-                </span>
-                {importPreview.conflict_count > 0 && (
-                  <span className="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-600">
-                    {importPreview.conflict_count} conflict{importPreview.conflict_count === 1 ? '' : 's'}
-                  </span>
-                )}
-              </div>
-              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                {importPreview.items.map((item) => (
-                  <div key={item.source_path} className="rounded-md bg-gray-50 p-2">
-                    <div className="truncate font-medium text-gray-800">{item.title}</div>
-                    <div className="mt-0.5 truncate text-gray-500">{item.source_path} · {item.markdown_chars} chars</div>
-                    {item.duplicate_title_entry_id && (
-                      <div className="mt-1 text-red-600">Same title as "{item.duplicate_title}"</div>
-                    )}
-                  </div>
-                ))}
-                {importPreview.skipped.map((item) => (
-                  <div key={`${item.file_name}-${item.reason}`} className="rounded-md bg-red-50 p-2 text-red-600">
-                    {item.file_name}: {item.reason}
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="inline-flex h-8 flex-1 items-center justify-center rounded-md bg-blue-600 px-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-200"
-                  type="button"
-                  disabled={loading || importPreview.items.length === 0}
-                  onClick={onConfirmImport}
-                >
-                  Import
-                </button>
-                <button
-                  className="inline-flex h-8 items-center justify-center rounded-md border border-gray-200 px-3 font-medium text-gray-600 hover:bg-gray-50"
-                  type="button"
-                  disabled={loading}
-                  onClick={onCancelImport}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-          {importResult && importResult.skipped.length > 0 && (
-            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-              <div className="font-medium">
-                Imported {importResult.imported_count} note{importResult.imported_count === 1 ? '' : 's'}, skipped {importResult.skipped.length}
-              </div>
-              <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
-                {importResult.skipped.map((item, index) => (
-                  <div key={`${item.file_name}-${item.reason}-${index}`} className="rounded-md bg-white/70 px-2 py-1.5">
-                    <div className="truncate font-medium">{item.file_name}</div>
-                    <div className="mt-0.5 text-amber-700">{item.reason}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           <div className="text-xs text-gray-500">{status}</div>
         </div>
 
@@ -1261,10 +840,6 @@ function NotebookTab({
                 </div>
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
-                  <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onExportEntry(activeEntry)}>
-                    <Download size={16} />
-                    Export
-                  </button>
                   <button className={secondaryButtonClassName} type="button" disabled={loading} onClick={() => onStartEdit(activeEntry)}>
                     <Edit3 size={16} />
                     Edit
@@ -2321,22 +1896,6 @@ function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
-}
-
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
-function safeDownloadName(value: string) {
-  const name = value.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').trim().replace(/^\.+|\.+$/g, '')
-  return name || 'note'
 }
 
 const secondaryButtonClassName = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3.5 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50'
