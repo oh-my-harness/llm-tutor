@@ -241,6 +241,7 @@ export function SettingsPage({ settings, onChange }: Props) {
   }
 
   const chooseNotebookFolder = async () => {
+    setNotebookStatus('Opening folder picker...')
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
       const selected = await open({
@@ -250,9 +251,14 @@ export function SettingsPage({ settings, onChange }: Props) {
       })
       if (typeof selected === 'string') {
         await bindNotebookVault(selected)
+      } else if (Array.isArray(selected) && typeof selected[0] === 'string') {
+        await bindNotebookVault(selected[0])
+      } else {
+        setNotebookStatus('Folder selection cancelled')
       }
-    } catch {
-      window.alert('Vault folder binding is available in the Tauri desktop app.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setNotebookStatus(`Folder picker failed: ${message}`)
     }
   }
 
