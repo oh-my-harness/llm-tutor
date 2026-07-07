@@ -229,6 +229,13 @@ export default function App() {
           void refreshSessions()
         }
       } else if (event.type === 'trace') {
+        const runtimeUsage = tokenUsageFromRuntimeTrace(event.payload as Record<string, unknown>)
+        if (runtimeUsage) {
+          setLatestUsage(runtimeUsage)
+          if (typeof event.payload.cost_usd === 'number') {
+            setBudgetSpent(event.payload.cost_usd)
+          }
+        }
         const citations = citationsFromTrace(event.payload as Record<string, unknown>)
         if (citations.length > 0) {
           pendingCitationsRef.current = mergeCitations(pendingCitationsRef.current, citations)
@@ -267,7 +274,7 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
         } else if (kind === 'done') {
-          setLatestUsage(isTokenUsagePayload(payload.usage) ? payload.usage : null)
+          setLatestUsage((prev) => isTokenUsagePayload(payload.usage) ? payload.usage : prev)
           if (!streamingRef.current) {
             pushStatus({
               kind: 'done',
@@ -1531,6 +1538,35 @@ function formatBytes(bytes: number) {
 
 function isTokenUsagePayload(value: unknown): value is TokenUsagePayload {
   return Boolean(value && typeof value === 'object')
+}
+
+function tokenUsageFromRuntimeTrace(payload: Record<string, unknown>): TokenUsagePayload | null {
+  if (payload.kind !== 'runtime_usage') return null
+  const inputTokens = numberOrUndefined(payload.input_tokens)
+  const outputTokens = numberOrUndefined(payload.output_tokens)
+  const cacheReadTokens = numberOrUndefined(payload.cache_read_tokens)
+  const cacheCreationTokens = numberOrUndefined(payload.cache_write_tokens)
+  const tokenParts = [
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+    numberOrUndefined(payload.reasoning_tokens),
+  ].filter((value): value is number => typeof value === 'number')
+  const totalTokens = tokenParts.reduce((sum, value) => sum + value, 0)
+
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cache_read_tokens: cacheReadTokens,
+    cache_creation_tokens: cacheCreationTokens,
+    total_tokens: totalTokens,
+    source: 'runtime',
+  }
+}
+
+function numberOrUndefined(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function isCapability(value: string): value is Capability {
