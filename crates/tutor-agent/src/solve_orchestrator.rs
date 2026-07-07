@@ -6,7 +6,7 @@ use llm_adapter::provider::Provider;
 use llm_harness_agent::HarnessHooks;
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::observability::audit::AuditEventType;
-use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEvent};
+use llm_harness_runtime::workflow::engine::{StepProgress, WorkflowEngine, WorkflowEvent};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::model::StepResult as RuntimeStepResult;
 use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, Tool};
@@ -232,12 +232,81 @@ fn relay_deep_solve_workflow_events(
                     )
                     .await;
                 }
+                WorkflowEvent::StepProgress { step_id, progress } => {
+                    emit_workflow_step_progress(&sink, &step_id, progress).await;
+                }
                 WorkflowEvent::Paused { .. }
                 | WorkflowEvent::Resumed
                 | WorkflowEvent::Cancelled { .. } => {}
             }
         }
     })
+}
+
+async fn emit_workflow_step_progress(
+    sink: &Option<SharedEventSink>,
+    step_id: &str,
+    progress: StepProgress,
+) {
+    let stage = deep_solve_stage_for_step(step_id).as_str();
+    let payload = match progress {
+        StepProgress::ToolCallStart { tool_use_id, name } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "tool_call_start",
+            "tool_use_id": tool_use_id,
+            "tool": name,
+        }),
+        StepProgress::ToolCallEnd { tool_use_id, args } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "tool_call_end",
+            "tool_use_id": tool_use_id,
+            "args": args,
+        }),
+        StepProgress::ToolExecutionStart {
+            tool_use_id,
+            tool_name,
+        } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "tool_execution_start",
+            "tool_use_id": tool_use_id,
+            "tool": tool_name,
+        }),
+        StepProgress::ToolExecutionEnd {
+            tool_use_id,
+            ok,
+            error,
+        } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "tool_execution_end",
+            "tool_use_id": tool_use_id,
+            "ok": ok,
+            "error": error,
+        }),
+        StepProgress::TurnEnd { index } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "turn_end",
+            "turn_index": index,
+        }),
+        StepProgress::MessageEnd { message_id, kind } => serde_json::json!({
+            "capability": "deep_solve",
+            "step_id": step_id,
+            "stage": stage,
+            "kind": "message_end",
+            "message_id": message_id,
+            "message_kind": kind,
+        }),
+    };
+    emit_trace(sink, "workflow_step_progress", payload).await;
 }
 
 fn deep_solve_stage_for_step(step_id: &str) -> deep_events::DeepSolveStage {

@@ -114,6 +114,11 @@
   - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
   - Change: Memory and Quiz workflow tests now model `submit_step_result` as the terminal step response, reducing unnecessary mock calls and aligning with runtime-managed structured step output.
 
+- **Resolved: workflow step progress events are now bridged to product trace**
+  - Expected: product UI should reuse runtime workflow progress events for step-internal tool/message boundaries instead of inventing a parallel progress model.
+  - Actual: latest runtime added `WorkflowEvent::StepProgress`, which broke exhaustive matching until the product event bridge understood it.
+  - Change: Deep Solve now relays runtime `StepProgress` as `workflow_step_progress` trace events with step, stage, kind, and key tool/message fields.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** can layer domain-specific + cross-cutting hooks; current product code only needs human approval hooks after moving replan into workflow routing
