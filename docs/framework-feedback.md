@@ -34,11 +34,12 @@
   - Fourteenth migration step: legacy Deep Solve `PhaseManager`, `ReplanHook`, `ReplanTool`, and `SolveContext` have been removed. Replanning is now represented only as workflow structured output (`submit_step_result` with `route:"replan"`) and runtime edge transitions.
   - Fifteenth migration step: Quiz and Memory workflow APIs no longer accept duplicate client/model parameters; runtime client/model ownership now flows only through `WorkflowEngineConfig`.
   - Sixteenth migration step: upgraded all runtime crates to `eea964b` and verified `tutor-agent` / `tutor-web` compile against the latest runtime. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
+  - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still times out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
-  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally".
+  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang on runtime `eea964b`, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally".
   - `WorkflowEngineConfig` exposes hooks and step cost aggregation, but does not yet expose a simple builder-style `budget(...)` / shared budget policy API for multi-step workflows.
   - Follow-up: add runtime budget helpers that distinguish per-call budget accounting from agent-loop stop decisions, and expose the same policy for ordinary harnesses and workflows.
 
