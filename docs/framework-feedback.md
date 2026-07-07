@@ -15,8 +15,16 @@
 
 ## Friction Points
 
+- **Runtime `workflow` branch can compile, but still has provider/tool-call gaps**
+  - `llm-tutor` tested `llm-harness-runtime` branch commit `cc0b737` and aligned `llm-api-adapter` to `de6015de`.
+  - The branch adds workflow/subagent APIs and re-exports chat provider types from `llm_harness_loop`, but it still depends on the external `llm-api-adapter` repo. Embedding traits/types are not re-exported, so RAG code still needs a direct adapter dependency.
+  - `HarnessBuilder` no longer exposes `system_prompt`, `model_info`, or `final_answer_mode` setters even though `AgentHarnessOptions` still supports those fields. App code currently has to construct `AgentHarnessOptions` directly to preserve existing behavior.
+  - `submit_step_result` no longer behaves as a terminal step response in workflow tests; the runtime asks the model for a follow-up text turn after the tool result. That doubles provider calls for structured workflow steps unless the app provides extra mock/final text turns.
+  - The default LLM converter still treats consecutive tool result messages as user-like messages and inserts an empty assistant between them for alternation. That is invalid for OpenAI-compatible APIs when one assistant turn emits multiple tool calls, because all tool result messages must immediately follow the assistant tool-call message.
+  - Suggestion: expose builder setters for all common `AgentHarnessOptions` fields, re-export embedding provider types or provide a runtime embedding boundary, and make alternation provider-aware so OpenAI tool-call adjacency is preserved.
+
 - **Status update: runtime workflow support is now available and consumed**
-  - `llm-tutor` now pins `llm-harness-runtime` to `bea5374`, which includes `workflow` and `spawn/subagent` modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
+  - `llm-tutor` now pins `llm-harness-runtime` to workflow branch commit `cc0b737`, which includes expanded workflow and spawn/subagent modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
   - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
@@ -33,18 +41,18 @@
   - Thirteenth migration step: app-side declarative edge evaluation has been removed. Deep Solve and Memory now pass a no-op marker into `WorkflowEngine::new`, allowing runtime's built-in declarative edge judge to own `EdgeCondition::Expr` routing.
   - Fourteenth migration step: legacy Deep Solve `PhaseManager`, `ReplanHook`, `ReplanTool`, and `SolveContext` have been removed. Replanning is now represented only as workflow structured output (`submit_step_result` with `route:"replan"`) and runtime edge transitions.
   - Fifteenth migration step: Quiz and Memory workflow APIs no longer accept duplicate client/model parameters; runtime client/model ownership now flows only through `WorkflowEngineConfig`.
-  - Sixteenth migration step: upgraded all runtime crates to `bea5374` and verified `tutor-agent` / `tutor-web` compile against the latest runtime. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
+  - Sixteenth migration step: upgraded all runtime crates to `cc0b737` and verified `tutor-agent` / `tutor-web` compile against the workflow runtime branch. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
   - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still timed out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
-  - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and `AgentEvent::as_final_answer()` / `as_progress()`, so durable assistant bubbles no longer come from intermediate progress text.
-  - Nineteenth migration step: Deep Solve now consumes runtime `WorkflowEvent::StepProgress` and relays it into product trace events instead of maintaining a separate workflow-progress model.
+  - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and direct `AgentEvent::FinalAnswer` / `Progress` matching, so durable assistant bubbles no longer come from intermediate progress text.
+  - Nineteenth migration step: Deep Solve previously consumed runtime `WorkflowEvent::StepProgress`; `cc0b737` removed this event, so the current bridge reports workflow step start/finish/failure only.
   - Twentieth migration step: Chat and Code Exec emit product `runtime_usage` traces from `AgentHarness::usage()`, and Deep Solve emits the same trace from runtime `TaskResult.cost`.
   - Twenty-first migration step: Quiz and Memory workflow helpers now return runtime `TaskResult.cost` alongside domain output, so callers no longer need to reconstruct workflow usage from app-layer state.
-  - Completion audit: remote runtime HEAD and the project pin are both `bea5374`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`d6ec86a3`) and one runtime revision. Active source no longer contains legacy direct `AgentHarnessOptions`, Deep Solve phase-loop, or app-side declarative edge evaluation paths.
+  - Completion audit: the project pin is `cc0b737`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`de6015de`) and one runtime revision. Active source no longer contains the legacy Deep Solve phase-loop or app-side declarative edge evaluation paths. Chat/Code Exec currently construct `AgentHarnessOptions` directly because `HarnessBuilder` on this branch no longer exposes all required option setters.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, safe budget policies, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
-  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang on runtime `eea964b`, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally". This has not been re-enabled on `bea5374`.
+  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang on runtime `eea964b`, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally". This has not been re-enabled on `cc0b737`.
   - `WorkflowEngineConfig` exposes hooks and step cost aggregation, but does not yet expose a simple builder-style `budget(...)` / shared budget policy API for multi-step workflows.
   - Follow-up: add runtime budget helpers that distinguish per-call budget accounting from agent-loop stop decisions, and expose the same policy for ordinary harnesses and workflows.
 
@@ -116,7 +124,7 @@
 - **Resolved: final assistant bubbles now follow the runtime final-answer contract**
   - Expected: UIs should restore durable assistant bubbles only from runtime `AssistantMessageKind::FinalAnswer`; intermediate `Progress` messages may remain in runtime context but should not appear as final chat answers.
   - Actual: Chat/Code Exec previously treated every `MessageEnd` and streamed `TextDelta` as candidate final answer text, so progress before tool calls could be returned or restored as a normal assistant bubble.
-  - Change: Chat/Code Exec now use runtime `AgentEvent::as_final_answer()` / `as_progress()`, return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles. Harness construction also enables runtime `FinalAnswerMode::tool_with_text_fallback()`, so models may use the built-in `final_answer` tool without losing plain-text compatibility.
+  - Change: Chat/Code Exec now match runtime `AgentEvent::FinalAnswer` / `Progress`, return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles. Harness construction also enables runtime `FinalAnswerMode::tool_with_text_fallback()`, so models may use the built-in `final_answer` tool without losing plain-text compatibility.
   - Remaining gap: streamed `TextDelta` is still emitted immediately for UX. If the runtime later exposes per-delta final/progress classification, the UI can avoid briefly showing progress text in the main stream.
 
 - **Resolved: workflow tests now follow runtime submit-step terminal semantics**
@@ -124,10 +132,10 @@
   - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
   - Change: Memory and Quiz workflow tests now model `submit_step_result` as the terminal step response, reducing unnecessary mock calls and aligning with runtime-managed structured step output.
 
-- **Resolved: workflow step progress events are now bridged to product trace**
+- **Regression: workflow step progress events are not available on `cc0b737`**
   - Expected: product UI should reuse runtime workflow progress events for step-internal tool/message boundaries instead of inventing a parallel progress model.
-  - Actual: latest runtime added `WorkflowEvent::StepProgress`, which broke exhaustive matching until the product event bridge understood it.
-  - Change: Deep Solve now relays runtime `StepProgress` as `workflow_step_progress` trace events with step, stage, kind, and key tool/message fields.
+  - Actual: `bea5374` exposed `WorkflowEvent::StepProgress`, but `cc0b737` no longer does. The product event bridge now reports workflow step start/finish/failure only.
+  - Suggestion: restore a stable workflow progress event stream or document the replacement event surface.
 
 ## Positive Validations
 

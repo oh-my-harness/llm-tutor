@@ -7,7 +7,7 @@ use llm_harness_loop::{
     LlmError,
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
 };
-use llm_harness_runtime::observability::audit::AuditSink;
+use llm_harness_runtime::audit::AuditSink;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::ExecutionEnv;

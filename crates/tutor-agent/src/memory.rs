@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_harness_runtime::control::cost::CostAggregate;
+use llm_harness_runtime::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::model::StepResult;
@@ -505,7 +505,7 @@ mod tests {
 
         assert_eq!(
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
-            1
+            2
         );
         assert_eq!(run.cost.total_input_tokens, 0);
         let output = run.output;

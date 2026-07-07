@@ -813,7 +813,6 @@ fn token_usage_from_runtime_trace(data: &serde_json::Value) -> Option<TokenUsage
         output_tokens: u32_from_json(payload.get("output_tokens")),
         cache_read_tokens: u32_from_json(payload.get("cache_read_tokens")),
         cache_creation_tokens: u32_from_json(payload.get("cache_write_tokens")),
-        reasoning_tokens: u32_from_json(payload.get("reasoning_tokens")),
     })
 }
 
@@ -926,7 +925,6 @@ mod tests {
                 "output_tokens": 5,
                 "cache_read_tokens": 3,
                 "cache_write_tokens": 2,
-                "reasoning_tokens": 7,
                 "cost_usd": 0.01,
             }),
         )
@@ -938,8 +936,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 5);
         assert_eq!(usage.cache_read_tokens, 3);
         assert_eq!(usage.cache_creation_tokens, 2);
-        assert_eq!(usage.reasoning_tokens, 7);
-        assert_eq!(usage.total_tokens(), 29);
+        assert_eq!(usage.total_tokens(), 22);
     }
 
     #[test]
