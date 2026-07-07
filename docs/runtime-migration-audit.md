@@ -23,6 +23,8 @@ Date: 2026-07-07
     a progress `MessageEnd` followed by a final answer and asserts that the
     product return value uses only the runtime final-answer event while progress
     is emitted as trace.
+  - Test evidence: `code_exec_returns_runtime_final_answer_not_progress_text`
+    covers the same contract for the Code Exec harness path.
 - Automatic compaction calls runtime `AgentHarness::compact()` and reads compact
   summaries from runtime `SessionEntryPayload::Compaction`.
 - Deep Solve, Quiz generation, and Memory workflows run through runtime
@@ -75,3 +77,14 @@ mentions, and citations.
 5. Safe budget policy helper that separates accounting from loop continuation.
 6. Normalized model metadata discovery.
 7. Per-delta final/progress classification for streaming UI.
+
+## Verification Coverage
+
+- `cargo test -p tutor-agent --test mock_integration` covers ordinary harness
+  setup, runtime final/progress splitting for Chat and Code Exec, tool routing,
+  Deep Solve workflow events, and Code Exec sandbox execution.
+- `cargo test -p tutor-agent quiz --lib` covers Quiz runtime workflow generation,
+  verifier repair, and publish behavior.
+- `cargo test -p tutor-web session --lib` covers runtime-backed session
+  persistence, custom UI entries, citations, mentions, trace entries, and
+  compaction summaries.

@@ -309,6 +309,44 @@ async fn code_exec_runs_tool_and_explains_result() {
 }
 
 #[tokio::test]
+async fn code_exec_returns_runtime_final_answer_not_progress_text() {
+    let dir = TempDir::new().unwrap();
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router_with_env(
+        vec![
+            progress_text_response("checking code execution plan"),
+            MockResponse::text("final code answer"),
+        ],
+        make_governance(None),
+        Arc::new(OsEnv::new(dir.path())) as Arc<dyn ExecutionEnv>,
+    )
+    .with_event_sink(sink.clone());
+
+    let answer = router
+        .run(Capability::CodeExec, "answer after code progress")
+        .await
+        .unwrap();
+
+    assert_eq!(answer, "final code answer");
+    let events = sink.events();
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "assistant_progress"
+                && data["summary"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("checking code execution plan"))
+        }),
+        "missing runtime progress trace: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "final_answer" && data["capability"] == "code_exec" }),
+        "missing runtime final answer trace: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn chat_emits_trace_events() {
     let sink = Arc::new(TraceRecorder::default());
     let router = make_router(
