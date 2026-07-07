@@ -42,7 +42,6 @@ pub fn deep_solve_workflow() -> Workflow {
                     "web_search".into(),
                     "web_fetch".into(),
                     "code_exec".into(),
-                    "replan".into(),
                 ],
             ),
             Step::llm(

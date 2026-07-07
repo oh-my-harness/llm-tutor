@@ -8,10 +8,10 @@
 
 | Hook | Use Case | Verdict |
 |------|---------|---------|
-| `BeforeToolCallHook` | ReplanHook intercepts `replan()` | ✅ worked as designed |
-| `PrepareNextTurnHook` | PhaseManager sets active_tools per step | ✅ worked as designed |
-| `AfterProviderResponseHook` | BudgetControlAdapter accumulates cost | ✅ worked as designed |
-| `ShouldStopHook` | BudgetControlAdapter hard-stops loop | ✅ worked as designed |
+| `BeforeToolCallHook` | Human approval for sensitive tools | ✅ worked as designed |
+| `PrepareNextTurnHook` | Historical PhaseManager active-tool filtering | ✅ worked; now replaced by workflow step tool scopes |
+| `AfterProviderResponseHook` | BudgetControlAdapter cost accumulation | ✅ worked; now awaiting safer app-level budget policy |
+| `ShouldStopHook` | BudgetControlAdapter loop stop policy | ⚠️ unsafe for ordinary one-turn chat with current semantics |
 
 ## Friction Points
 
@@ -31,6 +31,7 @@
   - Eleventh migration step: Memory assist/update/check/dedupe now runs as a runtime LLM step. Product code prepares the memory prompt in workflow context and validates the submitted structured memory result; the model submits memory facts/edits through runtime `submit_step_result`.
   - Twelfth migration step: agent-side legacy direct structured-output helpers have been removed. Deep Solve, Quiz, and Memory now use runtime workflow/harness paths for LLM orchestration; product code keeps only domain validation, source repair, and runtime executor bridges.
   - Thirteenth migration step: app-side declarative edge evaluation has been removed. Deep Solve and Memory now pass a no-op marker into `WorkflowEngine::new`, allowing runtime's built-in declarative edge judge to own `EdgeCondition::Expr` routing.
+  - Fourteenth migration step: legacy Deep Solve `PhaseManager`, `ReplanHook`, `ReplanTool`, and `SolveContext` have been removed. Replanning is now represented only as workflow structured output (`submit_step_result` with `route:"replan"`) and runtime edge transitions.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
@@ -96,9 +97,9 @@
 
 ## Positive Validations
 
-- **CompositeBeforeToolCallHook** chains ReplanHook and HumanApprovalWrapper cleanly — allows layering domain-specific + cross-cutting hooks
+- **CompositeBeforeToolCallHook** can layer domain-specific + cross-cutting hooks; current product code only needs human approval hooks after moving replan into workflow routing
 - **BudgetControlAdapter** dual-role as `AfterProviderResponseHook` + `ShouldStopHook` is elegant — one instance, two contracts
-- **`active_tools` in `NextTurnDirective`** is exactly the right granularity for PhaseManager — not `tools` (replace entire set) but a subset filter
+- **`active_tools` in `NextTurnDirective`** was useful for historical PhaseManager-style filtering; current workflow paths prefer runtime step `allowed_tools`
 - **`HarnessHooks::none()`** pattern with struct update syntax (`..HarnessHooks::none()`) makes selective hook wiring readable
 - **`AgentHarness::subscribe()` before `prompt()`** pattern allows reliable event collection without race conditions
 

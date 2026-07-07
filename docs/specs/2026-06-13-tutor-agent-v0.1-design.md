@@ -1,5 +1,12 @@
 # Tutor Agent v0.1 设计文档
 
+> Historical note (2026-07-07): this document records the original v0.1
+> design. Current implementation has migrated Deep Solve, Quiz, and Memory to
+> `llm-harness-runtime` `WorkflowEngine` / `HarnessBuilder`; legacy
+> `PhaseManager`, `ReplanHook`, `ReplanTool`, `SolveContext`, and direct
+> `BudgetControlAdapter` wiring are no longer current. See
+> `docs/framework-feedback.md` for the authoritative runtime migration status.
+
 > 状态: 设计阶段 | 仓库: `/Users/hhl/Documents/projs/tutor_agent` | runtime 依赖: `llm-harness-runtime` v0.2+
 
 ---

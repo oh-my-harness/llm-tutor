@@ -1,7 +1,6 @@
 use serde::Serialize;
 
 use crate::event_sink::{SharedEventSink, emit_trace};
-use crate::solve_context::Plan;
 
 pub const CAPABILITY: &str = "deep_solve";
 
@@ -54,20 +53,6 @@ pub async fn stage_done(
             "stage": stage.as_str(),
             "title": title,
             "summary": summary.into(),
-        }),
-    )
-    .await;
-}
-
-pub async fn plan(sink: &Option<SharedEventSink>, plan: &Plan) {
-    emit_trace(
-        sink,
-        "deep_solve_plan",
-        serde_json::json!({
-            "capability": CAPABILITY,
-            "stage": DeepSolveStage::Plan.as_str(),
-            "analysis": plan.analysis,
-            "steps": plan.steps,
         }),
     )
     .await;

@@ -1,10 +1,9 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use llm_adapter::provider::Provider;
 use llm_harness_agent::HarnessHooks;
-use llm_harness_loop::CompositeBeforeToolCallHook;
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::observability::audit::AuditEventType;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEvent};
@@ -21,12 +20,11 @@ use crate::runtime_engine::{RuntimeDeclarativeJudge, build_workflow_engine_confi
 use crate::runtime_workflow::{
     DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow, validate_deep_solve_workflow,
 };
-use crate::solve_context::SolveContext;
 use tutor_tools::WebSearchConfig;
 
 /// Drives the four-phase Deep Solve pipeline.
 pub struct SolveOrchestrator {
-    context: Arc<Mutex<SolveContext>>,
+    question: String,
     env: Arc<dyn ExecutionEnv>,
     llm: LlmConfig,
     governance: GovernanceConfig,
@@ -44,7 +42,7 @@ impl SolveOrchestrator {
         governance: GovernanceConfig,
     ) -> Self {
         Self {
-            context: Arc::new(Mutex::new(SolveContext::new(question))),
+            question: question.into(),
             env,
             llm,
             governance,
@@ -105,7 +103,7 @@ impl SolveOrchestrator {
         )
         .await;
 
-        let question = self.context.lock().unwrap().question.clone();
+        let question = self.question.clone();
         let client = self.make_client();
         let session_root = self
             .workflow_root
@@ -167,14 +165,10 @@ impl SolveOrchestrator {
     }
 
     fn deep_solve_before_tool_hooks(&self) -> Vec<Arc<dyn BeforeToolCallHook>> {
-        let replan_hook = Arc::new(crate::replan_hook::ReplanHook::new(self.context.clone()));
         if let Some(approval) = &self.governance.approval {
-            vec![Arc::new(CompositeBeforeToolCallHook::new(vec![
-                approval.clone() as Arc<dyn BeforeToolCallHook>,
-                replan_hook as Arc<dyn BeforeToolCallHook>,
-            ]))]
+            vec![approval.clone() as Arc<dyn BeforeToolCallHook>]
         } else {
-            vec![replan_hook as Arc<dyn BeforeToolCallHook>]
+            vec![]
         }
     }
 
@@ -197,7 +191,6 @@ impl SolveOrchestrator {
                 None => WebFetchTool::new(),
             }),
             Arc::new(CodeExecTool::new()),
-            Arc::new(crate::replan_tool::ReplanTool),
         ]
     }
 }

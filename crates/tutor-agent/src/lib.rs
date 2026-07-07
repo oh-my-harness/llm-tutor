@@ -7,14 +7,10 @@ pub mod event_sink;
 pub mod governance;
 pub mod llm_provider;
 pub mod memory;
-pub mod phase_manager;
 pub mod quiz;
-pub mod replan_hook;
-pub mod replan_tool;
 pub mod runtime_engine;
 pub mod runtime_harness;
 pub mod runtime_workflow;
-pub mod solve_context;
 pub mod solve_orchestrator;
 pub mod terminal_approver;
 
