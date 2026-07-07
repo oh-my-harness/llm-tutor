@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
 use crate::llm_provider::LlmConfig;
+use crate::runtime_workflow::validate_quiz_generation_workflow;
 
 #[derive(Debug, Clone)]
 pub struct QuizGenerationConfig {
@@ -68,6 +69,8 @@ pub async fn generate_quiz_questions_with_client(
     config: &QuizGenerationConfig,
     chunks: &[QuizSourceChunk],
 ) -> Result<Vec<GeneratedQuizQuestion>> {
+    validate_quiz_generation_workflow()?;
+
     if chunks.is_empty() {
         return Err(TutorError::Internal(
             "quiz generation has no source chunks".into(),

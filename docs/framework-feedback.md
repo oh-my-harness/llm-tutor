@@ -19,7 +19,14 @@
   - `llm-tutor` now pins `llm-harness-runtime` to `490e66a`, which includes `workflow` and `spawn/subagent` modules.
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
-  - Remaining migration target: replace `SolveOrchestrator`'s sequential `AgentHarness` calls with `WorkflowEngine`, and move the Quiz verification pass to a runtime workflow/subagent-style reviewer.
+  - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
+  - Remaining migration target: replace `SolveOrchestrator`'s sequential `AgentHarness` calls with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
+
+- **Budget control semantics changed after the runtime update**
+  - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
+  - Directly attaching it to ordinary one-turn chat/code/solve harnesses caused the model loop to continue after a normal answer.
+  - `llm-tutor` now avoids wiring budget as a generic ordinary `should_stop` hook until the relevant flow is migrated through `HarnessBuilder`/`WorkflowEngine`, where runtime can own the cost/budget lifecycle consistently.
+  - Follow-up: re-enable budget limits through runtime-managed builders/workflows instead of product-layer loop control.
 
 - **`BeforeToolCallCtx` requires a live `AssistantMessage` reference, making unit tests noisy**
   - Expected: construct a minimal mock in test code to verify hook logic

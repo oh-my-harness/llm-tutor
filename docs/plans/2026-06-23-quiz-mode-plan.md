@@ -76,11 +76,27 @@ propose_quiz_plan(title, topic, source, difficulty, question_count, notes)
 create_quiz(title?, kb_id?, notebook_entry_id?, source_text?, source_label?, topic?, difficulty?, question_count?)
 ```
 
-For V1, quiz generation is a controlled product flow that:
+For V1, quiz generation is a controlled product flow. The flow is now also
+declared as a runtime `Workflow` and validated before generation:
+
+```text
+collect_sources -> generate_questions -> verify_questions -> publish_questions
+                                      ^             |
+                                      |             v
+                                      +---------- repair
+```
+
+The current implementation still executes this flow in product code. The next
+runtime migration step is to run it through `WorkflowEngine` so retries, repair
+loops, trace, cancellation, and cost/budget policy are owned by the framework.
+
+Today the flow:
 
 - retrieves source chunks,
 - asks the LLM to generate JSON questions grounded in those chunks,
 - validates the JSON shape,
+- runs a strict structured LLM verifier against generated questions and source
+  chunks,
 - stores the Quiz in `QuizStore`,
 - returns quiz details to Chat so the UI can render an interactive card.
 
@@ -240,8 +256,9 @@ V1 UI should stay simple:
 
 ## 7. Current Verification Flow
 
-The current implementation does not yet have a separate child agent or LLM
-verifier. It has a deterministic validation/check path after generation:
+The current implementation has deterministic validation plus a strict structured
+LLM verifier. It does not yet execute the generation / verification / repair
+loop through runtime `WorkflowEngine`.
 
 1. `create_quiz` builds source material from a selected KB, Notebook entry,
    explicit `source_text`, or Chat/Space material resolved before tool call.
@@ -257,14 +274,17 @@ verifier. It has a deterministic validation/check path after generation:
    - empty explanations,
    - missing citations,
    - empty citation text.
-5. The quiz is stored with a `QuizVerificationReport`. Today this report records
-   the validation method and issues, but it is not the output of an independent
-   LLM reviewer.
+5. Generated questions are sent to a structured verifier prompt. The verifier
+   receives only source chunks, candidate question JSON, answer, explanation,
+   citations, and supporting quotes.
+6. The quiz is stored with a `QuizVerificationReport`. Today this report records
+   the validation method and issues at the storage boundary; the detailed
+   verifier issues are surfaced as generation errors when verification fails.
 
-The next hardening step is a controlled verifier stage that receives only source
-chunks plus candidate question JSON and returns structured `pass / revise /
-reject` output. It should not browse, introduce external facts, or behave like a
-free-form chat agent.
+The next hardening step is moving the controlled flow under runtime
+`WorkflowEngine` and adding a managed repair retry. The verifier should continue
+to judge only supplied sources and should not browse, introduce external facts,
+or behave like a free-form chat agent.
 
 ## 8. Implementation Phases
 
@@ -322,8 +342,10 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 
 - [x] Add deterministic validation before storage.
 - [x] Store `QuizVerificationReport`.
-- [ ] Add controlled LLM verifier stage.
-- [ ] Add structured verifier output.
+- [x] Add controlled LLM verifier stage.
+- [x] Add structured verifier output.
+- [x] Declare and validate Quiz flow as a runtime workflow.
+- [ ] Execute Quiz generation/verification through runtime `WorkflowEngine`.
 - [ ] Repair once and re-verify, then discard unresolved questions.
 - [ ] Add tests for answer/explanation/citation contradiction cases.
 
