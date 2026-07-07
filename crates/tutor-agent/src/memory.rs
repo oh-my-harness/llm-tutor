@@ -9,7 +9,7 @@ use llm_harness_runtime::workflow::model::StepResult;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
-use crate::runtime_engine::DeclarativeEdgeJudge;
+use crate::runtime_engine::RuntimeDeclarativeJudge;
 use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
 
 const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
@@ -87,7 +87,7 @@ pub async fn run_memory_workflow_with_runtime(
     let engine = WorkflowEngine::new(
         workflow.clone(),
         engine_config,
-        Arc::new(DeclarativeEdgeJudge::new(&workflow)),
+        Arc::new(RuntimeDeclarativeJudge),
     )
     .map_err(|err| TutorError::Internal(format!("memory workflow initialization failed: {err}")))?
     .with_executor(

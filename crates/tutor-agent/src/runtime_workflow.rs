@@ -174,7 +174,7 @@ pub fn memory_workflow() -> Workflow {
         edges: vec![Edge {
             from: "prepare_memory".into(),
             to: "run_memory".into(),
-            condition: None,
+            condition: Some(prepared_condition()),
         }],
     }
 }
@@ -208,6 +208,13 @@ fn action_condition(action: &str) -> EdgeCondition {
     })
 }
 
+fn prepared_condition() -> EdgeCondition {
+    EdgeCondition::Expr(ConditionExpr::Eq {
+        pointer: "/prepared".into(),
+        value: serde_json::json!(true),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +236,11 @@ mod tests {
 
     #[test]
     fn workflows_use_runtime_evaluable_edge_conditions() {
-        for workflow in [deep_solve_workflow(), quiz_generation_workflow()] {
+        for workflow in [
+            deep_solve_workflow(),
+            quiz_generation_workflow(),
+            memory_workflow(),
+        ] {
             for edge in workflow.edges {
                 assert!(
                     !matches!(edge.condition, Some(EdgeCondition::Label(_))),

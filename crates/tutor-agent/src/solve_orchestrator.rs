@@ -17,7 +17,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
-use crate::runtime_engine::{DeclarativeEdgeJudge, build_workflow_engine_config};
+use crate::runtime_engine::{RuntimeDeclarativeJudge, build_workflow_engine_config};
 use crate::runtime_workflow::{
     DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow, validate_deep_solve_workflow,
 };
@@ -119,25 +119,24 @@ impl SolveOrchestrator {
             session_root,
         );
 
-        let mut engine = WorkflowEngine::new(
-            workflow.clone(),
-            config,
-            Arc::new(DeclarativeEdgeJudge::new(&workflow)),
-        )
-        .map_err(|err| TutorError::Internal(format!("deep solve workflow init failed: {err}")))?
-        .with_executor(
-            "tutor.deep_solve.retrieve",
-            Arc::new(DeepSolveRetrieveExecutor {
-                question,
-                kb: kb.map(str::to_string),
-                event_sink: self.event_sink.clone(),
-                governance: self.governance.clone(),
-            }),
-        )
-        .with_hooks(HarnessHooks {
-            before_tool_call: self.deep_solve_before_tool_hooks(),
-            ..HarnessHooks::none()
-        });
+        let mut engine =
+            WorkflowEngine::new(workflow.clone(), config, Arc::new(RuntimeDeclarativeJudge))
+                .map_err(|err| {
+                    TutorError::Internal(format!("deep solve workflow init failed: {err}"))
+                })?
+                .with_executor(
+                    "tutor.deep_solve.retrieve",
+                    Arc::new(DeepSolveRetrieveExecutor {
+                        question,
+                        kb: kb.map(str::to_string),
+                        event_sink: self.event_sink.clone(),
+                        governance: self.governance.clone(),
+                    }),
+                )
+                .with_hooks(HarnessHooks {
+                    before_tool_call: self.deep_solve_before_tool_hooks(),
+                    ..HarnessHooks::none()
+                });
 
         for tool in self.deep_solve_tools() {
             engine = engine.with_tool(tool);

@@ -30,7 +30,8 @@
   - Tenth migration step: Quiz generation and verification now run as runtime LLM steps. Product code only collects sources into workflow context, publishes the final validated questions, and enforces a bounded repair loop through a thin workflow judge; the model submits structured quiz and verifier results through runtime `submit_step_result`.
   - Eleventh migration step: Memory assist/update/check/dedupe now runs as a runtime LLM step. Product code prepares the memory prompt in workflow context and validates the submitted structured memory result; the model submits memory facts/edits through runtime `submit_step_result`.
   - Twelfth migration step: agent-side legacy direct structured-output helpers have been removed. Deep Solve, Quiz, and Memory now use runtime workflow/harness paths for LLM orchestration; product code keeps only domain validation, source repair, and runtime executor bridges.
-  - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative judges, typed validation/retry helpers, and normalized model metadata discovery.
+  - Thirteenth migration step: app-side declarative edge evaluation has been removed. Deep Solve and Memory now pass a no-op marker into `WorkflowEngine::new`, allowing runtime's built-in declarative edge judge to own `EdgeCondition::Expr` routing.
+  - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
@@ -83,10 +84,10 @@
   - Actual: Chat, Research, Deep Solve, and Quiz runtime workflows can mount runtime tools, and Quiz now uses `submit_step_result` for structured quiz output. However, provider-native typed JSON schema, retries, and validation are still product-layer responsibilities.
   - Suggestion: add a runtime pattern for "tool-using structured generation", for example `AgentHarness::generate_structured_with_tools<T>()`, where tools, trace events, schema output, validation, and retries are all runtime-managed.
 
-- **Default workflow judge is not public**
-  - Expected: product code can construct a simple terminal/free-task workflow through public runtime APIs without implementing a custom `StepTransitionJudge`.
-  - Actual: `WorkflowEngine::new_free_task` hides the no-op judge, but custom product workflows require a `StepTransitionJudge` and runtime's `NoopJudge` / `EdgeConditionJudge` are `pub(crate)`, so apps must duplicate tiny terminal/declarative judges for smoke tests and declarative edge workflows.
-  - Suggestion: expose a `WorkflowEngine::new_declarative(workflow, config)` helper that selects the built-in edge judge automatically, or publish a small `NoopJudge`/`TerminalJudge` constructor.
+- **Default workflow judge helpers are still not public**
+  - Expected: product code can construct a declarative `EdgeCondition::Expr` workflow through public runtime APIs without implementing any `StepTransitionJudge`.
+  - Actual: runtime now auto-selects its built-in edge judge when the provided judge reports `is_noop()`, so `llm-tutor` no longer duplicates edge evaluation. However, runtime's `NoopJudge` / `EdgeConditionJudge` are still `pub(crate)`, so apps need a tiny marker judge solely to opt into the built-in behavior.
+  - Suggestion: expose a `WorkflowEngine::new_declarative(workflow, config)` helper that selects the built-in edge judge automatically, or publish a small no-op marker constructor.
 
 - **Model metadata discovery is still app-specific**
   - Expected: settings diagnostics and runtime context budgeting can ask the provider adapter for normalized model metadata such as context window, native embedding dimension, supported embedding dimensions, and detected source.
@@ -112,7 +113,7 @@
 | WorkflowEngine migration bridge still needs product adapters | Existing product flows need event bridges, executor state mapping, and structured `submit_step_result` prompts before they can stop using direct phase loops | Medium |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
-| No public default workflow judge/helper | Product workflows must duplicate a trivial terminal judge unless they use `new_free_task` | Low |
+| No public declarative/no-op workflow judge helper | Product workflows need a tiny marker judge to opt into runtime's built-in declarative edge router | Low |
 | No safe app-level budget policy helper | Ordinary one-turn harnesses and multi-step workflows cannot share budget accounting without app-layer loop-risk or hook boilerplate | Medium |
 | No normalized model metadata API | Apps duplicate `/models` probing, auth headers, context-window parsing, and embedding dimension capability discovery | Medium |
 
@@ -126,6 +127,6 @@
 6. Add a typed structured-output helper for provider-aware JSON/schema generation
 7. Add a tool-using structured-generation helper for flows like memory-aware Quiz
 8. Add normalized model metadata discovery in the adapter/runtime boundary
-9. Expose a public default workflow judge or `WorkflowEngine::new_declarative` helper
+9. Expose a public no-op/declarative workflow judge helper or `WorkflowEngine::new_declarative` constructor
 10. Continue hardening `WorkflowEngine` examples for app-level workflows that mix executor steps, LLM steps, and subagent reviewers
 11. Add a safe app-level budget helper/policy API that separates cost accounting from loop continuation
