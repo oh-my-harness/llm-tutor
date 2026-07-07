@@ -146,6 +146,7 @@ impl SolveOrchestrator {
             .run()
             .await
             .map_err(|err| TutorError::Internal(format!("deep solve workflow failed: {err}")))?;
+        emit_workflow_runtime_usage(&self.event_sink, &result.cost).await;
         drop(engine);
         let _ = event_task.await;
         let answer = result
@@ -193,6 +194,23 @@ impl SolveOrchestrator {
             Arc::new(CodeExecTool::new()),
         ]
     }
+}
+
+async fn emit_workflow_runtime_usage(sink: &Option<SharedEventSink>, cost: &CostAggregate) {
+    emit_trace(
+        sink,
+        "runtime_usage",
+        serde_json::json!({
+            "capability": "deep_solve",
+            "input_tokens": cost.total_input_tokens,
+            "output_tokens": cost.total_output_tokens,
+            "cache_read_tokens": cost.total_cache_read_tokens,
+            "cache_write_tokens": cost.total_cache_write_tokens,
+            "reasoning_tokens": cost.total_reasoning_tokens,
+            "cost_usd": cost.total_cost,
+        }),
+    )
+    .await;
 }
 
 fn relay_deep_solve_workflow_events(

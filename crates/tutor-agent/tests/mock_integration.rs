@@ -283,6 +283,12 @@ async fn deep_solve_emits_structured_ux_events() {
         }),
         "missing final event: {events:?}"
     );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "runtime_usage" && data["capability"] == "deep_solve" }),
+        "missing deep solve runtime usage trace: {events:?}"
+    );
 }
 
 #[tokio::test]
