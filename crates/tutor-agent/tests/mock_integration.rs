@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use futures::future::BoxFuture;
+use llm_adapter::types::{ContentKind, StopReason, StreamEvent, Usage};
 use llm_harness_loop::{
     LlmError,
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
@@ -35,6 +36,31 @@ fn make_router_with_env(
     let client = Arc::new(MockLlmClient::new(responses));
     let llm = LlmConfig::anthropic("mock-model", "");
     CapabilityRouter::new(env, llm, governance).with_client(client)
+}
+
+fn progress_text_response(text: &str) -> MockResponse {
+    MockResponse {
+        model: "mock-model".into(),
+        stream_error: None,
+        events: vec![
+            Ok(StreamEvent::ContentStart {
+                index: 0,
+                kind: ContentKind::Text,
+            }),
+            Ok(StreamEvent::TextDelta {
+                index: 0,
+                text: text.into(),
+            }),
+            Ok(StreamEvent::ContentStop {
+                index: 0,
+                signature: None,
+            }),
+            Ok(StreamEvent::MessageStop {
+                stop_reason: StopReason::ToolUse,
+                usage: Usage::default(),
+            }),
+        ],
+    }
 }
 
 #[derive(Default)]
@@ -109,6 +135,42 @@ async fn chat_can_call_read_memory_then_text() {
         .await
         .unwrap();
     assert!(answer.contains("profile"));
+}
+
+#[tokio::test]
+async fn chat_returns_runtime_final_answer_not_progress_text() {
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![
+            progress_text_response("checking context first"),
+            MockResponse::text("final answer only"),
+        ],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone());
+
+    let answer = router
+        .run(Capability::Chat, "answer after progress")
+        .await
+        .unwrap();
+
+    assert_eq!(answer, "final answer only");
+    let events = sink.events();
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "assistant_progress"
+                && data["summary"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("checking context first"))
+        }),
+        "missing runtime progress trace: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "final_answer" && data["capability"] == "chat" }),
+        "missing runtime final answer trace: {events:?}"
+    );
 }
 
 #[tokio::test]

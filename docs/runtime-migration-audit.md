@@ -19,6 +19,10 @@ Date: 2026-07-07
   via `AgentEvent::as_final_answer()`.
 - Progress messages are detected through runtime `AgentEvent::as_progress()` and
   are not restored as final chat bubbles.
+  - Test evidence: `chat_returns_runtime_final_answer_not_progress_text` covers
+    a progress `MessageEnd` followed by a final answer and asserts that the
+    product return value uses only the runtime final-answer event while progress
+    is emitted as trace.
 - Automatic compaction calls runtime `AgentHarness::compact()` and reads compact
   summaries from runtime `SessionEntryPayload::Compaction`.
 - Deep Solve, Quiz generation, and Memory workflows run through runtime
