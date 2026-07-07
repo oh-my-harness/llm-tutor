@@ -68,6 +68,21 @@ mentions, and citations.
   wiring is disabled until runtime exposes a safe app-level budget policy for
   ordinary one-turn harnesses and workflows.
 
+## Latest Runtime API Recheck
+
+Checked against local runtime checkout
+`llm-harness-runtime-6a63eaf83d5f868e/bea5374` on 2026-07-07.
+
+| Area | Runtime evidence | Product decision |
+| --- | --- | --- |
+| Declarative workflow routing | `workflow::judge::EdgeConditionJudge` and `NoopJudge` exist, but both are still `pub(crate)`. `WorkflowEngine` can auto-select the edge judge only when the provided judge reports `is_noop()`. | Keep the tiny `RuntimeDeclarativeJudge` marker until runtime exposes a public constructor/helper. |
+| Bounded verifier repair | `WorkflowEngine::with_max_steps` is a global step-count guard. Runtime docs recommend loop counters in structured state for custom routing; no transition-level visit cap is public. | Keep `QuizWorkflowJudge` for the current "repair once, then fail" semantic verifier loop. |
+| Harness setup | `HarnessBuilder` exposes `model_info`, compaction settings, retry, final-answer mode, tools, providers, and session wiring. | Continue using `HarnessBuilder` as the single ordinary harness factory. |
+| Final answer contract | Runtime exposes `FinalAnswerMode`, `AgentEvent::as_final_answer()`, `AgentEvent::as_progress()`, and final/progress assistant message kinds. | Chat and Code Exec now consume these APIs; tests cover both paths. |
+| Streaming deltas | Runtime still emits raw `TextDelta` without final/progress classification; classification is available at terminal message events. | Keep live streaming as raw text for now, while durable bubbles use final-answer events. |
+| Model metadata | Runtime accepts `ModelInfo` for context budgeting and compaction, but does not provide provider-normalized metadata discovery. | Keep product settings diagnostics for `/models` probing and inference until adapter/runtime owns discovery. |
+| Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. | Keep budget limit as product config only; do not enable stop hooks until runtime separates accounting from loop continuation. |
+
 ## Next Runtime API Requests
 
 1. Public declarative workflow constructor or no-op judge helper.
