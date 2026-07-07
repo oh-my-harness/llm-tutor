@@ -37,7 +37,10 @@
   - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still timed out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
   - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and `AgentEvent::as_final_answer()` / `as_progress()`, so durable assistant bubbles no longer come from intermediate progress text.
   - Nineteenth migration step: Deep Solve now consumes runtime `WorkflowEvent::StepProgress` and relays it into product trace events instead of maintaining a separate workflow-progress model.
-  - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
+  - Twentieth migration step: Chat and Code Exec emit product `runtime_usage` traces from `AgentHarness::usage()`, and Deep Solve emits the same trace from runtime `TaskResult.cost`.
+  - Twenty-first migration step: Quiz and Memory workflow helpers now return runtime `TaskResult.cost` alongside domain output, so callers no longer need to reconstruct workflow usage from app-layer state.
+  - Completion audit: remote runtime HEAD and the project pin are both `bea5374`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`d6ec86a3`) and one runtime revision. Active source no longer contains legacy direct `AgentHarnessOptions`, Deep Solve phase-loop, or app-side declarative edge evaluation paths.
+  - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, safe budget policies, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
@@ -142,7 +145,7 @@
 | Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
 | SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
-| WorkflowEngine migration bridge still needs product adapters | Existing product flows need event bridges, executor state mapping, and structured `submit_step_result` prompts before they can stop using direct phase loops | Medium |
+| WorkflowEngine migration bridge still needs thin product adapters | Product flows now run through `WorkflowEngine`, but still need executor state mapping, product trace bridges, and structured `submit_step_result` prompt/result validation until runtime exposes typed workflow helpers | Low |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
 | No public declarative/no-op workflow judge helper | Product workflows need a tiny marker judge to opt into runtime's built-in declarative edge router | Low |
