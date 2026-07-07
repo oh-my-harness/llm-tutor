@@ -1,9 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use llm_harness_runtime::control::budget::BudgetControlAdapter;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::CostAggregate;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig};
 
@@ -20,14 +18,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Governance: $2.00 session budget + JSONL audit log
-    let cost = Arc::new(Mutex::new(CostAggregate::default()));
-    let budget = Arc::new(BudgetControlAdapter::new(cost, 2.00, None));
-
+    // Governance: $2.00 session budget + JSONL audit log.
     let audit_path = std::env::temp_dir().join("tutor_audit.jsonl");
     let audit = Arc::new(JsonlAuditSink::new(&audit_path));
 
-    let governance = GovernanceConfig::new(budget, Some(audit), false);
+    let governance = GovernanceConfig::new(2.00, Some(audit), false);
 
     let router = CapabilityRouter::new(env, llm, governance);
 

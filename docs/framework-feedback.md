@@ -32,11 +32,11 @@
   - Twelfth migration step: agent-side legacy direct structured-output helpers have been removed. Deep Solve, Quiz, and Memory now use runtime workflow/harness paths for LLM orchestration; product code keeps only domain validation, source repair, and runtime executor bridges.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative judges, typed validation/retry helpers, and normalized model metadata discovery.
 
-- **Budget control semantics changed after the runtime update**
-  - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
-  - Directly attaching it to ordinary one-turn chat/code/solve harnesses caused the model loop to continue after a normal answer.
-  - `llm-tutor` now avoids wiring budget as a generic ordinary `should_stop` hook until the relevant flow is migrated through `HarnessBuilder`/`WorkflowEngine`, where runtime can own the cost/budget lifecycle consistently.
-  - Follow-up: re-enable budget limits through runtime-managed builders/workflows instead of product-layer loop control.
+- **Budget control still needs a safer runtime API**
+  - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
+  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally".
+  - `WorkflowEngineConfig` exposes hooks and step cost aggregation, but does not yet expose a simple builder-style `budget(...)` / shared budget policy API for multi-step workflows.
+  - Follow-up: add runtime budget helpers that distinguish per-call budget accounting from agent-loop stop decisions, and expose the same policy for ordinary harnesses and workflows.
 
 - **`BeforeToolCallCtx` requires a live `AssistantMessage` reference, making unit tests noisy**
   - Expected: construct a minimal mock in test code to verify hook logic
@@ -113,6 +113,7 @@
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
 | No public default workflow judge/helper | Product workflows must duplicate a trivial terminal judge unless they use `new_free_task` | Low |
+| No safe app-level budget policy helper | Ordinary one-turn harnesses and multi-step workflows cannot share budget accounting without app-layer loop-risk or hook boilerplate | Medium |
 | No normalized model metadata API | Apps duplicate `/models` probing, auth headers, context-window parsing, and embedding dimension capability discovery | Medium |
 
 ## Proposed v0.3 Changes
@@ -127,3 +128,4 @@
 8. Add normalized model metadata discovery in the adapter/runtime boundary
 9. Expose a public default workflow judge or `WorkflowEngine::new_declarative` helper
 10. Continue hardening `WorkflowEngine` examples for app-level workflows that mix executor steps, LLM steps, and subagent reviewers
+11. Add a safe app-level budget helper/policy API that separates cost accounting from loop continuation

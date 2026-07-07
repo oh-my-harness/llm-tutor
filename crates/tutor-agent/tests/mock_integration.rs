@@ -6,11 +6,10 @@ use llm_harness_loop::{
     LlmError,
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
 };
-use llm_harness_runtime::control::budget::BudgetControlAdapter;
 use llm_harness_runtime::observability::audit::AuditSink;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::{CostAggregate, ExecutionEnv};
+use llm_harness_types::ExecutionEnv;
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
 use tutor_agent::event_sink::EventSink;
@@ -18,9 +17,7 @@ use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{CapabilityRouter, LlmConfig};
 
 fn make_governance(audit: Option<Arc<dyn AuditSink>>) -> GovernanceConfig {
-    let cost = Arc::new(Mutex::new(CostAggregate::default()));
-    let budget = Arc::new(BudgetControlAdapter::new(cost, 100.0, None));
-    GovernanceConfig::new(budget, audit, false)
+    GovernanceConfig::new(100.0, audit, false)
 }
 
 fn make_router(responses: Vec<MockResponse>, governance: GovernanceConfig) -> CapabilityRouter {

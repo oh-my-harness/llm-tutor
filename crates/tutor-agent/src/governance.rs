@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use llm_harness_runtime::control::budget::BudgetControlAdapter;
 use llm_harness_runtime::control::human_approval::HumanApprovalWrapper;
 use llm_harness_runtime::observability::audit::{AuditEntry, AuditEventType, AuditSink};
 use uuid::Uuid;
@@ -8,8 +7,9 @@ use uuid::Uuid;
 /// Session-wide governance configuration shared across all harnesses.
 #[derive(Clone)]
 pub struct GovernanceConfig {
-    /// Shared budget adapter — tracks cumulative cost across all harness sessions.
-    pub budget: Arc<BudgetControlAdapter>,
+    /// Session budget limit in USD. The product stores the limit here while
+    /// runtime budget-policy APIs are still being hardened.
+    pub budget_limit_usd: f64,
     /// Optional audit sink for writing structured learning-trail events.
     pub audit: Option<Arc<dyn AuditSink>>,
     /// Optional human approval gate (wraps `BeforeToolCallHook`).
@@ -20,12 +20,12 @@ pub struct GovernanceConfig {
 
 impl GovernanceConfig {
     pub fn new(
-        budget: Arc<BudgetControlAdapter>,
+        budget_limit_usd: f64,
         audit: Option<Arc<dyn AuditSink>>,
         require_code_exec_approval: bool,
     ) -> Self {
         Self {
-            budget,
+            budget_limit_usd,
             audit,
             approval: None,
             require_code_exec_approval,
@@ -71,16 +71,11 @@ pub async fn record_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_harness_runtime::control::budget::BudgetControlAdapter;
-    use llm_harness_types::CostAggregate;
-    use std::sync::Arc;
-    use std::sync::Mutex;
 
     #[test]
     fn governance_config_builds_without_approval() {
-        let cost = Arc::new(Mutex::new(CostAggregate::default()));
-        let budget = Arc::new(BudgetControlAdapter::new(cost, 2.0, None));
-        let cfg = GovernanceConfig::new(budget, None, false);
+        let cfg = GovernanceConfig::new(2.0, None, false);
         assert!(!cfg.require_code_exec_approval);
+        assert_eq!(cfg.budget_limit_usd, 2.0);
     }
 }

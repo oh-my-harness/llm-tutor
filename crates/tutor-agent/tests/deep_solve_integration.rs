@@ -3,18 +3,14 @@
 // Example DeepSeek:
 //   LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... LLM_MODEL=deepseek-v4-flash
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use llm_harness_runtime::control::budget::BudgetControlAdapter;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::CostAggregate;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig};
 
 fn make_governance() -> GovernanceConfig {
-    let cost = Arc::new(Mutex::new(CostAggregate::default()));
-    let budget = Arc::new(BudgetControlAdapter::new(cost, 2.0, None));
-    GovernanceConfig::new(budget, None, false)
+    GovernanceConfig::new(2.0, None, false)
 }
 
 #[tokio::test]
