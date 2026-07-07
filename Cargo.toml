@@ -15,15 +15,15 @@ license = "MIT"
 
 [workspace.dependencies]
 # Core/runtime crates (same rev from llm-harness-runtime)
-llm-harness-agent = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-agent" }
-llm-harness-types = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-types" }
-llm-harness-loop  = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-loop" }
-llm-harness-runtime = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-runtime" }
-llm-harness-runtime-sandbox-os = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-runtime-sandbox-os" }
-llm-harness-runtime-audit-jsonl = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "490e66ac266539b46d0acc4caa19f31d8c9d28fa", package = "llm-harness-runtime-audit-jsonl" }
+llm-harness-agent = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-agent" }
+llm-harness-types = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-types" }
+llm-harness-loop  = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-loop" }
+llm-harness-runtime = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-runtime" }
+llm-harness-runtime-sandbox-os = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-runtime-sandbox-os" }
+llm-harness-runtime-audit-jsonl = { git = "https://github.com/oh-my-harness/llm-harness-runtime.git", rev = "f97248fb75bdfe3e80585c43fe2e6000ffd43a5e", package = "llm-harness-runtime-audit-jsonl" }
 
 # LLM provider adapter
-llm_adapter = { git = "https://github.com/oh-my-harness/llm-api-adapter", rev = "4594fc2f39beb9651401c2535e59ee6764230876" }
+llm_adapter = { git = "https://github.com/oh-my-harness/llm-api-adapter", rev = "d6ec86a382369f06dc4d767a4a8556493916ef38" }
 
 # Common
 anyhow      = "1"
