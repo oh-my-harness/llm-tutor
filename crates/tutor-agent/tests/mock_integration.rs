@@ -344,6 +344,12 @@ async fn code_exec_returns_runtime_final_answer_not_progress_text() {
             .any(|(kind, data)| { kind == "final_answer" && data["capability"] == "code_exec" }),
         "missing runtime final answer trace: {events:?}"
     );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "runtime_usage" && data["capability"] == "code_exec" }),
+        "missing runtime usage trace: {events:?}"
+    );
 }
 
 #[tokio::test]
@@ -369,6 +375,12 @@ async fn chat_emits_trace_events() {
             .iter()
             .any(|(kind, data)| { kind == "phase_end" && data["capability"] == "chat" }),
         "missing chat phase_end trace: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "runtime_usage" && data["capability"] == "chat" }),
+        "missing chat runtime_usage trace: {events:?}"
     );
 }
 

@@ -59,31 +59,34 @@ async fn run_code_exec_inner(
 
     let client = router.make_client();
     let has_session = session.is_some();
-    let harness = build_runtime_harness(
-        client,
-        router.env.clone(),
-        session,
-        RuntimeHarnessConfig {
-            model: router.llm.model.clone(),
-            model_info: router.llm.model_info(8192),
-            tools,
-            system_prompt: "You are a code execution tutor. When the user asks to run code, \
+    let harness = Arc::new(
+        build_runtime_harness(
+            client,
+            router.env.clone(),
+            session,
+            RuntimeHarnessConfig {
+                model: router.llm.model.clone(),
+                model_info: router.llm.model_info(8192),
+                tools,
+                system_prompt: "You are a code execution tutor. When the user asks to run code, \
              call code_exec with the correct language and code, then explain stdout, stderr, \
              and exit code clearly. For non-trivial numeric calculations or approximations, \
              call code_exec with Python to compute or verify the result before answering. If no \
              runnable code or computable task is provided, ask for the missing details."
-                .into(),
-            before_tool_call,
-            prepare_next_turn: vec![],
-        },
-    )
-    .await?;
+                    .into(),
+                before_tool_call,
+                prepare_next_turn: vec![],
+            },
+        )
+        .await?,
+    );
     if has_session {
         crate::chat::try_auto_compact(&harness, router, "code_exec").await;
     }
     let mut rx = harness.subscribe();
+    let prompt_harness = harness.clone();
     let prompt_task = tokio::spawn(async move {
-        harness
+        prompt_harness
             .prompt_with_messages(messages.unwrap_or_default())
             .await
     });
@@ -195,6 +198,7 @@ async fn run_code_exec_inner(
         serde_json::json!({ "capability": "code_exec", "phase": "execute" }),
     )
     .await;
+    crate::chat::emit_runtime_usage(&harness, router, "code_exec").await;
 
     if let Some(error) = last_error {
         return Err(TutorError::Internal(error));

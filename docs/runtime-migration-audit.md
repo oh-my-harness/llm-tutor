@@ -35,6 +35,10 @@ Date: 2026-07-07
   questions and verifier results.
 - Workflow step progress is consumed from runtime `WorkflowEvent::StepProgress`
   and bridged to product trace events.
+- Ordinary Chat and Code Exec turns emit `runtime_usage` trace events from
+  runtime `AgentHarness::usage()`. This reuses the `CostAccumulatorHook`
+  injected by `HarnessBuilder` instead of duplicating token accounting in
+  product code.
 
 ## Removed Or Avoided Product Reimplementations
 
@@ -81,7 +85,7 @@ Checked against local runtime checkout
 | Final answer contract | Runtime exposes `FinalAnswerMode`, `AgentEvent::as_final_answer()`, `AgentEvent::as_progress()`, and final/progress assistant message kinds. | Chat and Code Exec now consume these APIs; tests cover both paths. |
 | Streaming deltas | Runtime still emits raw `TextDelta` without final/progress classification; classification is available at terminal message events. | Keep live streaming as raw text for now, while durable bubbles use final-answer events. |
 | Model metadata | Runtime accepts `ModelInfo` for context budgeting and compaction, but does not provide provider-normalized metadata discovery. | Keep product settings diagnostics for `/models` probing and inference until adapter/runtime owns discovery. |
-| Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. | Keep budget limit as product config only; do not enable stop hooks until runtime separates accounting from loop continuation. |
+| Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. `HarnessBuilder` does inject `CostAccumulatorHook`, and the harness exposes `usage()`. | Emit runtime usage traces from `AgentHarness::usage()` for observability, but keep budget limits as product config only until runtime separates accounting from loop continuation. |
 
 ## Next Runtime API Requests
 
@@ -97,7 +101,8 @@ Checked against local runtime checkout
 
 - `cargo test -p tutor-agent --test mock_integration` covers ordinary harness
   setup, runtime final/progress splitting for Chat and Code Exec, tool routing,
-  Deep Solve workflow events, and Code Exec sandbox execution.
+  runtime usage traces, Deep Solve workflow events, and Code Exec sandbox
+  execution.
 - `cargo test -p tutor-agent quiz --lib` covers Quiz runtime workflow generation,
   verifier repair, and publish behavior.
 - `cargo test -p tutor-web session --lib` covers runtime-backed session

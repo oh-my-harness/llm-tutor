@@ -178,26 +178,29 @@ async fn run_chat_inner(
     let client = router.make_client();
 
     let has_session = session.is_some();
-    let harness = build_runtime_harness(
-        client,
-        router.env.clone(),
-        session,
-        RuntimeHarnessConfig {
-            model: router.llm.model.clone(),
-            model_info: router.llm.model_info(8192),
-            tools,
-            system_prompt,
-            before_tool_call: vec![],
-            prepare_next_turn: vec![],
-        },
-    )
-    .await?;
+    let harness = Arc::new(
+        build_runtime_harness(
+            client,
+            router.env.clone(),
+            session,
+            RuntimeHarnessConfig {
+                model: router.llm.model.clone(),
+                model_info: router.llm.model_info(8192),
+                tools,
+                system_prompt,
+                before_tool_call: vec![],
+                prepare_next_turn: vec![],
+            },
+        )
+        .await?,
+    );
     if has_session {
         try_auto_compact(&harness, router, capability).await;
     }
     let mut rx = harness.subscribe();
+    let prompt_harness = harness.clone();
     let prompt_task = tokio::spawn(async move {
-        harness
+        prompt_harness
             .prompt_with_messages(messages.unwrap_or_default())
             .await
     });
@@ -344,6 +347,7 @@ async fn run_chat_inner(
         serde_json::json!({ "capability": capability, "phase": "respond" }),
     )
     .await;
+    emit_runtime_usage(&harness, router, capability).await;
     if capability == "research" {
         emit_trace(
             &router.event_sink,
@@ -369,6 +373,28 @@ async fn run_chat_inner(
     }
 
     Ok(last_text)
+}
+
+pub(crate) async fn emit_runtime_usage(
+    harness: &AgentHarness,
+    router: &CapabilityRouter,
+    capability: &str,
+) {
+    let usage = harness.usage();
+    emit_trace(
+        &router.event_sink,
+        "runtime_usage",
+        serde_json::json!({
+            "capability": capability,
+            "input_tokens": usage.total_input_tokens,
+            "output_tokens": usage.total_output_tokens,
+            "cache_read_tokens": usage.total_cache_read_tokens,
+            "cache_write_tokens": usage.total_cache_write_tokens,
+            "reasoning_tokens": usage.total_reasoning_tokens,
+            "cost_usd": usage.total_cost,
+        }),
+    )
+    .await;
 }
 
 pub(crate) async fn try_auto_compact(
