@@ -1,4 +1,6 @@
-use llm_harness_runtime::workflow::model::{Edge, EdgeCondition, Step, Workflow};
+use llm_harness_runtime::workflow::model::{
+    ConditionExpr, Edge, EdgeCondition, Step, Workflow,
+};
 use llm_harness_runtime::workflow::plan::validate_workflow;
 
 use crate::error::{Result, TutorError};
@@ -54,12 +56,12 @@ pub fn deep_solve_workflow() -> Workflow {
             Edge {
                 from: "solve".into(),
                 to: "plan".into(),
-                condition: Some(EdgeCondition::Label("replan_requested".into())),
+                condition: Some(route_condition("replan")),
             },
             Edge {
                 from: "solve".into(),
                 to: "synthesize".into(),
-                condition: Some(EdgeCondition::Label("finish".into())),
+                condition: Some(route_condition("finish")),
             },
         ],
     }
@@ -116,12 +118,12 @@ pub fn quiz_generation_workflow() -> Workflow {
             Edge {
                 from: "verify_questions".into(),
                 to: "publish_questions".into(),
-                condition: Some(EdgeCondition::Label("pass".into())),
+                condition: Some(verdict_condition("pass")),
             },
             Edge {
                 from: "verify_questions".into(),
                 to: "generate_questions".into(),
-                condition: Some(EdgeCondition::Label("repair".into())),
+                condition: Some(action_condition("repair")),
             },
         ],
     }
@@ -132,6 +134,27 @@ pub fn validate_quiz_generation_workflow() -> Result<()> {
         TutorError::Internal(format!(
             "runtime workflow validation failed for {QUIZ_GENERATION_WORKFLOW_ID}: {err}"
         ))
+    })
+}
+
+fn route_condition(route: &str) -> EdgeCondition {
+    EdgeCondition::Expr(ConditionExpr::Eq {
+        pointer: "/route".into(),
+        value: serde_json::json!(route),
+    })
+}
+
+fn verdict_condition(verdict: &str) -> EdgeCondition {
+    EdgeCondition::Expr(ConditionExpr::Eq {
+        pointer: "/verdict".into(),
+        value: serde_json::json!(verdict),
+    })
+}
+
+fn action_condition(action: &str) -> EdgeCondition {
+    EdgeCondition::Expr(ConditionExpr::Eq {
+        pointer: "/action".into(),
+        value: serde_json::json!(action),
     })
 }
 
@@ -147,5 +170,19 @@ mod tests {
     #[test]
     fn quiz_generation_workflow_is_valid_runtime_workflow() {
         validate_quiz_generation_workflow().unwrap();
+    }
+
+    #[test]
+    fn workflows_use_runtime_evaluable_edge_conditions() {
+        for workflow in [deep_solve_workflow(), quiz_generation_workflow()] {
+            for edge in workflow.edges {
+                assert!(
+                    !matches!(edge.condition, Some(EdgeCondition::Label(_))),
+                    "workflow {} -> {} should use Expr conditions so runtime EdgeConditionJudge can route it",
+                    edge.from,
+                    edge.to
+                );
+            }
+        }
     }
 }
