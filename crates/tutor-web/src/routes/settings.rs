@@ -9,10 +9,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use llm_adapter::types::{ChatRequest, Message, RequestContent};
-use llm_adapter_embedding::EmbeddingProvider;
-use llm_adapter_embedding::openai::OpenAIProvider;
-use llm_adapter_embedding::types::EmbeddingRequest;
+use llm_adapter::EmbeddingProvider;
+use llm_adapter::openai::OpenAIProvider;
+use llm_adapter::types::{ChatRequest, EmbeddingRequest, Message, RequestContent};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

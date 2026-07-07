@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use llm_adapter::{Provider, anthropic::AnthropicProvider, deepseek, openai::OpenAIProvider};
 use llm_harness_agent::ModelInfo;
-use llm_harness_runtime_auth::EnvAuthHook;
 
 use crate::error::{Result, TutorError};
 
@@ -115,10 +114,6 @@ impl LlmConfig {
             chat_path,
             context_window_tokens: Some(default_context_window(provider)),
         })
-    }
-
-    pub fn auth_hook(&self) -> Option<EnvAuthHook> {
-        self.api_key_env.clone().map(EnvAuthHook::new)
     }
 
     pub fn build_client(&self) -> Arc<dyn Provider> {

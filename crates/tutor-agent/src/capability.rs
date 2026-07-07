@@ -116,17 +116,6 @@ impl CapabilityRouter {
         self.llm.build_client()
     }
 
-    /// Returns an auth hook; `None` when a mock client is injected.
-    pub(crate) fn auth_hook(&self) -> Option<Arc<dyn llm_harness_types::AuthHook>> {
-        if self.client.is_some() {
-            return None;
-        }
-        use llm_harness_types::AuthHook;
-        self.llm
-            .auth_hook()
-            .map(|h| Arc::new(h) as Arc<dyn AuthHook>)
-    }
-
     /// Route a question to the appropriate capability.
     pub async fn run(&self, capability: Capability, question: &str) -> Result<String> {
         self.run_with_messages(capability, vec![crate::chat::user_message(question)])

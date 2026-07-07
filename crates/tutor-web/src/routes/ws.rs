@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -12,8 +12,8 @@ use axum::{
     routing::get,
 };
 use futures::{SinkExt, StreamExt, future::BoxFuture};
-use llm_harness_runtime::budget::BudgetControlAdapter;
-use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
+use llm_harness_runtime::control::budget::BudgetControlAdapter;
+use llm_harness_types::CostAggregate;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use serde::Deserialize;
@@ -75,18 +75,6 @@ impl EventSink for PersistedEventSink {
     }
 }
 
-struct NoOpPricing;
-
-impl PricingProvider for NoOpPricing {
-    fn price_for(&self, _model: &str, _provider: &str) -> Option<TokenPrice> {
-        Some(TokenPrice {
-            input_per_mtok: 0.0,
-            output_per_mtok: 0.0,
-            cache_read_per_mtok: 0.0,
-            cache_write_per_mtok: 0.0,
-        })
-    }
-}
 
 #[derive(Deserialize)]
 #[serde(tag = "type")]
@@ -299,11 +287,8 @@ async fn run_tutor_message(
             .as_ref()
             .and_then(|config| config.budget_limit_usd)
             .unwrap_or(2.0);
-        let budget = Arc::new(BudgetControlAdapter::new(
-            Arc::new(NoOpPricing),
-            budget_limit,
-            None,
-        ));
+        let cost = Arc::new(Mutex::new(CostAggregate::default()));
+        let budget = Arc::new(BudgetControlAdapter::new(cost, budget_limit, None));
         let audit_path = std::env::temp_dir().join(format!("tutor_web_{}.jsonl", entry.id));
         let audit = Arc::new(JsonlAuditSink::new(&audit_path));
         let require_approval = entry

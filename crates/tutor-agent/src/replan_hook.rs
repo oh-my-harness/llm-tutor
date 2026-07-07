@@ -43,11 +43,14 @@ impl BeforeToolCallHook for ReplanHook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_harness_types::{BeforeToolCallCtx, ContentBlock};
+    use llm_harness_types::{AssistantMessageKind, BeforeToolCallCtx, ContentBlock};
     use std::sync::{Arc, Mutex};
 
     fn make_msg() -> &'static llm_harness_types::AssistantMessage {
         Box::leak(Box::new(llm_harness_types::AssistantMessage {
+            kind: AssistantMessageKind::FinalAnswer,
+            message_id: String::new(),
+            turn_id: String::new(),
             content: vec![],
             usage: None,
             stop_reason: None,

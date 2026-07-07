@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use llm_adapter::provider::Provider;
-use llm_harness_runtime::audit::AuditEventType;
-use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
+use llm_harness_runtime::observability::audit::AuditEventType;
+use llm_harness_loop::CompositeBeforeToolCallHook;
 use llm_harness_types::ExecutionEnv;
 
 use crate::deep_solve_events as deep_events;
@@ -10,6 +10,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
+use crate::runtime_workflow::{DEEP_SOLVE_WORKFLOW_ID, validate_deep_solve_workflow};
 use crate::solve_context::{Plan, SolveContext, StepResult};
 use tutor_tools::WebSearchConfig;
 
@@ -65,18 +66,20 @@ impl SolveOrchestrator {
         self.llm.build_client()
     }
 
-    fn auth_hook(&self) -> Option<Arc<dyn llm_harness_types::AuthHook>> {
-        if self.client.is_some() {
-            return None;
-        }
-        use llm_harness_types::AuthHook;
-        self.llm
-            .auth_hook()
-            .map(|h| Arc::new(h) as Arc<dyn AuthHook>)
-    }
-
-    /// Run the full pipeline: [Pre-retrieve] → Plan → (Solve → [REPLAN])* → Synthesize.
+    /// Run the full pipeline: [Pre-retrieve] -> Plan -> (Solve -> [REPLAN])* -> Synthesize.
     pub async fn run(&mut self, kb: Option<&str>) -> Result<String> {
+        validate_deep_solve_workflow()?;
+        emit_trace(
+            &self.event_sink,
+            "workflow_validated",
+            serde_json::json!({
+                "capability": "deep_solve",
+                "workflow": DEEP_SOLVE_WORKFLOW_ID,
+                "runtime": "llm-harness-runtime",
+            }),
+        )
+        .await;
+
         if let Some(kb_text) = kb {
             self.run_pre_retrieve(kb_text).await?;
         }
@@ -137,10 +140,8 @@ impl SolveOrchestrator {
     }
 
     async fn run_plan(&mut self) -> Result<()> {
-        use llm_harness_agent::{
-            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
-        };
-        use llm_harness_types::{AfterProviderResponseHook, AgentEvent, ContentBlock};
+        use llm_harness_agent::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions};
+        use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
@@ -207,13 +208,6 @@ impl SolveOrchestrator {
                  Respond only with the requested JSON."
                     .into(),
             ),
-            auth: self.auth_hook(),
-            hooks: HarnessHooks {
-                after_provider_response: vec![
-                    self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
-                ],
-                ..HarnessHooks::none()
-            },
             ..AgentHarnessOptions::new(self.llm.model.clone())
         };
 
@@ -293,8 +287,7 @@ impl SolveOrchestrator {
             AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
         };
         use llm_harness_types::{
-            AfterProviderResponseHook, AgentEvent, BeforeToolCallHook, ContentBlock,
-            PrepareNextTurnHook,
+            AgentEvent, BeforeToolCallHook, ContentBlock, PrepareNextTurnHook,
         };
         use std::sync::Arc;
         use tutor_tools::{
@@ -407,17 +400,13 @@ impl SolveOrchestrator {
                      web_fetch to read important source pages, and code_exec to run code.\n\
                      For non-trivial numeric calculations, approximations, transcendental functions, \
                      statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
-                     If the current plan is fundamentally wrong, call replan(reason) — \
+                     If the current plan is fundamentally wrong, call replan(reason) - \
                      this aborts the step and triggers a new plan.\n\
                      When done, write FINISH: followed by your conclusion for this step.",
                     id = step.id,
                     goal = step.goal,
                 )),
-                auth: self.auth_hook(),
                 hooks: HarnessHooks {
-                    after_provider_response: vec![
-                        self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
-                    ],
                     before_tool_call: before_tool_call.clone(),
                     prepare_next_turn: vec![phase_mgr as Arc<dyn PrepareNextTurnHook>],
                     ..HarnessHooks::none()
@@ -566,9 +555,9 @@ impl SolveOrchestrator {
 
     async fn run_synthesize(&mut self) -> Result<String> {
         use llm_harness_agent::{
-            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
+            AgentHarness, AgentHarnessEvent, AgentHarnessOptions,
         };
-        use llm_harness_types::{AfterProviderResponseHook, AgentEvent, ContentBlock};
+        use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
             &self.governance.audit,
@@ -611,13 +600,6 @@ impl SolveOrchestrator {
                  Be clear, structured, and educational."
                     .into(),
             ),
-            auth: self.auth_hook(),
-            hooks: HarnessHooks {
-                after_provider_response: vec![
-                    self.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
-                ],
-                ..HarnessHooks::none()
-            },
             ..AgentHarnessOptions::new(self.llm.model.clone())
         };
 

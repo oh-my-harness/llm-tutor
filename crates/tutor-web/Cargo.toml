@@ -13,7 +13,6 @@ tutor-agent = { path = "../tutor-agent" }
 tutor-rag = { path = "../tutor-rag" }
 tutor-tools = { path = "../tutor-tools" }
 llm_adapter = { workspace = true }
-llm_adapter_embedding = { workspace = true }
 llm-harness-agent = { workspace = true }
 llm-harness-runtime = { workspace = true }
 llm-harness-types = { workspace = true }

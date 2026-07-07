@@ -32,6 +32,7 @@ impl PrepareNextTurnHook for PhaseManager {
                 context: None,
                 model: None,
                 thinking_level: None,
+                temperature: None,
                 tools: None,
                 active_tools: Some(tools),
             })

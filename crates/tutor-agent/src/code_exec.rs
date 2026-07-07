@@ -3,9 +3,9 @@ use std::sync::Arc;
 use llm_harness_agent::{
     AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks, Session,
 };
-use llm_harness_runtime::composite::CompositeBeforeToolCallHook;
+use llm_harness_loop::CompositeBeforeToolCallHook;
 use llm_harness_types::{
-    AfterProviderResponseHook, AgentEvent, AgentMessage, BeforeToolCallHook, ContentBlock,
+    AgentEvent, AgentMessage, BeforeToolCallHook, ContentBlock,
 };
 use tutor_tools::CodeExecTool;
 
@@ -72,11 +72,7 @@ async fn run_code_exec_inner(
              runnable code or computable task is provided, ask for the missing details."
                 .into(),
         ),
-        auth: router.auth_hook(),
         hooks: HarnessHooks {
-            after_provider_response: vec![
-                router.governance.budget.clone() as Arc<dyn AfterProviderResponseHook>
-            ],
             before_tool_call,
             ..HarnessHooks::none()
         },

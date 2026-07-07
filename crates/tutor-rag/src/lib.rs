@@ -9,9 +9,9 @@ use arrow_schema::{DataType, Field, Schema};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
 use lancedb::query::{ExecutableQuery, QueryBase, Select};
-use llm_adapter_embedding::EmbeddingProvider;
-use llm_adapter_embedding::openai::OpenAIProvider;
-use llm_adapter_embedding::types::EmbeddingRequest;
+use llm_adapter::EmbeddingProvider;
+use llm_adapter::openai::OpenAIProvider;
+use llm_adapter::types::EmbeddingRequest;
 use serde::{Deserialize, Serialize};
 
 const TABLE_NAME: &str = "chunks";

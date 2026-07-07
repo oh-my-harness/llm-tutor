@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use llm_harness_agent::{
-    AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks, Session,
+    AgentHarness, AgentHarnessEvent, AgentHarnessOptions, Session,
 };
 use llm_harness_types::{
-    AfterProviderResponseHook, AgentEvent, AgentMessage, AssistantMessage, ContentBlock,
+    AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, ContentBlock,
     StopReason, UserMessage,
 };
 use tutor_tools::{
@@ -176,18 +176,11 @@ async fn run_chat_inner(
     ];
     tools.extend(router.product_tools.iter().cloned());
 
-    let gov = &router.governance;
-
     let opts = AgentHarnessOptions {
         model: router.llm.model.clone(),
         model_info: Some(router.llm.model_info(8192)),
         tools,
         system_prompt: Some(system_prompt),
-        auth: router.auth_hook(),
-        hooks: HarnessHooks {
-            after_provider_response: vec![gov.budget.clone() as Arc<dyn AfterProviderResponseHook>],
-            ..HarnessHooks::none()
-        },
         ..AgentHarnessOptions::new(router.llm.model.clone())
     };
 
@@ -399,6 +392,9 @@ pub fn user_message(text: &str) -> AgentMessage {
 
 pub fn assistant_message(text: &str) -> AgentMessage {
     AgentMessage::Assistant(AssistantMessage {
+        kind: AssistantMessageKind::FinalAnswer,
+        message_id: String::new(),
+        turn_id: String::new(),
         content: vec![ContentBlock::Text {
             text: text.to_string(),
         }],

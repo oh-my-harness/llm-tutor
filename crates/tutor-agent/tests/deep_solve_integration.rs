@@ -3,28 +3,17 @@
 // Example DeepSeek:
 //   LLM_PROVIDER=deepseek DEEPSEEK_API_KEY=... LLM_MODEL=deepseek-v4-flash
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use llm_harness_runtime::budget::BudgetControlAdapter;
-use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
+use llm_harness_runtime::control::budget::BudgetControlAdapter;
 use llm_harness_runtime_sandbox_os::OsEnv;
+use llm_harness_types::CostAggregate;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{Capability, CapabilityRouter, LlmConfig};
 
-struct NoOpPricing;
-impl PricingProvider for NoOpPricing {
-    fn price_for(&self, _model: &str, _provider: &str) -> Option<TokenPrice> {
-        Some(TokenPrice {
-            input_per_mtok: 0.0,
-            output_per_mtok: 0.0,
-            cache_read_per_mtok: 0.0,
-            cache_write_per_mtok: 0.0,
-        })
-    }
-}
-
 fn make_governance() -> GovernanceConfig {
-    let budget = Arc::new(BudgetControlAdapter::new(Arc::new(NoOpPricing), 2.0, None));
+    let cost = Arc::new(Mutex::new(CostAggregate::default()));
+    let budget = Arc::new(BudgetControlAdapter::new(cost, 2.0, None));
     GovernanceConfig::new(budget, None, false)
 }
 

@@ -13,8 +13,8 @@ tutor-tools = { path = "../tutor-tools" }
 tutor-rag = { path = "../tutor-rag" }
 llm-harness-agent  = { workspace = true }
 llm-harness-types  = { workspace = true }
+llm-harness-loop = { workspace = true }
 llm-harness-runtime = { workspace = true }
-llm-harness-runtime-auth = { workspace = true }
 llm-harness-runtime-sandbox-os = { workspace = true }
 llm-harness-runtime-audit-jsonl = { workspace = true }
 llm_adapter.workspace = true

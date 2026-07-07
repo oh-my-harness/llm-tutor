@@ -6,32 +6,20 @@ use llm_harness_loop::{
     LlmError,
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
 };
-use llm_harness_runtime::audit::AuditSink;
-use llm_harness_runtime::budget::BudgetControlAdapter;
-use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
+use llm_harness_runtime::control::budget::BudgetControlAdapter;
+use llm_harness_runtime::observability::audit::AuditSink;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::ExecutionEnv;
+use llm_harness_types::{CostAggregate, ExecutionEnv};
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
 use tutor_agent::event_sink::EventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{CapabilityRouter, LlmConfig};
 
-struct NoPricing;
-impl PricingProvider for NoPricing {
-    fn price_for(&self, _model: &str, _provider: &str) -> Option<TokenPrice> {
-        Some(TokenPrice {
-            input_per_mtok: 0.0,
-            output_per_mtok: 0.0,
-            cache_read_per_mtok: 0.0,
-            cache_write_per_mtok: 0.0,
-        })
-    }
-}
-
 fn make_governance(audit: Option<Arc<dyn AuditSink>>) -> GovernanceConfig {
-    let budget = Arc::new(BudgetControlAdapter::new(Arc::new(NoPricing), 100.0, None));
+    let cost = Arc::new(Mutex::new(CostAggregate::default()));
+    let budget = Arc::new(BudgetControlAdapter::new(cost, 100.0, None));
     GovernanceConfig::new(budget, audit, false)
 }
 
@@ -83,6 +71,7 @@ async fn chat_returns_error_instead_of_no_response() {
     let responses = vec![MockResponse {
         events: vec![Err(LlmError::InvalidRequest("bad request".into()))],
         model: "mock-model".into(),
+        stream_error: None,
     }];
     let router = make_router(responses, make_governance(None));
 

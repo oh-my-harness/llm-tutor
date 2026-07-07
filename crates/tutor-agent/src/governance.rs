@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use llm_harness_runtime::audit::{AuditEntry, AuditEventType, AuditSink};
-use llm_harness_runtime::budget::BudgetControlAdapter;
-use llm_harness_runtime::human_approval::HumanApprovalWrapper;
+use llm_harness_runtime::control::budget::BudgetControlAdapter;
+use llm_harness_runtime::control::human_approval::HumanApprovalWrapper;
+use llm_harness_runtime::observability::audit::{AuditEntry, AuditEventType, AuditSink};
 use uuid::Uuid;
 
 /// Session-wide governance configuration shared across all harnesses.
@@ -71,25 +71,15 @@ pub async fn record_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_harness_runtime::budget::BudgetControlAdapter;
-    use llm_harness_runtime::cost::{PricingProvider, TokenPrice};
+    use llm_harness_runtime::control::budget::BudgetControlAdapter;
+    use llm_harness_types::CostAggregate;
     use std::sync::Arc;
-
-    struct NoPricing;
-    impl PricingProvider for NoPricing {
-        fn price_for(&self, _model: &str, _provider: &str) -> Option<TokenPrice> {
-            Some(TokenPrice {
-                input_per_mtok: 0.0,
-                output_per_mtok: 0.0,
-                cache_read_per_mtok: 0.0,
-                cache_write_per_mtok: 0.0,
-            })
-        }
-    }
+    use std::sync::Mutex;
 
     #[test]
     fn governance_config_builds_without_approval() {
-        let budget = Arc::new(BudgetControlAdapter::new(Arc::new(NoPricing), 2.0, None));
+        let cost = Arc::new(Mutex::new(CostAggregate::default()));
+        let budget = Arc::new(BudgetControlAdapter::new(cost, 2.0, None));
         let cfg = GovernanceConfig::new(budget, None, false);
         assert!(!cfg.require_code_exec_approval);
     }
