@@ -120,7 +120,12 @@ async fn smoke_deep_solve_one_step() {
         r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;
     let responses = vec![
         MockResponse::text(plan_json),
-        MockResponse::text("FINISH: the answer is 4"),
+        MockResponse::tool_use(
+            "submit-solve",
+            "submit_step_result",
+            r#"{"result":{"route":"finish","summary":"the answer is 4"}}"#,
+        ),
+        MockResponse::text("Solved: the answer is 4."),
         MockResponse::text("The final answer is 4."),
     ];
     let router = make_router(responses, make_governance(None));
@@ -140,7 +145,12 @@ async fn audit_captures_deep_solve_state_transitions() {
     let plan_json = r#"{"analysis":"simple","steps":[{"id":"s1","goal":"compute the value"}]}"#;
     let responses = vec![
         MockResponse::text(plan_json),
-        MockResponse::text("FINISH: computed"),
+        MockResponse::tool_use(
+            "submit-solve",
+            "submit_step_result",
+            r#"{"result":{"route":"finish","summary":"computed"}}"#,
+        ),
+        MockResponse::text("Solved: computed."),
         MockResponse::text("The answer is 42."),
     ];
     let router = make_router(responses, make_governance(Some(sink)));
@@ -151,20 +161,16 @@ async fn audit_captures_deep_solve_state_transitions() {
 
     let content = std::fs::read_to_string(&audit_path).unwrap();
     assert!(
-        content.contains("\"plan\""),
-        "audit missing plan phase: {content}"
+        content.contains("\"retrieve\""),
+        "audit missing retrieve phase: {content}"
     );
     assert!(
-        content.contains("\"solve_steps\""),
-        "audit missing solve_steps phase: {content}"
-    );
-    assert!(
-        content.contains("\"synthesize\""),
-        "audit missing synthesize phase: {content}"
+        content.contains("\"has_kb\""),
+        "audit missing runtime retrieve metadata: {content}"
     );
 
     let count = JsonlAuditSink::validate(&audit_path).await.unwrap();
-    assert!(count >= 3, "expected at least 3 audit entries, got {count}");
+    assert!(count >= 1, "expected at least 1 audit entry, got {count}");
 }
 
 #[tokio::test]
@@ -174,7 +180,12 @@ async fn deep_solve_emits_structured_ux_events() {
         r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;
     let responses = vec![
         MockResponse::text(plan_json),
-        MockResponse::text("FINISH: the answer is 4"),
+        MockResponse::tool_use(
+            "submit-solve",
+            "submit_step_result",
+            r#"{"result":{"route":"finish","summary":"the answer is 4"}}"#,
+        ),
+        MockResponse::text("Solved: the answer is 4."),
         MockResponse::text("The final answer is 4."),
     ];
     let router = make_router(responses, make_governance(None)).with_event_sink(sink.clone());
@@ -195,24 +206,13 @@ async fn deep_solve_emits_structured_ux_events() {
     );
     assert!(
         events.iter().any(|(kind, data)| {
-            kind == "deep_solve_plan"
-                && data["analysis"] == "simple addition"
-                && data["steps"]
-                    .as_array()
-                    .is_some_and(|steps| steps.len() == 1)
-        }),
-        "missing structured plan: {events:?}"
-    );
-    assert!(
-        events.iter().any(|(kind, data)| {
-            kind == "deep_solve_step_done"
+            kind == "deep_solve_stage_done"
                 && data["stage"] == "solve"
-                && data["step_id"] == "s1"
                 && data["summary"]
                     .as_str()
                     .is_some_and(|text| text.contains("4"))
         }),
-        "missing step done event: {events:?}"
+        "missing runtime solve stage done: {events:?}"
     );
     assert!(
         events.iter().any(|(kind, data)| {

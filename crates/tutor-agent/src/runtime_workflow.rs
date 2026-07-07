@@ -20,16 +20,27 @@ pub fn deep_solve_workflow() -> Workflow {
             Step::llm(
                 "plan",
                 "Create solve plan",
-                "Create a concise, grounded plan for solving the learner question.",
+                "Read the workflow Context for `question` and optional `kb_summary`. \
+                 Create a concise, grounded step-by-step plan for solving the learner question. \
+                 Output the plan as readable text; the next step will receive this step history.",
                 vec![],
             ),
             Step::llm(
                 "solve",
                 "Solve steps",
-                "Execute the current solve plan. Use available tools when verification or fresh evidence is needed.",
+                "Read the workflow Context and prior step history, then execute the current solve plan. \
+                 Use available tools when verification, calculation, memory, RAG, or fresh evidence is needed. \
+                 For non-trivial numeric calculations, approximations, transcendental functions, statistics, \
+                 or simulations, use code_exec to compute or verify the result. \
+                 When this step is complete, call submit_step_result with a JSON object. \
+                 Use {\"route\":\"finish\",\"summary\":\"...\"} when the work is ready for synthesis. \
+                 Use {\"route\":\"replan\",\"reason\":\"...\"} only if the current plan is fundamentally wrong.",
                 vec![
                     "rag_search".into(),
+                    "read_memory".into(),
+                    "write_memory".into(),
                     "web_search".into(),
+                    "web_fetch".into(),
                     "code_exec".into(),
                     "replan".into(),
                 ],
@@ -37,7 +48,8 @@ pub fn deep_solve_workflow() -> Workflow {
             Step::llm(
                 "synthesize",
                 "Synthesize answer",
-                "Synthesize the verified work into a clear final answer for the learner.",
+                "Read the workflow Context and prior step history. Synthesize the verified work into a clear final answer for the learner. \
+                 Start with the direct answer, then provide the explanation.",
                 vec![],
             ),
         ],

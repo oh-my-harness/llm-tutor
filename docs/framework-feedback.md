@@ -26,7 +26,8 @@
   - Sixth migration step: `llm-tutor` now has a thin `runtime_engine` adapter that builds `WorkflowEngineConfig` from the product `ExecutionEnv`, LLM client, model, and runtime JSONL session factory. A smoke test runs an executor workflow through runtime `WorkflowEngine`.
   - Seventh migration step: Quiz generation now has a product runtime workflow path. `collect_sources`, `generate_questions`, `verify_questions`, and `publish_questions` run as runtime executor steps, and the repair edge is driven by `WorkflowEngine` transitions. The web Quiz route and chat `create_quiz` tool now call this runtime workflow path when an LLM is configured.
   - Eighth migration step: Memory assist/update/check/dedupe now has a runtime `WorkflowEngine` path. The web memory route builds a runtime workflow config with a JSONL session root and runs the LLM-backed memory workflow through a registered runtime executor.
-  - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz/Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
+  - Ninth migration step: Deep Solve now runs through runtime `WorkflowEngine`. Product code registers a retrieve executor, product tools/hooks, and a thin event bridge; runtime owns the plan/solve/synthesize LLM step sessions, step history, `submit_step_result` routing, and workflow transitions.
+  - Remaining migration target: move Quiz/Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
 
 - **Budget control semantics changed after the runtime update**
   - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
@@ -46,8 +47,8 @@
 
 - **Resolved: repeated harness setup has been consolidated**
   - Earlier `SolveOrchestrator` phases repeated manual `AgentHarnessOptions` and harness setup code.
-  - `llm-tutor` now uses a local thin `runtime_harness` adapter over runtime `HarnessBuilder`, keeping product code focused on prompts, tools, and hooks while the runtime owns harness assembly.
-  - Follow-up: replace the remaining phase loop with `WorkflowEngine` so step execution, transition judging, and retries are also runtime-owned.
+  - `llm-tutor` now uses runtime `HarnessBuilder` for ordinary capability harness setup and runtime `WorkflowEngine` for Deep Solve, Quiz generation, and Memory assist workflows.
+  - Follow-up: reduce product-side bridge code as runtime exposes public declarative judges and typed structured-output helpers.
 
 - **Session option/metadata types are not re-exported from the root facade**
   - Expected: common session types used with `JsonlSessionRepo` can be imported from `llm_harness_agent::{...}` or the prelude.
@@ -81,7 +82,7 @@
 
 - **Default workflow judge is not public**
   - Expected: product code can construct a simple terminal/free-task workflow through public runtime APIs without implementing a custom `StepTransitionJudge`.
-  - Actual: `WorkflowEngine::new_free_task` hides the no-op judge, but custom product workflows require a `StepTransitionJudge` and runtime's `NoopJudge` is `pub(crate)`, so apps must duplicate tiny terminal judges for smoke tests or one-step executor flows.
+  - Actual: `WorkflowEngine::new_free_task` hides the no-op judge, but custom product workflows require a `StepTransitionJudge` and runtime's `NoopJudge` / `EdgeConditionJudge` are `pub(crate)`, so apps must duplicate tiny terminal/declarative judges for smoke tests and declarative edge workflows.
   - Suggestion: expose a `WorkflowEngine::new_declarative(workflow, config)` helper that selects the built-in edge judge automatically, or publish a small `NoopJudge`/`TerminalJudge` constructor.
 
 - **Model metadata discovery is still app-specific**

@@ -1,18 +1,28 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use futures::future::BoxFuture;
 use llm_adapter::provider::Provider;
-use llm_harness_runtime::observability::audit::AuditEventType;
+use llm_harness_agent::HarnessHooks;
 use llm_harness_loop::CompositeBeforeToolCallHook;
-use llm_harness_types::ExecutionEnv;
+use llm_harness_runtime::control::cost::CostAggregate;
+use llm_harness_runtime::observability::audit::AuditEventType;
+use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEvent};
+use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
+use llm_harness_runtime::workflow::model::StepResult as RuntimeStepResult;
+use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, Tool};
 
 use crate::deep_solve_events as deep_events;
 use crate::error::{Result, TutorError};
 use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
+use crate::runtime_engine::{DeclarativeEdgeJudge, build_workflow_engine_config};
 use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
-use crate::runtime_workflow::{DEEP_SOLVE_WORKFLOW_ID, validate_deep_solve_workflow};
-use crate::solve_context::{Plan, SolveContext, StepResult};
+use crate::runtime_workflow::{
+    DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow, validate_deep_solve_workflow,
+};
+use crate::solve_context::{Plan, SolveContext, StepResult as SolveStepResult};
 use tutor_tools::WebSearchConfig;
 
 /// Drives the four-phase Deep Solve pipeline.
@@ -24,6 +34,7 @@ pub struct SolveOrchestrator {
     event_sink: Option<SharedEventSink>,
     web_search: Option<WebSearchConfig>,
     client: Option<Arc<dyn Provider>>,
+    workflow_root: Option<PathBuf>,
 }
 
 impl SolveOrchestrator {
@@ -41,6 +52,7 @@ impl SolveOrchestrator {
             event_sink: None,
             web_search: None,
             client: None,
+            workflow_root: None,
         }
     }
 
@@ -60,6 +72,11 @@ impl SolveOrchestrator {
         self
     }
 
+    pub fn with_workflow_root(mut self, root: Option<PathBuf>) -> Self {
+        self.workflow_root = root;
+        self
+    }
+
     fn make_client(&self) -> Arc<dyn Provider> {
         if let Some(c) = &self.client {
             return c.clone();
@@ -70,6 +87,7 @@ impl SolveOrchestrator {
     /// Run the full pipeline: [Pre-retrieve] -> Plan -> (Solve -> [REPLAN])* -> Synthesize.
     pub async fn run(&mut self, kb: Option<&str>) -> Result<String> {
         validate_deep_solve_workflow()?;
+        let workflow = deep_solve_workflow();
         emit_trace(
             &self.event_sink,
             "workflow_validated",
@@ -81,24 +99,111 @@ impl SolveOrchestrator {
         )
         .await;
 
-        if let Some(kb_text) = kb {
-            self.run_pre_retrieve(kb_text).await?;
+        deep_events::stage_start(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Plan,
+            "Run Deep Solve workflow",
+        )
+        .await;
+
+        let question = self.context.lock().unwrap().question.clone();
+        let client = self.make_client();
+        let session_root = self
+            .workflow_root
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join("llm-tutor-workflow-sessions"))
+            .join("deep-solve");
+        let config = build_workflow_engine_config(
+            client.clone(),
+            self.llm.model.clone(),
+            self.env.clone(),
+            session_root,
+        );
+
+        let mut engine = WorkflowEngine::new(
+            workflow.clone(),
+            config,
+            Arc::new(DeclarativeEdgeJudge::new(&workflow)),
+        )
+        .map_err(|err| TutorError::Internal(format!("deep solve workflow init failed: {err}")))?
+        .with_executor(
+            "tutor.deep_solve.retrieve",
+            Arc::new(DeepSolveRetrieveExecutor {
+                question,
+                kb: kb.map(str::to_string),
+                event_sink: self.event_sink.clone(),
+                governance: self.governance.clone(),
+            }),
+        )
+        .with_hooks(HarnessHooks {
+            before_tool_call: self.deep_solve_before_tool_hooks(),
+            ..HarnessHooks::none()
+        });
+
+        for tool in self.deep_solve_tools() {
+            engine = engine.with_tool(tool);
         }
 
-        loop {
-            self.run_plan().await?;
-            self.run_solve_steps().await?;
-
-            if !should_replan(&self.context.lock().unwrap()) {
-                self.context.lock().unwrap().replan_reason = None;
-                break;
-            }
-            self.context.lock().unwrap().reset_for_replan();
-        }
-
-        self.run_synthesize().await
+        let event_task =
+            relay_deep_solve_workflow_events(engine.subscribe(), self.event_sink.clone());
+        let result = engine
+            .run()
+            .await
+            .map_err(|err| TutorError::Internal(format!("deep solve workflow failed: {err}")))?;
+        drop(engine);
+        let _ = event_task.await;
+        let answer = result
+            .final_message
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or_else(|| "No synthesis generated.".into());
+        emit_content(&self.event_sink, answer.clone(), false).await;
+        deep_events::final_answer(&self.event_sink, &answer).await;
+        deep_events::stage_done(
+            &self.event_sink,
+            deep_events::DeepSolveStage::Synthesize,
+            "Run Deep Solve workflow",
+            "Final explanation generated",
+        )
+        .await;
+        Ok(answer)
     }
 
+    fn deep_solve_before_tool_hooks(&self) -> Vec<Arc<dyn BeforeToolCallHook>> {
+        let replan_hook = Arc::new(crate::replan_hook::ReplanHook::new(self.context.clone()));
+        if let Some(approval) = &self.governance.approval {
+            vec![Arc::new(CompositeBeforeToolCallHook::new(vec![
+                approval.clone() as Arc<dyn BeforeToolCallHook>,
+                replan_hook as Arc<dyn BeforeToolCallHook>,
+            ]))]
+        } else {
+            vec![replan_hook as Arc<dyn BeforeToolCallHook>]
+        }
+    }
+
+    fn deep_solve_tools(&self) -> Vec<Arc<dyn Tool>> {
+        use tutor_tools::{
+            CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool,
+            WriteMemoryTool,
+        };
+
+        vec![
+            Arc::new(ReadMemoryTool::new()),
+            Arc::new(WriteMemoryTool::new()),
+            Arc::new(RagSearchTool::new()),
+            Arc::new(match self.web_search.clone() {
+                Some(config) => WebSearchTool::with_config(config),
+                None => WebSearchTool::new(),
+            }),
+            Arc::new(match self.web_search.clone() {
+                Some(config) => WebFetchTool::with_config(config),
+                None => WebFetchTool::new(),
+            }),
+            Arc::new(CodeExecTool::new()),
+            Arc::new(crate::replan_tool::ReplanTool),
+        ]
+    }
+
+    #[allow(dead_code)]
     async fn run_pre_retrieve(&mut self, kb: &str) -> Result<()> {
         deep_events::stage_start(
             &self.event_sink,
@@ -140,6 +245,7 @@ impl SolveOrchestrator {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn run_plan(&mut self) -> Result<()> {
         use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{AgentEvent, ContentBlock};
@@ -286,6 +392,7 @@ impl SolveOrchestrator {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn run_solve_steps(&mut self) -> Result<()> {
         use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{
@@ -520,10 +627,14 @@ impl SolveOrchestrator {
             } else {
                 finish_text
             };
-            self.context.lock().unwrap().step_results.push(StepResult {
-                step_id: step.id.clone(),
-                finish_text: final_step_text.clone(),
-            });
+            self.context
+                .lock()
+                .unwrap()
+                .step_results
+                .push(SolveStepResult {
+                    step_id: step.id.clone(),
+                    finish_text: final_step_text.clone(),
+                });
             deep_events::step_done(&self.event_sink, &step.id, &step.goal, final_step_text).await;
             emit_trace(
                 &self.event_sink,
@@ -555,6 +666,7 @@ impl SolveOrchestrator {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn run_synthesize(&mut self) -> Result<String> {
         use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{AgentEvent, ContentBlock};
@@ -662,12 +774,142 @@ impl SolveOrchestrator {
     }
 }
 
+fn relay_deep_solve_workflow_events(
+    mut rx: tokio::sync::broadcast::Receiver<WorkflowEvent>,
+    sink: Option<SharedEventSink>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            match event {
+                WorkflowEvent::StepStarted { step_id, step_name } => {
+                    let stage = deep_solve_stage_for_step(&step_id);
+                    deep_events::stage_start(&sink, stage, &step_name).await;
+                }
+                WorkflowEvent::StepFinished { step_id, result } => {
+                    let stage = deep_solve_stage_for_step(&step_id);
+                    let summary = result
+                        .structured
+                        .as_ref()
+                        .and_then(|value| {
+                            value
+                                .get("summary")
+                                .or_else(|| value.get("reason"))
+                                .and_then(serde_json::Value::as_str)
+                        })
+                        .unwrap_or(&result.output)
+                        .to_string();
+                    deep_events::stage_done(&sink, stage, &step_id, summary).await;
+                }
+                WorkflowEvent::Failed { error } => {
+                    emit_trace(
+                        &sink,
+                        "workflow_failed",
+                        serde_json::json!({
+                            "capability": "deep_solve",
+                            "error": error,
+                        }),
+                    )
+                    .await;
+                }
+                WorkflowEvent::Paused { .. }
+                | WorkflowEvent::Resumed
+                | WorkflowEvent::Cancelled { .. } => {}
+            }
+        }
+    })
+}
+
+fn deep_solve_stage_for_step(step_id: &str) -> deep_events::DeepSolveStage {
+    match step_id {
+        "retrieve" => deep_events::DeepSolveStage::Retrieve,
+        "plan" => deep_events::DeepSolveStage::Plan,
+        "solve" => deep_events::DeepSolveStage::Solve,
+        "synthesize" => deep_events::DeepSolveStage::Synthesize,
+        _ => deep_events::DeepSolveStage::Solve,
+    }
+}
+
+struct DeepSolveRetrieveExecutor {
+    question: String,
+    kb: Option<String>,
+    event_sink: Option<SharedEventSink>,
+    governance: GovernanceConfig,
+}
+
+impl StepExecutor for DeepSolveRetrieveExecutor {
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a ExecutorCtx<'a>,
+    ) -> BoxFuture<'a, anyhow::Result<RuntimeStepResult>> {
+        Box::pin(async move {
+            deep_events::stage_start(
+                &self.event_sink,
+                deep_events::DeepSolveStage::Retrieve,
+                "Retrieve knowledge",
+            )
+            .await;
+            emit_trace(
+                &self.event_sink,
+                "phase_start",
+                serde_json::json!({ "capability": "deep_solve", "phase": "retrieve" }),
+            )
+            .await;
+
+            let kb_summary = self
+                .kb
+                .as_ref()
+                .map(|kb| format!("[KB summary for: {kb}]"))
+                .unwrap_or_else(|| "none".into());
+            {
+                let mut context = ctx.context.lock().await;
+                context
+                    .variables
+                    .insert("question".into(), serde_json::json!(self.question.clone()));
+                context
+                    .variables
+                    .insert("kb_summary".into(), serde_json::json!(kb_summary.clone()));
+            }
+
+            crate::governance::record_audit(
+                &self.governance.audit,
+                AuditEventType::StateTransition,
+                serde_json::json!({"phase": "retrieve", "has_kb": self.kb.is_some()}),
+            )
+            .await;
+
+            emit_trace(
+                &self.event_sink,
+                "phase_end",
+                serde_json::json!({ "capability": "deep_solve", "phase": "retrieve" }),
+            )
+            .await;
+            deep_events::stage_done(
+                &self.event_sink,
+                deep_events::DeepSolveStage::Retrieve,
+                "Retrieve knowledge",
+                "Knowledge summary prepared",
+            )
+            .await;
+
+            Ok(RuntimeStepResult {
+                output: "Knowledge summary prepared".into(),
+                structured: Some(serde_json::json!({ "retrieved": true })),
+                tool_calls_count: 0,
+                session_id: String::new(),
+                cost: CostAggregate::default(),
+                started_at: None,
+                ended_at: None,
+            })
+        })
+    }
+}
+
 /// True if a replan should be triggered: reason is set AND under the limit.
 pub fn should_replan(ctx: &SolveContext) -> bool {
     ctx.replan_reason.is_some() && ctx.replan_count < ctx.max_replans
 }
 
-fn format_step_results(results: &[StepResult]) -> String {
+fn format_step_results(results: &[SolveStepResult]) -> String {
     results
         .iter()
         .map(|r| format!("Step {}: {}", r.step_id, r.finish_text))
@@ -721,11 +963,11 @@ mod tests {
     #[test]
     fn step_results_format_for_synthesis() {
         let results = vec![
-            StepResult {
+            SolveStepResult {
                 step_id: "s1".into(),
                 finish_text: "The integral is 8/3.".into(),
             },
-            StepResult {
+            SolveStepResult {
                 step_id: "s2".into(),
                 finish_text: "Simplified: 2.67.".into(),
             },

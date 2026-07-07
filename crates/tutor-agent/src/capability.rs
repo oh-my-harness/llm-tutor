@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -55,6 +56,7 @@ pub struct CapabilityRouter {
     pub associated_kb: Option<String>,
     pub web_search: Option<WebSearchConfig>,
     pub product_tools: Vec<Arc<dyn Tool>>,
+    pub workflow_root: Option<PathBuf>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -69,6 +71,7 @@ impl CapabilityRouter {
             associated_kb: None,
             web_search: None,
             product_tools: vec![],
+            workflow_root: None,
             client: None,
         }
     }
@@ -108,6 +111,11 @@ impl CapabilityRouter {
         self
     }
 
+    pub fn with_workflow_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.workflow_root = Some(root.into());
+        self
+    }
+
     /// Returns the injected client or builds one from `LlmConfig`.
     pub(crate) fn make_client(&self) -> Arc<dyn Provider> {
         if let Some(c) = &self.client {
@@ -144,6 +152,7 @@ impl CapabilityRouter {
                 )
                 .with_event_sink(self.event_sink.clone())
                 .with_web_search(self.web_search.clone())
+                .with_workflow_root(self.workflow_root.clone())
                 .with_client(client);
                 orchestrator.run(None).await
             }

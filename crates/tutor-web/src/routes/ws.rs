@@ -305,6 +305,7 @@ async fn run_tutor_message(
         });
         let mut router = CapabilityRouter::new(env, llm, governance)
             .with_event_sink(sink)
+            .with_workflow_root(rag_root.join("workflow-sessions"))
             .with_product_tool(Arc::new(ReadSpaceItemTool::new(
                 notebook.clone(),
                 quizzes.clone(),
