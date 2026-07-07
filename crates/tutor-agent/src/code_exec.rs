@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
-use llm_harness_agent::{
-    AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks, Session,
-};
+use llm_harness_agent::{AgentHarnessEvent, Session};
 use llm_harness_loop::CompositeBeforeToolCallHook;
-use llm_harness_types::{
-    AgentEvent, AgentMessage, BeforeToolCallHook, ContentBlock,
-};
+use llm_harness_types::{AgentEvent, AgentMessage, BeforeToolCallHook, ContentBlock};
 use tutor_tools::CodeExecTool;
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
 use crate::event_sink::{emit_content, emit_trace};
+use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 
 /// Run code execution as an agent turn: the model calls `code_exec`, then explains the result.
 pub async fn run_code_exec(router: &CapabilityRouter, request: &str) -> Result<String> {
@@ -60,32 +57,26 @@ async fn run_code_exec_inner(
             vec![]
         };
 
-    let opts = AgentHarnessOptions {
-        model: router.llm.model.clone(),
-        model_info: Some(router.llm.model_info(8192)),
-        tools,
-        system_prompt: Some(
-            "You are a code execution tutor. When the user asks to run code, \
+    let client = router.make_client();
+    let has_session = session.is_some();
+    let harness = build_runtime_harness(
+        client,
+        router.env.clone(),
+        session,
+        RuntimeHarnessConfig {
+            model: router.llm.model.clone(),
+            model_info: router.llm.model_info(8192),
+            tools,
+            system_prompt: "You are a code execution tutor. When the user asks to run code, \
              call code_exec with the correct language and code, then explain stdout, stderr, \
              and exit code clearly. For non-trivial numeric calculations or approximations, \
              call code_exec with Python to compute or verify the result before answering. If no \
              runnable code or computable task is provided, ask for the missing details."
                 .into(),
-        ),
-        hooks: HarnessHooks {
             before_tool_call,
-            ..HarnessHooks::none()
         },
-        ..AgentHarnessOptions::new(router.llm.model.clone())
-    };
-
-    let client = router.make_client();
-    let has_session = session.is_some();
-    let harness = if let Some(session) = session {
-        AgentHarness::with_session(client, router.env.clone(), session, opts)
-    } else {
-        AgentHarness::new_in_memory(client, router.env.clone(), opts).await
-    };
+    )
+    .await?;
     if has_session {
         crate::chat::try_auto_compact(&harness, router, "code_exec").await;
     }

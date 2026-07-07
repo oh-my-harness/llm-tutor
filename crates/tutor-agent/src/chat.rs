@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use llm_harness_agent::{
-    AgentHarness, AgentHarnessEvent, AgentHarnessOptions, Session,
-};
+use llm_harness_agent::{AgentHarness, AgentHarnessEvent, Session};
 use llm_harness_types::{
-    AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, ContentBlock,
-    StopReason, UserMessage,
+    AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, ContentBlock, StopReason,
+    UserMessage,
 };
 use tutor_tools::{
     CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool, WriteMemoryTool,
@@ -15,6 +13,7 @@ use tutor_tools::{
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
 use crate::event_sink::{emit_content, emit_trace};
+use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 
 /// Run a single Chat turn: question → [rag_search + web_search] → answer.
 /// Creates a fresh in-memory harness per call (stateless in v0.1).
@@ -176,22 +175,22 @@ async fn run_chat_inner(
     ];
     tools.extend(router.product_tools.iter().cloned());
 
-    let opts = AgentHarnessOptions {
-        model: router.llm.model.clone(),
-        model_info: Some(router.llm.model_info(8192)),
-        tools,
-        system_prompt: Some(system_prompt),
-        ..AgentHarnessOptions::new(router.llm.model.clone())
-    };
-
     let client = router.make_client();
 
     let has_session = session.is_some();
-    let harness = if let Some(session) = session {
-        AgentHarness::with_session(client, router.env.clone(), session, opts)
-    } else {
-        AgentHarness::new_in_memory(client, router.env.clone(), opts).await
-    };
+    let harness = build_runtime_harness(
+        client,
+        router.env.clone(),
+        session,
+        RuntimeHarnessConfig {
+            model: router.llm.model.clone(),
+            model_info: router.llm.model_info(8192),
+            tools,
+            system_prompt,
+            before_tool_call: vec![],
+        },
+    )
+    .await?;
     if has_session {
         try_auto_compact(&harness, router, capability).await;
     }
