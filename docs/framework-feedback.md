@@ -96,6 +96,11 @@
   - Actual: `llm-tutor` has to implement a thin `GET /models` probe, provider-specific auth headers, endpoint derivation, and recursive parsing of fields such as `context_window`, `max_context_tokens`, and `max_model_len`.
   - Suggestion: add an `llm-api-adapter` capability such as `list_models()` / `model_metadata(model)` and expose source labels (`metadata`, `known_model`, `default`) so apps do not duplicate provider quirks.
 
+- **Resolved: compact summaries now read directly from runtime session entries**
+  - Expected: UI-visible compaction summaries should come from runtime `SessionEntryPayload::Compaction` records.
+  - Actual: `llm-tutor` previously wrote an additional custom `compact_summary` entry after each chat turn, which duplicated runtime-owned session/compaction state.
+  - Change: removed the product-layer summary mirror. Session detail responses still expose `compact_summary`, but it is now derived only from the latest runtime compaction entry.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** can layer domain-specific + cross-cutting hooks; current product code only needs human approval hooks after moving replan into workflow routing

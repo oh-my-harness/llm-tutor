@@ -463,35 +463,6 @@ impl SessionPool {
             .collect())
     }
 
-    pub async fn refresh_compact_summary(
-        &self,
-        id: &str,
-    ) -> Result<Option<PersistedCompactSummary>, llm_harness_types::SessionError> {
-        let messages = self.messages(id).await?;
-        let message_count = messages
-            .iter()
-            .filter(|message| matches!(message, AgentMessage::User(_) | AgentMessage::Assistant(_)))
-            .count();
-        if message_count < 2 {
-            return Ok(None);
-        }
-
-        let summary = build_lightweight_summary(&messages);
-        let value = PersistedCompactSummary {
-            summary,
-            timestamp: chrono::Utc::now(),
-            message_count,
-        };
-        self.open_runtime_session(id)
-            .await?
-            .append(SessionEntryPayload::Custom {
-                custom_type: "compact_summary".into(),
-                data: serde_json::to_value(&value).unwrap_or_default(),
-            })
-            .await?;
-        Ok(Some(value))
-    }
-
     pub async fn compact_summary(
         &self,
         id: &str,
@@ -502,7 +473,7 @@ impl SessionPool {
             .read_active_path()
             .await?;
 
-        if let Some(summary) = entries.iter().rev().find_map(|entry| {
+        Ok(entries.iter().rev().find_map(|entry| {
             let SessionEntryPayload::Compaction(compaction) = &entry.payload else {
                 return None;
             };
@@ -514,18 +485,6 @@ impl SessionPool {
                 timestamp: entry.timestamp,
                 message_count: 0,
             })
-        }) {
-            return Ok(Some(summary));
-        }
-
-        Ok(entries.into_iter().rev().find_map(|entry| {
-            let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
-                return None;
-            };
-            if custom_type != "compact_summary" {
-                return None;
-            }
-            serde_json::from_value::<PersistedCompactSummary>(data).ok()
         }))
     }
 
@@ -688,33 +647,6 @@ impl SessionPool {
         update(entry);
         let _ = persist_product_metadata(&self.product_metadata_path, &metadata);
     }
-}
-
-fn build_lightweight_summary(messages: &[AgentMessage]) -> String {
-    let turns = messages
-        .iter()
-        .filter_map(|message| {
-            let role = message_role(message)?;
-            let text = message_text(message);
-            if text.trim().is_empty() {
-                return None;
-            }
-            Some(format!("{role}: {}", truncate_chars(text.trim(), 180)))
-        })
-        .collect::<Vec<_>>();
-
-    let start = turns.len().saturating_sub(8);
-    format!(
-        "Recent conversation summary:\n{}",
-        turns[start..].join("\n")
-    )
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    format!("{}...", text.chars().take(max_chars).collect::<String>())
 }
 
 pub fn message_text(message: &llm_harness_types::AgentMessage) -> String {
@@ -1059,7 +991,7 @@ mod tests {
             .await
             .unwrap();
         let session = pool.open_runtime_session(&id).await.unwrap();
-        session
+        let first_entry = session
             .append_message(tutor_agent::chat::user_message("what is lithography?"))
             .await
             .unwrap();
@@ -1069,16 +1001,30 @@ mod tests {
             ))
             .await
             .unwrap();
-
-        let summary = pool.refresh_compact_summary(&id).await.unwrap();
-        assert!(summary.is_some());
+        session
+            .append(SessionEntryPayload::Compaction(
+                llm_harness_agent::session::CompactionEntry {
+                    summary_message: AgentMessage::CompactionSummary(
+                        llm_harness_types::CompactionSummaryMessage {
+                            summary: "lithography means pattern transfer".into(),
+                            timestamp: chrono::Utc::now(),
+                        },
+                    ),
+                    first_kept_entry: first_entry,
+                    tokens_before: 42,
+                    from_hook: false,
+                    details: None,
+                },
+            ))
+            .await
+            .unwrap();
 
         drop(pool);
         let reopened = SessionPool::new_with_root(&root);
         let restored = reopened.compact_summary(&id).await.unwrap().unwrap();
 
         assert!(restored.summary.contains("lithography"));
-        assert_eq!(restored.message_count, 2);
+        assert_eq!(restored.message_count, 0);
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -406,7 +406,6 @@ async fn run_tutor_message(
             }
             let final_text = if streamed { "" } else { &answer };
             let _ = entry.stream.content(final_text, false).await;
-            let _ = pool.refresh_compact_summary(&entry.id).await;
             let history_len = pool.history_len(&entry.id).await;
             let latest_usage = pool.latest_usage(&entry.id).await.ok().flatten();
             let context_window_tokens = entry
