@@ -24,7 +24,8 @@
   - Fourth migration step: Deep Solve and Quiz workflow edges now use runtime-evaluable `EdgeCondition::Expr` predicates instead of legacy label strings, so the built-in `EdgeConditionJudge` can route them once execution moves to `WorkflowEngine`.
   - Fifth migration step: Quiz generation now performs a controlled verifier repair pass that mirrors the runtime workflow's `verify_questions -> generate_questions` repair edge while the full `WorkflowEngine` execution path is being adopted.
   - Sixth migration step: `llm-tutor` now has a thin `runtime_engine` adapter that builds `WorkflowEngineConfig` from the product `ExecutionEnv`, LLM client, model, and runtime JSONL session factory. A smoke test runs an executor workflow through runtime `WorkflowEngine`.
-  - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
+  - Seventh migration step: Quiz generation now has a product runtime workflow path. `collect_sources`, `generate_questions`, `verify_questions`, and `publish_questions` run as runtime executor steps, and the repair edge is driven by `WorkflowEngine` transitions. The web Quiz route and chat `create_quiz` tool now call this runtime workflow path when an LLM is configured.
+  - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz/Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
 
 - **Budget control semantics changed after the runtime update**
   - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".

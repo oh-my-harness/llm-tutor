@@ -63,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
             notebook.clone(),
             memory.clone(),
             rag_root.clone(),
+            config.data_dir.join("workflow-sessions").join("quiz"),
         ))
         .merge(routes::books::books_router(books))
         .merge(routes::notebook::notebook_router(

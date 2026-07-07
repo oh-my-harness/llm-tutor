@@ -8,6 +8,8 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use llm_harness_runtime_sandbox_os::OsEnv;
+use llm_harness_types::ExecutionEnv;
 use serde::Deserialize;
 use tutor_rag::KnowledgeRetriever;
 
@@ -26,6 +28,7 @@ pub(crate) struct QuizState {
     pub(crate) notebook: Arc<NotebookStore>,
     pub(crate) memory: Arc<MemoryStore>,
     pub(crate) rag_root: PathBuf,
+    pub(crate) workflow_root: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,8 +279,9 @@ pub fn quiz_router(
     notebook: Arc<NotebookStore>,
     memory: Arc<MemoryStore>,
     rag_root: impl Into<PathBuf>,
+    workflow_root: impl Into<PathBuf>,
 ) -> Router {
-    quiz_router_with_rag_root(store, knowledge, notebook, memory, rag_root)
+    quiz_router_with_rag_root(store, knowledge, notebook, memory, rag_root, workflow_root)
 }
 
 fn quiz_router_with_rag_root(
@@ -286,6 +290,7 @@ fn quiz_router_with_rag_root(
     notebook: Arc<NotebookStore>,
     memory: Arc<MemoryStore>,
     rag_root: impl Into<PathBuf>,
+    workflow_root: impl Into<PathBuf>,
 ) -> Router {
     let state = QuizState {
         store,
@@ -293,6 +298,7 @@ fn quiz_router_with_rag_root(
         notebook,
         memory,
         rag_root: rag_root.into(),
+        workflow_root: workflow_root.into(),
     };
     Router::new()
         .route("/api/quizzes", get(list_quizzes).post(create_quiz))
@@ -313,7 +319,7 @@ async fn generate_questions(
     if let Some(source_text) = source_text {
         let hits = source_hits_from_text(&quiz, &source_label, &source_text);
         let (questions, verification_method) =
-            questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
+            questions_for_hits(state, &quiz, llm, &hits, memory_markdown).await?;
         validate_quiz_questions_for_storage(&questions)?;
         let quiz = state.store.replace_questions(&quiz.id, questions)?;
         return state.store.set_verification(
@@ -341,7 +347,7 @@ async fn generate_questions(
         anyhow::bail!("no source chunks found for quiz generation");
     }
     let (questions, verification_method) =
-        questions_for_hits(&quiz, llm, &hits, memory_markdown).await?;
+        questions_for_hits(state, &quiz, llm, &hits, memory_markdown).await?;
     validate_quiz_questions_for_storage(&questions)?;
     let quiz = state.store.replace_questions(&quiz.id, questions)?;
     state.store.set_verification(
@@ -351,6 +357,7 @@ async fn generate_questions(
 }
 
 async fn questions_for_hits(
+    state: &QuizState,
     quiz: &QuizSession,
     llm: Option<CreateLlmConfig>,
     hits: &[tutor_rag::SearchHit],
@@ -365,8 +372,18 @@ async fn questions_for_hits(
                 score: hit.score,
             })
             .collect::<Vec<_>>();
-        let generated = tutor_agent::quiz::generate_quiz_questions(
-            &llm,
+        let cwd = std::env::current_dir()?;
+        let env = Arc::new(OsEnv::new(cwd)) as Arc<dyn ExecutionEnv>;
+        let client = llm.build_client();
+        let engine_config = tutor_agent::runtime_engine::build_workflow_engine_config(
+            client.clone(),
+            llm.model.clone(),
+            env,
+            state.workflow_root.join("quiz"),
+        );
+        let generated = tutor_agent::quiz::generate_quiz_questions_with_workflow(
+            client,
+            &llm.model,
             &tutor_agent::quiz::QuizGenerationConfig {
                 topic: quiz.config.topic.clone(),
                 difficulty: format!("{:?}", quiz.config.difficulty).to_ascii_lowercase(),
@@ -374,6 +391,7 @@ async fn questions_for_hits(
                 memory_markdown,
             },
             &sources,
+            engine_config,
         )
         .await?;
         Ok((
@@ -742,7 +760,14 @@ mod tests {
             )
             .await
             .unwrap();
-        let app = quiz_router_with_rag_root(store, knowledge, notebook, memory.clone(), rag_root);
+        let app = quiz_router_with_rag_root(
+            store,
+            knowledge,
+            notebook,
+            memory.clone(),
+            rag_root,
+            dir.path().join("workflow-sessions"),
+        );
 
         let create = serde_json::json!({
             "kb_id": kb.id,
@@ -784,8 +809,14 @@ mod tests {
         let knowledge = KnowledgeStore::new_with_path(dir.path().join("knowledge-bases.json"));
         let notebook = Arc::new(NotebookStore::new_with_path(dir.path().join("notebook")));
         let memory = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
-        let app =
-            quiz_router_with_rag_root(store, knowledge, notebook, memory, dir.path().join("rag"));
+        let app = quiz_router_with_rag_root(
+            store,
+            knowledge,
+            notebook,
+            memory,
+            dir.path().join("rag"),
+            dir.path().join("workflow-sessions"),
+        );
 
         let create = serde_json::json!({
             "topic": "element reactions",
@@ -858,8 +889,14 @@ mod tests {
                 source_message_id: None,
             })
             .unwrap();
-        let app =
-            quiz_router_with_rag_root(store, knowledge, notebook, memory, dir.path().join("rag"));
+        let app = quiz_router_with_rag_root(
+            store,
+            knowledge,
+            notebook,
+            memory,
+            dir.path().join("rag"),
+            dir.path().join("workflow-sessions"),
+        );
 
         let create = serde_json::json!({
             "notebook_entry_id": entry.id,

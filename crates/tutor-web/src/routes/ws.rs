@@ -13,9 +13,9 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt, future::BoxFuture};
 use llm_harness_runtime::control::budget::BudgetControlAdapter;
-use llm_harness_types::CostAggregate;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
+use llm_harness_types::CostAggregate;
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 use tutor_agent::event_sink::{EventSink, SharedEventSink};
@@ -74,7 +74,6 @@ impl EventSink for PersistedEventSink {
         })
     }
 }
-
 
 #[derive(Deserialize)]
 #[serde(tag = "type")]
@@ -319,6 +318,7 @@ async fn run_tutor_message(
                     notebook.clone(),
                     memory.clone(),
                     rag_root.clone(),
+                    rag_root.join("workflow-sessions").join("quiz"),
                     entry.kb.clone(),
                     create_quiz_llm_config_for_session(entry.llm.clone()),
                 )));

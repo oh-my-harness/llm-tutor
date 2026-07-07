@@ -21,6 +21,7 @@ pub(crate) struct CreateQuizTool {
     notebook: Arc<NotebookStore>,
     memory: Arc<MemoryStore>,
     rag_root: PathBuf,
+    workflow_root: PathBuf,
     default_kb_id: Option<String>,
     llm: Option<CreateLlmConfig>,
 }
@@ -32,6 +33,7 @@ impl CreateQuizTool {
         notebook: Arc<NotebookStore>,
         memory: Arc<MemoryStore>,
         rag_root: PathBuf,
+        workflow_root: PathBuf,
         default_kb_id: Option<String>,
         llm: Option<CreateLlmConfig>,
     ) -> Self {
@@ -41,6 +43,7 @@ impl CreateQuizTool {
             notebook,
             memory,
             rag_root,
+            workflow_root,
             default_kb_id,
             llm,
         }
@@ -201,6 +204,7 @@ impl Tool for CreateQuizTool {
                 notebook: self.notebook.clone(),
                 memory: self.memory.clone(),
                 rag_root: self.rag_root.clone(),
+                workflow_root: self.workflow_root.clone(),
             };
             let quiz = create_quiz_for_request(&state, request)
                 .await

@@ -347,9 +347,12 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 - [x] Declare and validate Quiz flow as a runtime workflow.
 - [x] Repair once and re-verify before surfacing unresolved verifier failures.
 - [x] Add tests for answer/explanation/citation contradiction cases.
-- [ ] Execute Quiz generation/verification through runtime `WorkflowEngine`.
-- [ ] Move verifier repair routing from the transitional direct-call path into
-  `WorkflowEngine` execution.
+- [x] Execute Quiz generation/verification orchestration through runtime
+  `WorkflowEngine` executor steps.
+- [x] Move verifier repair routing from the transitional direct-call path into
+  `WorkflowEngine` transitions.
+- [ ] Move generation and verifier LLM calls from workflow executor internals
+  into native runtime LLM steps or subagent reviewers using `submit_step_result`.
 
 ## 9. Acceptance Criteria
 

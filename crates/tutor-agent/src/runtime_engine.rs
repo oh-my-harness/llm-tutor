@@ -48,15 +48,18 @@ mod tests {
     use futures::future::BoxFuture;
     use llm_harness_loop::test_utils::{MockLlmClient, NoOpEnv};
     use llm_harness_runtime::control::cost::CostAggregate;
-    use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
     use llm_harness_runtime::workflow::engine::WorkflowEngine;
+    use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
     use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
     use llm_harness_runtime::workflow::model::{Step, StepResult, Transition, Workflow};
 
     struct FixedExecutor;
 
     impl StepExecutor for FixedExecutor {
-        fn execute<'a>(&'a self, _ctx: &'a ExecutorCtx<'a>) -> BoxFuture<'a, anyhow::Result<StepResult>> {
+        fn execute<'a>(
+            &'a self,
+            _ctx: &'a ExecutorCtx<'a>,
+        ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
             Box::pin(async {
                 Ok(StepResult {
                     output: "runtime workflow executed".into(),
@@ -110,7 +113,10 @@ mod tests {
 
         let result = engine.run().await.unwrap();
 
-        assert_eq!(result.final_message.as_deref(), Some("runtime workflow executed"));
+        assert_eq!(
+            result.final_message.as_deref(),
+            Some("runtime workflow executed")
+        );
         assert_eq!(result.turns, 1);
     }
 }
