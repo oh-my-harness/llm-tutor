@@ -23,6 +23,7 @@
   - Third migration step: ordinary Chat, Code Exec, and the existing Deep Solve phases now construct harnesses through runtime `HarnessBuilder` instead of manually assembling `AgentHarnessOptions`; product code only maps tools, prompts, and hooks into a thin builder config.
   - Fourth migration step: Deep Solve and Quiz workflow edges now use runtime-evaluable `EdgeCondition::Expr` predicates instead of legacy label strings, so the built-in `EdgeConditionJudge` can route them once execution moves to `WorkflowEngine`.
   - Fifth migration step: Quiz generation now performs a controlled verifier repair pass that mirrors the runtime workflow's `verify_questions -> generate_questions` repair edge while the full `WorkflowEngine` execution path is being adopted.
+  - Sixth migration step: `llm-tutor` now has a thin `runtime_engine` adapter that builds `WorkflowEngineConfig` from the product `ExecutionEnv`, LLM client, model, and runtime JSONL session factory. A smoke test runs an executor workflow through runtime `WorkflowEngine`.
   - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
 
 - **Budget control semantics changed after the runtime update**
@@ -76,6 +77,11 @@
   - Actual: Chat, Research, and Deep Solve can mount `read_memory` through the harness, but Quiz currently uses a direct structured-output API path. `llm-tutor` can pass L3 memory as product context for personalization, but it cannot let the model truly decide to call `read_memory` without migrating Quiz into a custom parallel agent loop.
   - Suggestion: add a runtime pattern for "tool-using structured generation", for example `AgentHarness::generate_structured_with_tools<T>()`, where tools, trace events, schema output, validation, and retries are all runtime-managed.
 
+- **Default workflow judge is not public**
+  - Expected: product code can construct a simple terminal/free-task workflow through public runtime APIs without implementing a custom `StepTransitionJudge`.
+  - Actual: `WorkflowEngine::new_free_task` hides the no-op judge, but custom product workflows require a `StepTransitionJudge` and runtime's `NoopJudge` is `pub(crate)`, so apps must duplicate tiny terminal judges for smoke tests or one-step executor flows.
+  - Suggestion: expose a `WorkflowEngine::new_declarative(workflow, config)` helper that selects the built-in edge judge automatically, or publish a small `NoopJudge`/`TerminalJudge` constructor.
+
 - **Model metadata discovery is still app-specific**
   - Expected: settings diagnostics and runtime context budgeting can ask the provider adapter for normalized model metadata such as context window, native embedding dimension, supported embedding dimensions, and detected source.
   - Actual: `llm-tutor` has to implement a thin `GET /models` probe, provider-specific auth headers, endpoint derivation, and recursive parsing of fields such as `context_window`, `max_context_tokens`, and `max_model_len`.
@@ -100,6 +106,7 @@
 | WorkflowEngine migration bridge still needs product adapters | Existing product flows need event bridges, executor state mapping, and structured `submit_step_result` prompts before they can stop using direct phase loops | Medium |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
+| No public default workflow judge/helper | Product workflows must duplicate a trivial terminal judge unless they use `new_free_task` | Low |
 | No normalized model metadata API | Apps duplicate `/models` probing, auth headers, context-window parsing, and embedding dimension capability discovery | Medium |
 
 ## Proposed v0.3 Changes
@@ -112,4 +119,5 @@
 6. Add a typed structured-output helper for provider-aware JSON/schema generation
 7. Add a tool-using structured-generation helper for flows like memory-aware Quiz
 8. Add normalized model metadata discovery in the adapter/runtime boundary
-9. Continue hardening `WorkflowEngine` examples for app-level workflows that mix executor steps, LLM steps, and subagent reviewers
+9. Expose a public default workflow judge or `WorkflowEngine::new_declarative` helper
+10. Continue hardening `WorkflowEngine` examples for app-level workflows that mix executor steps, LLM steps, and subagent reviewers
