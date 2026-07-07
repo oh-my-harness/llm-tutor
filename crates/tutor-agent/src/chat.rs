@@ -188,6 +188,7 @@ async fn run_chat_inner(
             tools,
             system_prompt,
             before_tool_call: vec![],
+            prepare_next_turn: vec![],
         },
     )
     .await?;

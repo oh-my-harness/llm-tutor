@@ -74,6 +74,7 @@ async fn run_code_exec_inner(
              runnable code or computable task is provided, ask for the missing details."
                 .into(),
             before_tool_call,
+            prepare_next_turn: vec![],
         },
     )
     .await?;

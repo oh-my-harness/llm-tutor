@@ -3,7 +3,7 @@ use std::sync::Arc;
 use llm_harness_agent::{AgentHarness, HarnessHooks, ModelInfo, Plugin, Session};
 use llm_harness_loop::LlmClient;
 use llm_harness_runtime::builder::HarnessBuilder;
-use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, Tool};
+use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, PrepareNextTurnHook, Tool};
 
 use crate::error::{Result, TutorError};
 
@@ -13,10 +13,12 @@ pub struct RuntimeHarnessConfig {
     pub tools: Vec<Arc<dyn Tool>>,
     pub system_prompt: String,
     pub before_tool_call: Vec<Arc<dyn BeforeToolCallHook>>,
+    pub prepare_next_turn: Vec<Arc<dyn PrepareNextTurnHook>>,
 }
 
 struct HookPlugin {
     before_tool_call: Vec<Arc<dyn BeforeToolCallHook>>,
+    prepare_next_turn: Vec<Arc<dyn PrepareNextTurnHook>>,
 }
 
 impl Plugin for HookPlugin {
@@ -28,6 +30,9 @@ impl Plugin for HookPlugin {
         hooks
             .before_tool_call
             .extend(self.before_tool_call.iter().cloned());
+        hooks
+            .prepare_next_turn
+            .extend(self.prepare_next_turn.iter().cloned());
     }
 }
 
@@ -45,9 +50,10 @@ pub async fn build_runtime_harness(
     for tool in config.tools {
         builder = builder.tool(tool);
     }
-    if !config.before_tool_call.is_empty() {
+    if !config.before_tool_call.is_empty() || !config.prepare_next_turn.is_empty() {
         let hooks = HookPlugin {
             before_tool_call: config.before_tool_call,
+            prepare_next_turn: config.prepare_next_turn,
         };
         builder = builder.install(&hooks);
     }

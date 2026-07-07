@@ -10,6 +10,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::{SharedEventSink, emit_content, emit_trace};
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
+use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 use crate::runtime_workflow::{DEEP_SOLVE_WORKFLOW_ID, validate_deep_solve_workflow};
 use crate::solve_context::{Plan, SolveContext, StepResult};
 use tutor_tools::WebSearchConfig;
@@ -140,7 +141,7 @@ impl SolveOrchestrator {
     }
 
     async fn run_plan(&mut self) -> Result<()> {
-        use llm_harness_agent::{AgentHarness, AgentHarnessEvent, AgentHarnessOptions};
+        use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
@@ -199,19 +200,22 @@ impl SolveOrchestrator {
 
         let client = self.make_client();
 
-        let opts = AgentHarnessOptions {
-            model: self.llm.model.clone(),
-            model_info: Some(self.llm.model_info(8192)),
-            tools: vec![],
-            system_prompt: Some(
-                "You are a math tutor planning a structured solution. \
-                 Respond only with the requested JSON."
+        let harness = build_runtime_harness(
+            client,
+            self.env.clone(),
+            None,
+            RuntimeHarnessConfig {
+                model: self.llm.model.clone(),
+                model_info: self.llm.model_info(8192),
+                tools: vec![],
+                system_prompt: "You are a math tutor planning a structured solution. \
+                     Respond only with the requested JSON."
                     .into(),
-            ),
-            ..AgentHarnessOptions::new(self.llm.model.clone())
-        };
-
-        let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
+                before_tool_call: vec![],
+                prepare_next_turn: vec![],
+            },
+        )
+        .await?;
         let mut rx = harness.subscribe();
         let prompt_task = tokio::spawn(async move { harness.prompt(prompt).await });
 
@@ -283,9 +287,7 @@ impl SolveOrchestrator {
     }
 
     async fn run_solve_steps(&mut self) -> Result<()> {
-        use llm_harness_agent::{
-            AgentHarness, AgentHarnessEvent, AgentHarnessOptions, HarnessHooks,
-        };
+        use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{
             AgentEvent, BeforeToolCallHook, ContentBlock, PrepareNextTurnHook,
         };
@@ -387,35 +389,35 @@ impl SolveOrchestrator {
                 "replan".into(),
             ]));
 
-            let opts = AgentHarnessOptions {
-                model: self.llm.model.clone(),
-                model_info: Some(self.llm.model_info(8192)),
-                tools: solve_tools,
-                system_prompt: Some(format!(
-                    "You are solving step {id}: {goal}\n\
-                     Use read_memory when the step should adapt to the learner's prior weaknesses, \
-                     preferences, recent learning state, or teaching strategy. Memory is learner context, \
-                     not a factual source. Use write_memory only when the user explicitly asks you to remember \
-                     a durable preference or approves recording it. Use rag_search for course knowledge, web_search for external discovery, \
-                     web_fetch to read important source pages, and code_exec to run code.\n\
-                     For non-trivial numeric calculations, approximations, transcendental functions, \
-                     statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
-                     If the current plan is fundamentally wrong, call replan(reason) - \
-                     this aborts the step and triggers a new plan.\n\
-                     When done, write FINISH: followed by your conclusion for this step.",
-                    id = step.id,
-                    goal = step.goal,
-                )),
-                hooks: HarnessHooks {
+            let client = self.make_client();
+            let harness = build_runtime_harness(
+                client,
+                self.env.clone(),
+                None,
+                RuntimeHarnessConfig {
+                    model: self.llm.model.clone(),
+                    model_info: self.llm.model_info(8192),
+                    tools: solve_tools,
+                    system_prompt: format!(
+                        "You are solving step {id}: {goal}\n\
+                         Use read_memory when the step should adapt to the learner's prior weaknesses, \
+                         preferences, recent learning state, or teaching strategy. Memory is learner context, \
+                         not a factual source. Use write_memory only when the user explicitly asks you to remember \
+                         a durable preference or approves recording it. Use rag_search for course knowledge, web_search for external discovery, \
+                         web_fetch to read important source pages, and code_exec to run code.\n\
+                         For non-trivial numeric calculations, approximations, transcendental functions, \
+                         statistics, or simulations, use code_exec with Python to compute or verify the result.\n\
+                         If the current plan is fundamentally wrong, call replan(reason) - \
+                         this aborts the step and triggers a new plan.\n\
+                         When done, write FINISH: followed by your conclusion for this step.",
+                        id = step.id,
+                        goal = step.goal,
+                    ),
                     before_tool_call: before_tool_call.clone(),
                     prepare_next_turn: vec![phase_mgr as Arc<dyn PrepareNextTurnHook>],
-                    ..HarnessHooks::none()
                 },
-                ..AgentHarnessOptions::new(self.llm.model.clone())
-            };
-
-            let client = self.make_client();
-            let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
+            )
+            .await?;
             let mut rx = harness.subscribe();
             let step_prompt = format!("Solve step {}: {}", step.id, step.goal);
             let prompt_task = tokio::spawn(async move { harness.prompt(step_prompt).await });
@@ -554,9 +556,7 @@ impl SolveOrchestrator {
     }
 
     async fn run_synthesize(&mut self) -> Result<String> {
-        use llm_harness_agent::{
-            AgentHarness, AgentHarnessEvent, AgentHarnessOptions,
-        };
+        use llm_harness_agent::AgentHarnessEvent;
         use llm_harness_types::{AgentEvent, ContentBlock};
 
         crate::governance::record_audit(
@@ -591,19 +591,22 @@ impl SolveOrchestrator {
 
         let client = self.make_client();
 
-        let opts = AgentHarnessOptions {
-            model: self.llm.model.clone(),
-            model_info: Some(self.llm.model_info(8192)),
-            tools: vec![],
-            system_prompt: Some(
-                "You are a math tutor writing a final answer synthesis. \
-                 Be clear, structured, and educational."
+        let harness = build_runtime_harness(
+            client,
+            self.env.clone(),
+            None,
+            RuntimeHarnessConfig {
+                model: self.llm.model.clone(),
+                model_info: self.llm.model_info(8192),
+                tools: vec![],
+                system_prompt: "You are a math tutor writing a final answer synthesis. \
+                     Be clear, structured, and educational."
                     .into(),
-            ),
-            ..AgentHarnessOptions::new(self.llm.model.clone())
-        };
-
-        let harness = AgentHarness::new_in_memory(client, self.env.clone(), opts).await;
+                before_tool_call: vec![],
+                prepare_next_turn: vec![],
+            },
+        )
+        .await?;
         let mut rx = harness.subscribe();
         let prompt_task = tokio::spawn(async move { harness.prompt(prompt).await });
 

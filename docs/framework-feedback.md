@@ -20,8 +20,8 @@
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
   - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
-  - Third migration step: ordinary Chat and Code Exec now construct harnesses through runtime `HarnessBuilder` instead of manually assembling `AgentHarnessOptions`; product code only maps tools, prompts, and approval hooks into a thin builder config.
-  - Remaining migration target: replace `SolveOrchestrator`'s sequential `AgentHarness` calls with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
+  - Third migration step: ordinary Chat, Code Exec, and the existing Deep Solve phases now construct harnesses through runtime `HarnessBuilder` instead of manually assembling `AgentHarnessOptions`; product code only maps tools, prompts, and hooks into a thin builder config.
+  - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
 
 - **Budget control semantics changed after the runtime update**
   - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
