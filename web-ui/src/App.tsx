@@ -1462,7 +1462,7 @@ function phaseLabel(value: string): string {
 
 function sessionTitleFromMessage(text: string) {
   const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return '鏂扮殑浼氳瘽'
+  if (!normalized) return '新的会话'
   return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized
 }
 

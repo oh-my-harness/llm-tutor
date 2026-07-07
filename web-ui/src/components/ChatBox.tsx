@@ -364,7 +364,7 @@ export function ChatBox({
                             }}
                           >
                             <FileText size={16} />
-                            淇濆瓨鍒扮瑪璁版湰
+                            保存到笔记本
                           </button>
                         </div>
                       )}
@@ -395,7 +395,7 @@ export function ChatBox({
                             type="button"
                             onClick={cancelEditUserMessage}
                           >
-                            鍙栨秷
+                            取消
                           </button>
                           <button
                             className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-gray-200"
@@ -494,7 +494,7 @@ function ContextCapacity({ stats }: { stats: ContextStats }) {
           {formatTokenCount(usedTokens)} / {formatTokenCount(maxTokens)}
         </span>
         <span className="text-gray-400">{percent}%</span>
-        <span className="text-gray-400">{stats.source === 'provider' ? '涓婃璇锋眰' : '浼扮畻'}</span>
+        <span className="text-gray-400">{stats.source === 'provider' ? '上次请求' : '估算'}</span>
       </div>
     </div>
   )
