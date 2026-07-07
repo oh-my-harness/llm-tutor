@@ -137,7 +137,7 @@ These items come from the earlier Phase 1-5 plans. They should be closed before 
 
 - [x] Wire top-level `Capability::CodeExec` instead of returning `UnsupportedCapability`.
 - [x] Decide whether `code_exec` requires approval in CLI, Web, both, or only when configured.
-- [x] Wire `BudgetControlAdapter` into both cost accumulation and stop/limit behavior for every harness.
+- [ ] Re-enable runtime budget enforcement once `llm-harness-runtime` exposes a safe app-level budget policy for ordinary one-turn harnesses and workflows. Current code keeps session budget configuration but avoids direct `BudgetControlAdapter` wiring because the latest tested hook semantics can hang Chat/Code Exec mock runs.
 - [x] Emit real `TutorStream::trace` events from Chat and Deep Solve, especially phase transitions, tool calls, and replan events.
 - [x] Confirm WebSocket output semantics: final-only response, chunked text stream, or mixed content/trace/status stream.
 - [x] Replace Deep Solve `run_pre_retrieve` stub with either real RAG retrieval or an explicit no-KB branch.
