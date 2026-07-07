@@ -213,26 +213,28 @@
 - REQ-291: Quiz generation shall separate user instruction from source material. The latest user message may guide topic and constraints, but it shall not be treated as factual source material unless no other source is available or the user explicitly says it is source material. Status: partially implemented through `kb_id`, `notebook_entry_id`, `source_text`, and `source_label`; needs stronger UI/agent guardrails.
 - REQ-292: A successful `create_quiz` tool call shall save the Quiz into Quiz Bank and render an interactive Quiz card in Chat. Status: implemented.
 - REQ-293: Quiz planning may use learner memory for personalization, but generated factual answers and citations shall remain grounded in selected source material. Status: implemented for first slice; L3 memory is passed only for personalization when review/practice intent is detected.
-- REQ-294: Quiz generation shall include a verifier stage inside the controlled product flow, not as a separate free-form chat agent. Status: implemented with deterministic validation plus a structured LLM verifier; runtime `Workflow` declaration is implemented, runtime `WorkflowEngine` execution is planned.
+- REQ-294: Quiz generation shall include a verifier stage inside the controlled product flow, not as a separate free-form chat agent. Status: implemented with deterministic validation plus a structured LLM verifier running inside the runtime `WorkflowEngine`.
 - REQ-295: The verifier stage shall receive only the source chunks, candidate question JSON, answer, explanation, citations, and supporting quote needed for review. Status: implemented.
 - REQ-296: The verifier stage shall return structured review output such as `verdict`, `issues`, `supported_answer`, `explanation_consistent`, `citation_supports_answer`, and optional repair guidance. Status: partially implemented with `verdict` and `issues`; richer booleans and repair guidance are planned.
 - REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: implemented in prompt contract; needs provider-behavior QA.
-- REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: partially implemented; deterministic and LLM verifier failures reject generation, while repair/re-verify is planned.
-- REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: planned.
+- REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: implemented for first slice through runtime workflow repair and final publish validation.
+- REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: implemented for first slice with a bounded runtime workflow repair loop.
 
 Current Quiz verification flow:
 
 1. `create_quiz` builds source material from one of these sources: selected knowledge base chunks, a Notebook entry, explicit `source_text`, or selected Chat/Space material.
-2. If a usable LLM config exists, the quiz runtime workflow definition is validated before generation: `collect_sources -> generate_questions -> verify_questions -> publish_questions`, with a planned repair edge from verifier back to generation.
-3. `tutor_agent::quiz::generate_quiz_questions` asks the model for structured single-choice question JSON grounded in the supplied chunks.
-4. Generated questions are deterministically validated for JSON shape, option consistency, citations, and supporting quotes.
-5. Generated questions are reviewed by a structured LLM verifier against the supplied source chunks.
-6. If no usable LLM config exists, the backend uses a deterministic fallback question generator from source chunks.
-7. The backend converts verified questions into stored `QuizQuestion` records and maps cited source indices to `QuizCitation` metadata.
-8. `validate_quiz_questions_for_storage` rejects empty question sets, empty stems, too-few options, missing correct option IDs, empty explanations, missing citations, and empty citation text.
-9. The stored quiz receives a `QuizVerificationReport` with method `llm_verifier_and_citation_check` or `deterministic_fallback_citation_check`.
+2. If a usable LLM config exists, the quiz runtime workflow definition is validated before generation: `collect_sources -> generate_questions -> verify_questions -> publish_questions`, with a bounded repair edge from verifier back to generation.
+3. `tutor_agent::quiz::generate_quiz_questions_with_workflow` runs the controlled quiz flow through runtime `WorkflowEngine`.
+4. The `generate_questions` runtime LLM step submits structured single-choice question JSON through `submit_step_result`.
+5. The `verify_questions` runtime LLM step reviews generated questions against the supplied source chunks and submits a structured pass/fail result.
+6. Failed verifier results route back to `generate_questions` once for repair; unresolved failures do not reach final publish.
+7. The `publish_questions` executor deterministically validates JSON shape, option consistency, citations, and supporting quotes before storage.
+8. If no usable LLM config exists, the backend uses a deterministic fallback question generator from source chunks.
+9. The backend converts verified questions into stored `QuizQuestion` records and maps cited source indices to `QuizCitation` metadata.
+10. `validate_quiz_questions_for_storage` rejects empty question sets, empty stems, too-few options, missing correct option IDs, empty explanations, missing citations, and empty citation text.
+11. The stored quiz receives a `QuizVerificationReport` with method `llm_verifier_and_citation_check` or `deterministic_fallback_citation_check`.
 
-There is not yet runtime `WorkflowEngine` execution for the quiz flow, nor a managed repair/retry loop for failed verifier reviews. That remains the next hardening step.
+Remaining hardening: richer verifier booleans and repair guidance can be added later, but the runtime `WorkflowEngine` execution and bounded repair/retry loop are now implemented.
 
 ## 14. Research
 

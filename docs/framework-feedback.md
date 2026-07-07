@@ -15,8 +15,8 @@
 
 ## Friction Points
 
-- **Status update: runtime workflow/subagent support is now available and consumed**
-  - `llm-tutor` now pins `llm-harness-runtime` to `490e66a`, which includes `workflow` and `spawn/subagent` modules.
+- **Status update: runtime workflow support is now available and consumed**
+  - `llm-tutor` now pins `llm-harness-runtime` to `f97248f`, which includes `workflow` and `spawn/subagent` modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
   - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
@@ -75,7 +75,7 @@
 
 - **Structured-output generation still needs app-level boilerplate**
   - Expected: product flows like quiz generation can ask the framework for typed JSON output with provider-aware schema support, retries, and validation error reporting.
-  - Actual: runtime LLM steps can collect structured results through `submit_step_result`, but provider-native JSON schema response formats are not exposed at the workflow step level. Legacy direct helpers still use `llm_adapter::ResponseFormat`; runtime workflow paths must place schema instructions in prompts and validate submitted JSON in product code.
+  - Actual: runtime LLM steps can collect structured results through `submit_step_result`, but provider-native JSON schema response formats are not exposed at the workflow step level. The legacy direct helpers have been removed, so runtime workflow paths now place schema instructions in prompts and validate submitted JSON in product code.
   - Suggestion: add a runtime or agent helper such as `generate_structured<T>(prompt, schema/options)` that uses provider capabilities, validates typed output, and returns structured errors suitable for UI display.
 
 - **Structured product flows cannot yet combine typed output with normal tool orchestration**
