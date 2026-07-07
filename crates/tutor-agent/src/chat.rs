@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use llm_harness_agent::{AgentHarness, AgentHarnessEvent, Session};
 use llm_harness_types::{
-    AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, ContentBlock, StopReason,
-    UserMessage,
+    AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, CompactionError,
+    ContentBlock, HarnessError, StopReason, UserMessage,
 };
 use tutor_tools::{
     CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool, WriteMemoryTool,
@@ -390,7 +390,7 @@ pub(crate) async fn try_auto_compact(
             )
             .await;
         }
-        Err(err) if err.to_string().contains("not enough tokens to compact") => {}
+        Err(HarnessError::Compaction(CompactionError::InsufficientTokens)) => {}
         Err(err) => {
             emit_trace(
                 &router.event_sink,
