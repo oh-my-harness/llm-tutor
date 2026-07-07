@@ -99,13 +99,18 @@ pub fn quiz_generation_workflow() -> Workflow {
             Step::llm(
                 "generate_questions",
                 "Generate grounded questions",
-                "Generate grounded single-choice quiz questions from the collected sources. Return structured JSON only.",
+                "Read the workflow Context. The `quiz_generation_prompt` variable contains the full source-grounded quiz generation instruction. \
+                 Generate grounded single-choice quiz questions from those sources. If prior step history includes verifier repair feedback, repair the draft. \
+                 When done, call submit_step_result with {\"questions\":[...]} using the exact question schema requested in Context.",
                 vec![],
             ),
             Step::llm(
                 "verify_questions",
                 "Verify generated questions",
-                "Strictly verify every question against its cited source chunks. Return structured JSON with pass/fail and issues.",
+                "Read the workflow Context and prior generate_questions structured result. Strictly verify every question against its cited source chunks. \
+                 When done, call submit_step_result with {\"verdict\":\"pass\",\"issues\":[]} if all questions are grounded. \
+                 If any question is unsupported, contradictory, or wrongly cited, call submit_step_result with \
+                 {\"verdict\":\"fail\",\"action\":\"repair\",\"issues\":[\"...\"]}.",
                 vec![],
             ),
             Step::executor(

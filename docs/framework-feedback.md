@@ -27,7 +27,8 @@
   - Seventh migration step: Quiz generation now has a product runtime workflow path. `collect_sources`, `generate_questions`, `verify_questions`, and `publish_questions` run as runtime executor steps, and the repair edge is driven by `WorkflowEngine` transitions. The web Quiz route and chat `create_quiz` tool now call this runtime workflow path when an LLM is configured.
   - Eighth migration step: Memory assist/update/check/dedupe now has a runtime `WorkflowEngine` path. The web memory route builds a runtime workflow config with a JSONL session root and runs the LLM-backed memory workflow through a registered runtime executor.
   - Ninth migration step: Deep Solve now runs through runtime `WorkflowEngine`. Product code registers a retrieve executor, product tools/hooks, and a thin event bridge; runtime owns the plan/solve/synthesize LLM step sessions, step history, `submit_step_result` routing, and workflow transitions.
-  - Remaining migration target: move Quiz/Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
+  - Tenth migration step: Quiz generation and verification now run as runtime LLM steps. Product code only collects sources into workflow context, publishes the final validated questions, and enforces a bounded repair loop through a thin workflow judge; the model submits structured quiz and verifier results through runtime `submit_step_result`.
+  - Remaining migration target: move Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
 
 - **Budget control semantics changed after the runtime update**
   - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
@@ -72,12 +73,12 @@
 
 - **Structured-output generation still needs app-level boilerplate**
   - Expected: product flows like quiz generation can ask the framework for typed JSON output with provider-aware schema support, retries, and validation error reporting.
-  - Actual: `llm-tutor` has to call `llm_adapter::ResponseFormat` directly, extract JSON from text, deserialize it, and implement validation/retry policy in product code.
+  - Actual: runtime LLM steps can collect structured results through `submit_step_result`, but provider-native JSON schema response formats are not exposed at the workflow step level. Legacy direct helpers still use `llm_adapter::ResponseFormat`; runtime workflow paths must place schema instructions in prompts and validate submitted JSON in product code.
   - Suggestion: add a runtime or agent helper such as `generate_structured<T>(prompt, schema/options)` that uses provider capabilities, validates typed output, and returns structured errors suitable for UI display.
 
 - **Structured product flows cannot yet combine typed output with normal tool orchestration**
   - Expected: a product flow such as Quiz can ask the model to call tools like `read_memory`, then return validated typed JSON questions in one runtime-managed flow.
-  - Actual: Chat, Research, and Deep Solve can mount `read_memory` through the harness, but Quiz currently uses a direct structured-output API path. `llm-tutor` can pass L3 memory as product context for personalization, but it cannot let the model truly decide to call `read_memory` without migrating Quiz into a custom parallel agent loop.
+  - Actual: Chat, Research, Deep Solve, and Quiz runtime workflows can mount runtime tools, and Quiz now uses `submit_step_result` for structured quiz output. However, provider-native typed JSON schema, retries, and validation are still product-layer responsibilities.
   - Suggestion: add a runtime pattern for "tool-using structured generation", for example `AgentHarness::generate_structured_with_tools<T>()`, where tools, trace events, schema output, validation, and retries are all runtime-managed.
 
 - **Default workflow judge is not public**

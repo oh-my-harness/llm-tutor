@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use futures::future::BoxFuture;
 use llm_adapter::Provider;
@@ -8,9 +7,7 @@ use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
-use llm_harness_runtime::workflow::model::{
-    Edge, EdgeCondition, Step, StepResult, Transition, Workflow,
-};
+use llm_harness_runtime::workflow::model::{StepResult, Transition};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
@@ -25,7 +22,7 @@ pub struct QuizGenerationConfig {
     pub memory_markdown: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuizSourceChunk {
     pub source: String,
     pub text: String,
@@ -114,8 +111,8 @@ pub async fn generate_quiz_questions_with_client(
 }
 
 pub async fn generate_quiz_questions_with_workflow(
-    client: Arc<dyn Provider>,
-    model: &str,
+    _client: Arc<dyn Provider>,
+    _model: &str,
     config: &QuizGenerationConfig,
     chunks: &[QuizSourceChunk],
     engine_config: WorkflowEngineConfig,
@@ -127,46 +124,24 @@ pub async fn generate_quiz_questions_with_workflow(
         ));
     }
 
-    let state = Arc::new(Mutex::new(QuizWorkflowState {
-        config: config.clone(),
-        chunks: chunks.to_vec(),
-        questions: None,
-        repair_feedback: None,
-        generation_attempts: 0,
-    }));
-    let engine = WorkflowEngine::new(
-        quiz_generation_executor_workflow(),
-        engine_config,
-        Arc::new(QuizWorkflowJudge),
-    )
-    .map_err(|err| TutorError::Internal(format!("quiz workflow initialization failed: {err}")))?
-    .with_executor(
-        "tutor.quiz.collect_sources",
-        Arc::new(CollectQuizSourcesExecutor {
-            state: state.clone(),
-        }),
-    )
-    .with_executor(
-        "tutor.quiz.generate_questions",
-        Arc::new(GenerateQuizQuestionsExecutor {
-            state: state.clone(),
-            client: client.clone(),
-            model: model.to_string(),
-        }),
-    )
-    .with_executor(
-        "tutor.quiz.verify_questions",
-        Arc::new(VerifyQuizQuestionsExecutor {
-            state: state.clone(),
-            client,
-            model: model.to_string(),
-        }),
-    )
-    .with_executor(
-        "tutor.quiz.publish_questions",
-        Arc::new(PublishQuizQuestionsExecutor { state }),
-    )
-    .with_max_retries(1);
+    let workflow = quiz_generation_workflow();
+    let engine = WorkflowEngine::new(workflow, engine_config, Arc::new(QuizWorkflowJudge))
+        .map_err(|err| TutorError::Internal(format!("quiz workflow initialization failed: {err}")))?
+        .with_executor(
+            "tutor.quiz.collect_sources",
+            Arc::new(CollectQuizSourcesExecutor {
+                config: config.clone(),
+                chunks: chunks.to_vec(),
+            }),
+        )
+        .with_executor(
+            "tutor.quiz.publish_questions",
+            Arc::new(PublishQuizQuestionsExecutor {
+                expected_count: config.question_count,
+                chunks: chunks.to_vec(),
+            }),
+        )
+        .with_max_retries(1);
 
     engine
         .run()
@@ -190,115 +165,80 @@ pub async fn generate_quiz_questions_with_workflow(
         .map_err(|err| TutorError::Internal(format!("invalid quiz workflow questions: {err}")))
 }
 
-#[derive(Debug)]
-struct QuizWorkflowState {
-    config: QuizGenerationConfig,
-    chunks: Vec<QuizSourceChunk>,
-    questions: Option<Vec<GeneratedQuizQuestion>>,
-    repair_feedback: Option<String>,
-    generation_attempts: usize,
-}
-
-fn quiz_generation_executor_workflow() -> Workflow {
-    let declared = quiz_generation_workflow();
-    Workflow {
-        entry_step: declared.entry_step,
-        steps: vec![
-            Step::executor(
-                "collect_sources",
-                "Collect quiz sources",
-                "tutor.quiz.collect_sources",
-                None,
-            ),
-            Step::executor(
-                "generate_questions",
-                "Generate grounded questions",
-                "tutor.quiz.generate_questions",
-                None,
-            ),
-            Step::executor(
-                "verify_questions",
-                "Verify generated questions",
-                "tutor.quiz.verify_questions",
-                None,
-            ),
-            Step::executor(
-                "publish_questions",
-                "Publish verified questions",
-                "tutor.quiz.publish_questions",
-                None,
-            ),
-        ],
-        edges: declared.edges,
-    }
-}
-
 struct QuizWorkflowJudge;
 
 impl StepTransitionJudge for QuizWorkflowJudge {
     fn decide<'a>(&'a self, ctx: &StepCtx<'a>) -> BoxFuture<'a, Transition> {
         let current_step = ctx.current_step.id().clone();
         let structured = ctx.last_result.structured.clone();
-        let edges = quiz_generation_executor_workflow().edges;
+        let generate_attempts = ctx
+            .step_history
+            .iter()
+            .filter(|record| record.step_id == "generate_questions")
+            .count();
         Box::pin(async move {
             match current_step.as_str() {
                 "publish_questions" => Transition::Abort {
                     reason: "quiz generated".into(),
                 },
-                _ => decide_quiz_transition(&current_step, structured.as_ref(), &edges),
+                "collect_sources" => Transition::To("generate_questions".into()),
+                "generate_questions" => Transition::To("verify_questions".into()),
+                "verify_questions" => {
+                    let verdict = structured
+                        .as_ref()
+                        .and_then(|value| value.get("verdict"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    if verdict.eq_ignore_ascii_case("pass") {
+                        return Transition::To("publish_questions".into());
+                    }
+                    if generate_attempts >= 2 {
+                        return Transition::Fail {
+                            reason: format!(
+                                "quiz verifier rejected generated questions after repair attempt: {}",
+                                structured
+                                    .as_ref()
+                                    .and_then(|value| serde_json::to_string(value).ok())
+                                    .unwrap_or_else(|| "missing structured verifier output".into())
+                            ),
+                        };
+                    }
+                    Transition::To("generate_questions".into())
+                }
+                _ => Transition::Fail {
+                    reason: format!("quiz workflow has no transition from {current_step}"),
+                },
             }
         })
     }
 }
 
-fn decide_quiz_transition(
-    current_step: &str,
-    structured: Option<&serde_json::Value>,
-    edges: &[Edge],
-) -> Transition {
-    for edge in edges.iter().filter(|edge| edge.from == current_step) {
-        match &edge.condition {
-            None => return Transition::To(edge.to.clone()),
-            Some(EdgeCondition::Expr(expr)) => {
-                if quiz_condition_matches(expr, structured) {
-                    return Transition::To(edge.to.clone());
-                }
-            }
-            Some(EdgeCondition::Label(label)) => {
-                return Transition::Fail {
-                    reason: format!("quiz workflow has unsupported label condition: {label}"),
-                };
-            }
-        }
-    }
-    Transition::Fail {
-        reason: format!("quiz workflow has no matched transition from {current_step}"),
-    }
-}
-
-fn quiz_condition_matches(
-    expr: &llm_harness_runtime::workflow::model::ConditionExpr,
-    structured: Option<&serde_json::Value>,
-) -> bool {
-    match expr {
-        llm_harness_runtime::workflow::model::ConditionExpr::Eq { pointer, value } => structured
-            .and_then(|value| value.pointer(pointer))
-            .is_some_and(|found| found == value),
-        _ => false,
-    }
-}
-
 struct CollectQuizSourcesExecutor {
-    state: Arc<Mutex<QuizWorkflowState>>,
+    config: QuizGenerationConfig,
+    chunks: Vec<QuizSourceChunk>,
 }
 
 impl StepExecutor for CollectQuizSourcesExecutor {
     fn execute<'a>(
         &'a self,
-        _ctx: &'a ExecutorCtx<'a>,
+        ctx: &'a ExecutorCtx<'a>,
     ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
         Box::pin(async move {
-            let source_count = self.state.lock().unwrap().chunks.len();
+            let source_count = self.chunks.len();
+            {
+                let mut context = ctx.context.lock().await;
+                context.variables.insert(
+                    "quiz_generation_prompt".into(),
+                    serde_json::json!(generation_prompt(&self.config, &self.chunks, None)),
+                );
+                context
+                    .variables
+                    .insert("quiz_sources".into(), serde_json::to_value(&self.chunks)?);
+                context.variables.insert(
+                    "quiz_expected_count".into(),
+                    serde_json::json!(self.config.question_count.clamp(1, 10)),
+                );
+            }
             Ok(workflow_step_result(
                 format!("collected {source_count} source chunks"),
                 serde_json::json!({ "source_count": source_count }),
@@ -307,117 +247,35 @@ impl StepExecutor for CollectQuizSourcesExecutor {
     }
 }
 
-struct GenerateQuizQuestionsExecutor {
-    state: Arc<Mutex<QuizWorkflowState>>,
-    client: Arc<dyn Provider>,
-    model: String,
-}
-
-impl StepExecutor for GenerateQuizQuestionsExecutor {
-    fn execute<'a>(
-        &'a self,
-        _ctx: &'a ExecutorCtx<'a>,
-    ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
-        Box::pin(async move {
-            let (config, chunks, repair_feedback) = {
-                let mut state = self.state.lock().unwrap();
-                state.generation_attempts += 1;
-                (
-                    state.config.clone(),
-                    state.chunks.clone(),
-                    state.repair_feedback.clone(),
-                )
-            };
-            let mut questions = generate_quiz_attempt(
-                self.client.clone(),
-                &self.model,
-                &config,
-                &chunks,
-                repair_feedback.as_deref(),
-            )
-            .await?;
-            repair_supporting_quotes_against_chunks(&mut questions, &chunks);
-            let question_count = questions.len();
-            self.state.lock().unwrap().questions = Some(questions);
-            Ok(workflow_step_result(
-                format!("generated {question_count} quiz questions"),
-                serde_json::json!({ "question_count": question_count }),
-            ))
-        })
-    }
-}
-
-struct VerifyQuizQuestionsExecutor {
-    state: Arc<Mutex<QuizWorkflowState>>,
-    client: Arc<dyn Provider>,
-    model: String,
-}
-
-impl StepExecutor for VerifyQuizQuestionsExecutor {
-    fn execute<'a>(
-        &'a self,
-        _ctx: &'a ExecutorCtx<'a>,
-    ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
-        Box::pin(async move {
-            let (questions, chunks, attempts) = {
-                let state = self.state.lock().unwrap();
-                (
-                    state.questions.clone().ok_or_else(|| {
-                        anyhow::anyhow!("quiz verifier has no generated questions")
-                    })?,
-                    state.chunks.clone(),
-                    state.generation_attempts,
-                )
-            };
-            match verify_quiz_questions_with_client(
-                self.client.clone(),
-                &self.model,
-                &questions,
-                &chunks,
-            )
-            .await
-            {
-                Ok(()) => Ok(workflow_step_result(
-                    "quiz verifier passed".into(),
-                    serde_json::json!({ "verdict": "pass" }),
-                )),
-                Err(err) if attempts < 2 => {
-                    let message = err.to_string();
-                    self.state.lock().unwrap().repair_feedback = Some(message.clone());
-                    Ok(workflow_step_result(
-                        format!("quiz verifier requested repair: {message}"),
-                        serde_json::json!({
-                            "verdict": "fail",
-                            "action": "repair",
-                            "issues": [message],
-                        }),
-                    ))
-                }
-                Err(err) => Err(anyhow::anyhow!(
-                    "quiz verifier rejected generated questions after repair attempt: {err}"
-                )),
-            }
-        })
-    }
-}
-
 struct PublishQuizQuestionsExecutor {
-    state: Arc<Mutex<QuizWorkflowState>>,
+    expected_count: usize,
+    chunks: Vec<QuizSourceChunk>,
 }
 
 impl StepExecutor for PublishQuizQuestionsExecutor {
     fn execute<'a>(
         &'a self,
-        _ctx: &'a ExecutorCtx<'a>,
+        ctx: &'a ExecutorCtx<'a>,
     ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
         Box::pin(async move {
-            let questions = self
-                .state
-                .lock()
-                .unwrap()
-                .questions
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("quiz publish has no verified questions"))?;
+            let generated = ctx
+                .step_history
+                .iter()
+                .rev()
+                .find(|record| record.step_id == "generate_questions")
+                .and_then(|record| record.result.as_ref())
+                .and_then(|result| result.structured.as_ref())
+                .ok_or_else(|| anyhow::anyhow!("quiz publish has no generated questions"))?;
+            let questions_value = generated
+                .get("questions")
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("quiz generation result missing questions"))?;
+            let parsed = GeneratedQuiz {
+                questions: serde_json::from_value(questions_value)?,
+            };
+            let mut questions =
+                validate_questions(parsed.questions, self.expected_count, self.chunks.len())?;
+            repair_supporting_quotes_against_chunks(&mut questions, &self.chunks);
             Ok(workflow_step_result(
                 format!("published {} quiz questions", questions.len()),
                 serde_json::json!({ "questions": questions }),
@@ -822,7 +680,7 @@ mod tests {
     use llm_adapter::provider::ProviderCapabilities;
     use llm_adapter::stream_handle::StreamHandle;
     use llm_adapter::types::{ChatResponse, StopReason, Usage};
-    use llm_harness_loop::test_utils::NoOpEnv;
+    use llm_harness_loop::test_utils::{MockLlmClient, MockResponse, NoOpEnv};
     use llm_harness_types::ExecutionEnv;
 
     use crate::runtime_engine::build_workflow_engine_config;
@@ -971,16 +829,41 @@ mod tests {
     #[tokio::test]
     async fn runtime_workflow_repairs_and_publishes_quiz() {
         let dir = tempfile::TempDir::new().unwrap();
-        let provider = Arc::new(RepairingQuizProvider::new());
+        let client = Arc::new(MockLlmClient::new(vec![
+            MockResponse::tool_use(
+                "gen-1",
+                "submit_step_result",
+                r#"{"result":{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
+            ),
+            MockResponse::text("Draft submitted."),
+            MockResponse::tool_use(
+                "verify-1",
+                "submit_step_result",
+                r#"{"result":{"verdict":"fail","action":"repair","issues":["correct answer contradicts explanation and source"]}}"#,
+            ),
+            MockResponse::text("Verification failed."),
+            MockResponse::tool_use(
+                "gen-2",
+                "submit_step_result",
+                r#"{"result":{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
+            ),
+            MockResponse::text("Repaired draft submitted."),
+            MockResponse::tool_use(
+                "verify-2",
+                "submit_step_result",
+                r#"{"result":{"verdict":"pass","issues":[]}}"#,
+            ),
+            MockResponse::text("Verification passed."),
+        ]));
         let engine_config = build_workflow_engine_config(
-            provider.clone(),
+            client.clone(),
             "fake-model",
             Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
             dir.path().join("quiz-workflow-sessions"),
         );
 
         let questions = generate_quiz_questions_with_workflow(
-            provider.clone(),
+            Arc::new(FakeQuizProvider::new()),
             "fake-model",
             &QuizGenerationConfig {
                 topic: Some("OPC".into()),
@@ -998,7 +881,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
+        assert_eq!(client.call_count.load(Ordering::SeqCst), 8);
         assert_eq!(questions[0].stem, "Repaired draft");
         assert_eq!(questions[0].correct_option_index, 0);
     }
