@@ -106,8 +106,13 @@
 - **Resolved: final assistant bubbles now follow the runtime final-answer contract**
   - Expected: UIs should restore durable assistant bubbles only from runtime `AssistantMessageKind::FinalAnswer`; intermediate `Progress` messages may remain in runtime context but should not appear as final chat answers.
   - Actual: Chat/Code Exec previously treated every `MessageEnd` and streamed `TextDelta` as candidate final answer text, so progress before tool calls could be returned or restored as a normal assistant bubble.
-  - Change: Chat/Code Exec now return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles.
+  - Change: Chat/Code Exec now use runtime `AgentEvent::as_final_answer()` / `as_progress()`, return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles. Harness construction also enables runtime `FinalAnswerMode::tool_with_text_fallback()`, so models may use the built-in `final_answer` tool without losing plain-text compatibility.
   - Remaining gap: streamed `TextDelta` is still emitted immediately for UX. If the runtime later exposes per-delta final/progress classification, the UI can avoid briefly showing progress text in the main stream.
+
+- **Resolved: workflow tests now follow runtime submit-step terminal semantics**
+  - Expected: runtime `submit_step_result` should be enough to complete an LLM workflow step and provide structured output to the workflow engine.
+  - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
+  - Change: Memory and Quiz workflow tests now model `submit_step_result` as the terminal step response, reducing unnecessary mock calls and aligning with runtime-managed structured step output.
 
 ## Positive Validations
 

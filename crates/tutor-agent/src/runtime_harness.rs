@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use llm_harness_agent::{AgentHarness, HarnessHooks, ModelInfo, Plugin, Session};
-use llm_harness_loop::LlmClient;
+use llm_harness_loop::{FinalAnswerMode, LlmClient};
 use llm_harness_runtime::builder::HarnessBuilder;
 use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, PrepareNextTurnHook, Tool};
 
@@ -45,7 +45,8 @@ pub async fn build_runtime_harness(
     let mut builder = HarnessBuilder::new(config.model.clone())
         .provider(config.model.clone(), client)
         .model_info(Some(config.model_info))
-        .system_prompt(Some(config.system_prompt));
+        .system_prompt(Some(config.system_prompt))
+        .final_answer_mode(FinalAnswerMode::tool_with_text_fallback());
 
     for tool in config.tools {
         builder = builder.tool(tool);

@@ -495,7 +495,7 @@ mod tests {
 
         assert_eq!(
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
-            2
+            1
         );
         assert!(output.changed);
         assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);

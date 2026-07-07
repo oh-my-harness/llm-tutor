@@ -221,12 +221,39 @@ async fn run_chat_inner(
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         };
 
-        match event.as_ref() {
-            AgentHarnessEvent::Agent(AgentEvent::MessageEnd { message, .. }) => {
-                if message.kind == AssistantMessageKind::FinalAnswer {
-                    last_text = message.text_content();
-                }
+        if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
+            if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
+                last_text = text;
+                emit_trace(
+                    &router.event_sink,
+                    "final_answer",
+                    serde_json::json!({
+                        "capability": capability,
+                        "message_id": message_id,
+                        "turn_id": turn_id,
+                    }),
+                )
+                .await;
+                continue;
             }
+
+            if let Some((message_id, turn_id, text)) = agent_event.as_progress() {
+                emit_trace(
+                    &router.event_sink,
+                    "assistant_progress",
+                    serde_json::json!({
+                        "capability": capability,
+                        "message_id": message_id,
+                        "turn_id": turn_id,
+                        "summary": text.chars().take(240).collect::<String>(),
+                    }),
+                )
+                .await;
+                continue;
+            }
+        }
+
+        match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 emit_content(&router.event_sink, text.clone(), true).await;
             }

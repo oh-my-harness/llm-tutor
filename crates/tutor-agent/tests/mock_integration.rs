@@ -217,7 +217,7 @@ async fn deep_solve_emits_structured_ux_events() {
                 && data["stage"] == "synthesize"
                 && data["summary"]
                     .as_str()
-                    .is_some_and(|text| text.contains("final answer"))
+                    .is_some_and(|text| text.contains("4"))
         }),
         "missing final event: {events:?}"
     );
