@@ -376,14 +376,12 @@ async fn questions_for_hits(
         let env = Arc::new(OsEnv::new(cwd)) as Arc<dyn ExecutionEnv>;
         let client = llm.build_client();
         let engine_config = tutor_agent::runtime_engine::build_workflow_engine_config(
-            client.clone(),
+            client,
             llm.model.clone(),
             env,
             state.workflow_root.join("quiz"),
         );
         let generated = tutor_agent::quiz::generate_quiz_questions_with_workflow(
-            client,
-            &llm.model,
             &tutor_agent::quiz::QuizGenerationConfig {
                 topic: quiz.config.topic.clone(),
                 difficulty: format!("{:?}", quiz.config.difficulty).to_ascii_lowercase(),

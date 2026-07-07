@@ -32,6 +32,7 @@
   - Twelfth migration step: agent-side legacy direct structured-output helpers have been removed. Deep Solve, Quiz, and Memory now use runtime workflow/harness paths for LLM orchestration; product code keeps only domain validation, source repair, and runtime executor bridges.
   - Thirteenth migration step: app-side declarative edge evaluation has been removed. Deep Solve and Memory now pass a no-op marker into `WorkflowEngine::new`, allowing runtime's built-in declarative edge judge to own `EdgeCondition::Expr` routing.
   - Fourteenth migration step: legacy Deep Solve `PhaseManager`, `ReplanHook`, `ReplanTool`, and `SolveContext` have been removed. Replanning is now represented only as workflow structured output (`submit_step_result` with `route:"replan"`) and runtime edge transitions.
+  - Fifteenth migration step: Quiz and Memory workflow APIs no longer accept duplicate client/model parameters; runtime client/model ownership now flows only through `WorkflowEngineConfig`.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**

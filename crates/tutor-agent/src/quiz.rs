@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_adapter::Provider;
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
@@ -46,8 +45,6 @@ struct GeneratedQuiz {
 }
 
 pub async fn generate_quiz_questions_with_workflow(
-    _client: Arc<dyn Provider>,
-    _model: &str,
     config: &QuizGenerationConfig,
     chunks: &[QuizSourceChunk],
     engine_config: WorkflowEngineConfig,
@@ -457,8 +454,6 @@ mod tests {
         );
 
         let questions = generate_quiz_questions_with_workflow(
-            client.clone(),
-            "fake-model",
             &QuizGenerationConfig {
                 topic: Some("OPC".into()),
                 difficulty: "medium".into(),

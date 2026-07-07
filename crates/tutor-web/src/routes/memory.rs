@@ -442,13 +442,12 @@ async fn run_memory_runtime_workflow(
     let env = Arc::new(OsEnv::new(cwd)) as Arc<dyn ExecutionEnv>;
     let client = llm.build_client();
     let engine_config = tutor_agent::runtime_engine::build_workflow_engine_config(
-        client.clone(),
+        client,
         llm.model.clone(),
         env,
         workflow_root.join("memory"),
     );
-    tutor_agent::memory::run_memory_workflow_with_runtime(client, &llm.model, input, engine_config)
-        .await
+    tutor_agent::memory::run_memory_workflow_with_runtime(input, engine_config).await
 }
 
 pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>) -> Router {

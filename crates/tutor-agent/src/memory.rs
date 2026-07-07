@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_adapter::Provider;
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
@@ -77,8 +76,6 @@ pub enum MemoryWorkflowEditOp {
 }
 
 pub async fn run_memory_workflow_with_runtime(
-    _client: Arc<dyn Provider>,
-    _model: &str,
     input: &MemoryWorkflowInput,
     engine_config: WorkflowEngineConfig,
 ) -> Result<MemoryWorkflowOutput> {
@@ -492,10 +489,9 @@ mod tests {
             Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
             dir.path().join("memory-workflow-sessions"),
         );
-        let output =
-            run_memory_workflow_with_runtime(client.clone(), "mock-model", &input, engine_config)
-                .await
-                .unwrap();
+        let output = run_memory_workflow_with_runtime(&input, engine_config)
+            .await
+            .unwrap();
 
         assert_eq!(
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
