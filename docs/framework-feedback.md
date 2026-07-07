@@ -16,7 +16,7 @@
 ## Friction Points
 
 - **Status update: runtime workflow support is now available and consumed**
-  - `llm-tutor` now pins `llm-harness-runtime` to `eea964b`, which includes `workflow` and `spawn/subagent` modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
+  - `llm-tutor` now pins `llm-harness-runtime` to `bea5374`, which includes `workflow` and `spawn/subagent` modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
   - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
@@ -33,13 +33,15 @@
   - Thirteenth migration step: app-side declarative edge evaluation has been removed. Deep Solve and Memory now pass a no-op marker into `WorkflowEngine::new`, allowing runtime's built-in declarative edge judge to own `EdgeCondition::Expr` routing.
   - Fourteenth migration step: legacy Deep Solve `PhaseManager`, `ReplanHook`, `ReplanTool`, and `SolveContext` have been removed. Replanning is now represented only as workflow structured output (`submit_step_result` with `route:"replan"`) and runtime edge transitions.
   - Fifteenth migration step: Quiz and Memory workflow APIs no longer accept duplicate client/model parameters; runtime client/model ownership now flows only through `WorkflowEngineConfig`.
-  - Sixteenth migration step: upgraded all runtime crates to `eea964b` and verified `tutor-agent` / `tutor-web` compile against the latest runtime. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
-  - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still times out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
+  - Sixteenth migration step: upgraded all runtime crates to `bea5374` and verified `tutor-agent` / `tutor-web` compile against the latest runtime. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
+  - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still timed out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
+  - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and `AgentEvent::as_final_answer()` / `as_progress()`, so durable assistant bubbles no longer come from intermediate progress text.
+  - Nineteenth migration step: Deep Solve now consumes runtime `WorkflowEvent::StepProgress` and relays it into product trace events instead of maintaining a separate workflow-progress model.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.
-  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang on runtime `eea964b`, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally".
+  - Attempting to wire `HarnessBuilder::budget(..., None)` into ordinary one-turn Chat/Code Exec harnesses still makes mock integration tests hang on runtime `eea964b`, matching the earlier `ShouldStopHook` semantic issue: `false` means "continue loop", not "allow this call and finish normally". This has not been re-enabled on `bea5374`.
   - `WorkflowEngineConfig` exposes hooks and step cost aggregation, but does not yet expose a simple builder-style `budget(...)` / shared budget policy API for multi-step workflows.
   - Follow-up: add runtime budget helpers that distinguish per-call budget accounting from agent-loop stop decisions, and expose the same policy for ordinary harnesses and workflows.
 
@@ -93,6 +95,11 @@
   - Actual: runtime now auto-selects its built-in edge judge when the provided judge reports `is_noop()`, so `llm-tutor` no longer duplicates edge evaluation. However, runtime's `NoopJudge` / `EdgeConditionJudge` are still `pub(crate)`, so apps need a tiny marker judge solely to opt into the built-in behavior.
   - Suggestion: expose a `WorkflowEngine::new_declarative(workflow, config)` helper that selects the built-in edge judge automatically, or publish a small no-op marker constructor.
 
+- **Workflow semantic repair loops still need a declarative bounded policy**
+  - Expected: product flows such as Quiz can express verifier repair loops with declarative runtime workflow edges and runtime-owned visit limits.
+  - Actual: runtime `EdgeConditionJudge` can route based on `StepResult.structured`, and `StepExecutionPolicy.max_attempts` can retry execution failures, but there is no declarative edge condition or step policy for "repair once, then fail" based on semantic verifier output and prior step visits. `llm-tutor` therefore keeps a thin `QuizWorkflowJudge` only to bound the `verify_questions -> generate_questions` repair loop.
+  - Suggestion: let edge conditions inspect step visit counts / `step_history`, or add a workflow-level `max_visits_per_step` / `max_semantic_repairs` policy that can be attached to a transition.
+
 - **Model metadata discovery is still app-specific**
   - Expected: settings diagnostics and runtime context budgeting can ask the provider adapter for normalized model metadata such as context window, native embedding dimension, supported embedding dimensions, and detected source.
   - Actual: `llm-tutor` has to implement a thin `GET /models` probe, provider-specific auth headers, endpoint derivation, and recursive parsing of fields such as `context_window`, `max_context_tokens`, and `max_model_len`.
@@ -139,6 +146,7 @@
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
 | No public declarative/no-op workflow judge helper | Product workflows need a tiny marker judge to opt into runtime's built-in declarative edge router | Low |
+| No declarative bounded semantic repair policy | Quiz still needs a thin product judge to cap verifier-driven repair loops | Medium |
 | No safe app-level budget policy helper | Ordinary one-turn harnesses and multi-step workflows cannot share budget accounting without app-layer loop-risk or hook boilerplate | Medium |
 | No normalized model metadata API | Apps duplicate `/models` probing, auth headers, context-window parsing, and embedding dimension capability discovery | Medium |
 
@@ -155,3 +163,4 @@
 9. Expose a public no-op/declarative workflow judge helper or `WorkflowEngine::new_declarative` constructor
 10. Continue hardening `WorkflowEngine` examples for app-level workflows that mix executor steps, LLM steps, and subagent reviewers
 11. Add a safe app-level budget helper/policy API that separates cost accounting from loop continuation
+12. Add declarative bounded semantic repair policies for verifier-driven workflow loops
