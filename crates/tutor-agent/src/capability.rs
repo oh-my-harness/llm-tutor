@@ -5,6 +5,7 @@ use std::sync::Arc;
 use llm_adapter::provider::Provider;
 use llm_harness_agent::Session;
 use llm_harness_types::{AgentMessage, ContentBlock, ExecutionEnv, Tool};
+use tokio_util::sync::CancellationToken;
 use tutor_rag::KnowledgeRetriever;
 
 use crate::error::{Result, TutorError};
@@ -169,17 +170,43 @@ impl CapabilityRouter {
         session: Session,
         question: &str,
     ) -> Result<String> {
+        self.run_with_session_cancel(capability, session, question, None)
+            .await
+    }
+
+    /// Route a question using a runtime-backed session and an optional abort token.
+    pub async fn run_with_session_cancel(
+        &self,
+        capability: Capability,
+        session: Session,
+        question: &str,
+        abort_token: Option<CancellationToken>,
+    ) -> Result<String> {
         match capability {
-            Capability::Chat => crate::chat::run_chat_with_session(self, session, question).await,
+            Capability::Chat => {
+                crate::chat::run_chat_with_session_cancel(self, session, question, abort_token)
+                    .await
+            }
             Capability::Research => {
-                crate::chat::run_research_with_session(self, session, question).await
+                crate::chat::run_research_with_session_cancel(self, session, question, abort_token)
+                    .await
             }
             Capability::Organize => {
-                crate::chat::run_organize_with_session(self, session, question).await
+                crate::chat::run_organize_with_session_cancel(self, session, question, abort_token)
+                    .await
             }
-            Capability::Quiz => crate::chat::run_quiz_with_session(self, session, question).await,
+            Capability::Quiz => {
+                crate::chat::run_quiz_with_session_cancel(self, session, question, abort_token)
+                    .await
+            }
             Capability::CodeExec => {
-                crate::code_exec::run_code_exec_with_session(self, session, question).await
+                crate::code_exec::run_code_exec_with_session_cancel(
+                    self,
+                    session,
+                    question,
+                    abort_token,
+                )
+                .await
             }
             Capability::DeepSolve => {
                 let existing = session

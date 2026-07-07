@@ -271,6 +271,21 @@ async fn run_tutor_message(
 
     let work = async {
         let capability: Capability = entry.capability.parse()?;
+        let repaired_context = pool
+            .repair_incomplete_tool_call_context(&entry.id)
+            .await
+            .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
+        if repaired_context {
+            let _ = entry
+                .stream
+                .status(
+                    "context_repaired",
+                    serde_json::json!({
+                        "reason": "incomplete_tool_call",
+                    }),
+                )
+                .await;
+        }
         let runtime_session = pool
             .open_runtime_session(&entry.id)
             .await
@@ -354,27 +369,31 @@ async fn run_tutor_message(
                 .await;
         }
         let answer = router
-            .run_with_session(capability, runtime_session, &resolved_content.content)
+            .run_with_session_cancel(
+                capability,
+                runtime_session,
+                &resolved_content.content,
+                Some(cancel.clone()),
+            )
             .await?;
         Ok((answer, streamed_content.load(Ordering::SeqCst)))
     };
 
-    let result: tutor_agent::Result<(String, bool)> = tokio::select! {
-        _ = cancel.cancelled() => {
-            let _ = entry
-                .stream
-                .status(
-                    "stopped",
-                    serde_json::json!({
-                        "capability": entry.capability,
-                    }),
-                )
-                .await;
-            let _ = entry.stream.content("", false).await;
-            return;
-        }
-        result = work => result,
-    };
+    let result: tutor_agent::Result<(String, bool)> = work.await;
+
+    if cancel.is_cancelled() {
+        let _ = entry
+            .stream
+            .status(
+                "stopped",
+                serde_json::json!({
+                    "capability": entry.capability,
+                }),
+            )
+            .await;
+        let _ = entry.stream.content("", false).await;
+        return;
+    }
 
     match result {
         Ok((answer, streamed)) => {

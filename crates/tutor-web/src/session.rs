@@ -6,7 +6,9 @@ use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
     session::{CreateSessionOptions, ListSessionOptions, SessionEntryPayload, SessionMetadata},
 };
-use llm_harness_types::{AgentMessage, AssistantMessageKind, EntryId, TokenUsage};
+use llm_harness_types::{
+    AgentMessage, AssistantMessageKind, ContentBlock, EntryId, SessionError, TokenUsage,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
@@ -216,6 +218,62 @@ impl SessionPool {
     ) -> Result<Session, llm_harness_types::SessionError> {
         let storage = self.repo.open(id).await?;
         Ok(Session::new(storage))
+    }
+
+    pub async fn repair_incomplete_tool_call_context(
+        &self,
+        id: &str,
+    ) -> Result<bool, SessionError> {
+        let session = self.open_runtime_session(id).await?;
+        let entries = session.read_active_path().await?;
+        let mut last_valid_message_entry: Option<EntryId> = None;
+        let mut pending_tool_calls: Option<(Vec<String>, Option<EntryId>)> = None;
+
+        for entry in entries {
+            let SessionEntryPayload::Message(message) = &entry.payload else {
+                continue;
+            };
+
+            if let Some((_, rewind_to)) = &pending_tool_calls
+                && !matches!(message, AgentMessage::ToolResult(_))
+            {
+                return rewind_incomplete_tool_call(&session, *rewind_to).await;
+            }
+
+            match message {
+                AgentMessage::Assistant(message) => {
+                    let ids = tool_use_ids(&message.content);
+                    if ids.is_empty() {
+                        last_valid_message_entry = Some(entry.id);
+                    } else {
+                        pending_tool_calls = Some((ids, last_valid_message_entry));
+                    }
+                }
+                AgentMessage::ToolResult(message) => {
+                    let Some((ids, rewind_to)) = pending_tool_calls.as_mut() else {
+                        return rewind_incomplete_tool_call(&session, last_valid_message_entry)
+                            .await;
+                    };
+                    let Some(index) = ids.iter().position(|id| id == &message.tool_use_id) else {
+                        return rewind_incomplete_tool_call(&session, *rewind_to).await;
+                    };
+                    ids.remove(index);
+                    if ids.is_empty() {
+                        pending_tool_calls = None;
+                        last_valid_message_entry = Some(entry.id);
+                    }
+                }
+                _ => {
+                    last_valid_message_entry = Some(entry.id);
+                }
+            }
+        }
+
+        if let Some((_, rewind_to)) = pending_tool_calls {
+            return rewind_incomplete_tool_call(&session, rewind_to).await;
+        }
+
+        Ok(false)
     }
 
     pub async fn metadata(
@@ -659,6 +717,27 @@ impl SessionPool {
     }
 }
 
+async fn rewind_incomplete_tool_call(
+    session: &Session,
+    rewind_to: Option<EntryId>,
+) -> Result<bool, SessionError> {
+    let Some(entry_id) = rewind_to else {
+        return Ok(false);
+    };
+    session.navigate_to(entry_id).await?;
+    Ok(true)
+}
+
+fn tool_use_ids(content: &[ContentBlock]) -> Vec<String> {
+    content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn message_text(message: &llm_harness_types::AgentMessage) -> String {
     let content = match message {
         llm_harness_types::AgentMessage::User(message) => &message.content,
@@ -786,6 +865,41 @@ mod tests {
         let reopened = pool.open_runtime_session(&id).await.unwrap();
         let ctx = reopened.build_context().await.unwrap();
         assert_eq!(ctx.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn repair_incomplete_tool_call_context_rewinds_active_cursor() {
+        let pool = test_pool();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("hello"))
+            .await
+            .unwrap();
+        let mut tool_call = tutor_agent::chat::assistant_message("");
+        let AgentMessage::Assistant(assistant) = &mut tool_call else {
+            panic!("expected assistant message");
+        };
+        assistant.content = vec![ContentBlock::ToolUse {
+            id: "call_1".into(),
+            name: "web_search".into(),
+            input: serde_json::json!({"query": "rust"}),
+        }];
+        session.append_message(tool_call).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("next turn"))
+            .await
+            .unwrap();
+
+        assert!(pool.repair_incomplete_tool_call_context(&id).await.unwrap());
+        let repaired = pool.open_runtime_session(&id).await.unwrap();
+        let ctx = repaired.build_context().await.unwrap();
+
+        assert_eq!(ctx.messages.len(), 1);
+        assert_eq!(message_text(&ctx.messages[0]), "hello");
     }
 
     #[tokio::test]

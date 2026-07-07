@@ -289,6 +289,12 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
           setRunning(false)
+        } else if (kind === 'context_repaired') {
+          pushStatus({
+            kind: 'tool',
+            label: 'Context repaired',
+            detail: payload.reason === 'incomplete_tool_call' ? 'Recovered incomplete tool call history' : undefined,
+          })
         } else if (kind === 'approval_request') {
           pushStatus({
             kind: 'tool',

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use llm_harness_agent::{AgentHarnessEvent, Session};
 use llm_harness_loop::CompositeBeforeToolCallHook;
 use llm_harness_types::{AgentEvent, AgentMessage, AssistantMessageKind, BeforeToolCallHook};
+use tokio_util::sync::CancellationToken;
 use tutor_tools::CodeExecTool;
 
 use crate::capability::CapabilityRouter;
@@ -19,7 +20,7 @@ pub async fn run_code_exec_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_code_exec_inner(router, Some(messages), None).await
+    run_code_exec_inner(router, Some(messages), None, None).await
 }
 
 pub async fn run_code_exec_with_session(
@@ -27,10 +28,20 @@ pub async fn run_code_exec_with_session(
     session: Session,
     request: &str,
 ) -> Result<String> {
+    run_code_exec_with_session_cancel(router, session, request, None).await
+}
+
+pub async fn run_code_exec_with_session_cancel(
+    router: &CapabilityRouter,
+    session: Session,
+    request: &str,
+    abort_token: Option<CancellationToken>,
+) -> Result<String> {
     run_code_exec_inner(
         router,
         Some(vec![crate::chat::user_message(request)]),
         Some(session),
+        abort_token,
     )
     .await
 }
@@ -39,6 +50,7 @@ async fn run_code_exec_inner(
     router: &CapabilityRouter,
     messages: Option<Vec<AgentMessage>>,
     session: Option<Session>,
+    abort_token: Option<CancellationToken>,
 ) -> Result<String> {
     emit_trace(
         &router.event_sink,
@@ -82,6 +94,9 @@ async fn run_code_exec_inner(
     );
     if has_session {
         crate::chat::try_auto_compact(&harness, router, "code_exec").await;
+    }
+    if let Some(token) = abort_token {
+        harness.set_abort_token(token);
     }
     let mut rx = harness.subscribe();
     let prompt_harness = harness.clone();

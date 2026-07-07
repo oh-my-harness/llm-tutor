@@ -6,6 +6,7 @@ use llm_harness_types::{
     AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, CompactionError,
     ContentBlock, HarnessError, StopReason, UserMessage,
 };
+use tokio_util::sync::CancellationToken;
 use tutor_tools::{
     CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool, WriteMemoryTool,
 };
@@ -25,7 +26,15 @@ pub async fn run_chat_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(router, "chat", chat_system_prompt(), Some(messages), None).await
+    run_chat_inner(
+        router,
+        "chat",
+        chat_system_prompt(),
+        Some(messages),
+        None,
+        None,
+    )
+    .await
 }
 
 pub async fn run_chat_with_session(
@@ -33,12 +42,22 @@ pub async fn run_chat_with_session(
     session: Session,
     question: &str,
 ) -> Result<String> {
+    run_chat_with_session_cancel(router, session, question, None).await
+}
+
+pub async fn run_chat_with_session_cancel(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+    abort_token: Option<CancellationToken>,
+) -> Result<String> {
     run_chat_inner(
         router,
         "chat",
         chat_system_prompt(),
         Some(vec![user_message(question)]),
         Some(session),
+        abort_token,
     )
     .await
 }
@@ -53,6 +72,7 @@ pub async fn run_research_with_messages(
         research_system_prompt(),
         Some(messages),
         None,
+        None,
     )
     .await
 }
@@ -62,12 +82,22 @@ pub async fn run_research_with_session(
     session: Session,
     question: &str,
 ) -> Result<String> {
+    run_research_with_session_cancel(router, session, question, None).await
+}
+
+pub async fn run_research_with_session_cancel(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+    abort_token: Option<CancellationToken>,
+) -> Result<String> {
     run_chat_inner(
         router,
         "research",
         research_system_prompt(),
         Some(vec![user_message(question)]),
         Some(session),
+        abort_token,
     )
     .await
 }
@@ -82,6 +112,7 @@ pub async fn run_organize_with_messages(
         organize_system_prompt(),
         Some(messages),
         None,
+        None,
     )
     .await
 }
@@ -91,12 +122,22 @@ pub async fn run_organize_with_session(
     session: Session,
     question: &str,
 ) -> Result<String> {
+    run_organize_with_session_cancel(router, session, question, None).await
+}
+
+pub async fn run_organize_with_session_cancel(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+    abort_token: Option<CancellationToken>,
+) -> Result<String> {
     run_chat_inner(
         router,
         "organize",
         organize_system_prompt(),
         Some(vec![user_message(question)]),
         Some(session),
+        abort_token,
     )
     .await
 }
@@ -105,7 +146,15 @@ pub async fn run_quiz_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(router, "quiz", quiz_system_prompt(), Some(messages), None).await
+    run_chat_inner(
+        router,
+        "quiz",
+        quiz_system_prompt(),
+        Some(messages),
+        None,
+        None,
+    )
+    .await
 }
 
 pub async fn run_quiz_with_session(
@@ -113,12 +162,22 @@ pub async fn run_quiz_with_session(
     session: Session,
     question: &str,
 ) -> Result<String> {
+    run_quiz_with_session_cancel(router, session, question, None).await
+}
+
+pub async fn run_quiz_with_session_cancel(
+    router: &CapabilityRouter,
+    session: Session,
+    question: &str,
+    abort_token: Option<CancellationToken>,
+) -> Result<String> {
     run_chat_inner(
         router,
         "quiz",
         quiz_system_prompt(),
         Some(vec![user_message(question)]),
         Some(session),
+        abort_token,
     )
     .await
 }
@@ -129,6 +188,7 @@ async fn run_chat_inner(
     system_prompt: String,
     messages: Option<Vec<AgentMessage>>,
     session: Option<Session>,
+    abort_token: Option<CancellationToken>,
 ) -> Result<String> {
     emit_trace(
         &router.event_sink,
@@ -196,6 +256,9 @@ async fn run_chat_inner(
     );
     if has_session {
         try_auto_compact(&harness, router, capability).await;
+    }
+    if let Some(token) = abort_token {
+        harness.set_abort_token(token);
     }
     let mut rx = harness.subscribe();
     let prompt_harness = harness.clone();
