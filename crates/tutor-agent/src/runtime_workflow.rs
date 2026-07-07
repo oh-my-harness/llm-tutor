@@ -155,14 +155,27 @@ pub fn validate_quiz_generation_workflow() -> Result<()> {
 
 pub fn memory_workflow() -> Workflow {
     Workflow {
-        entry_step: "run_memory".into(),
-        steps: vec![Step::executor(
-            "run_memory",
-            "Run memory workflow",
-            "tutor.memory.run",
-            None,
-        )],
-        edges: vec![],
+        entry_step: "prepare_memory".into(),
+        steps: vec![
+            Step::executor(
+                "prepare_memory",
+                "Prepare memory workflow input",
+                "tutor.memory.prepare",
+                None,
+            ),
+            Step::llm(
+                "run_memory",
+                "Run memory workflow",
+                "Read the workflow Context. The `memory_prompt` variable contains the full memory maintenance instruction, including target file, action, current Markdown, normalized evidence, and output schema. \
+                 Maintain learner memory according to that instruction. When done, call submit_step_result with the JSON object requested by `memory_prompt`.",
+                vec![],
+            ),
+        ],
+        edges: vec![Edge {
+            from: "prepare_memory".into(),
+            to: "run_memory".into(),
+            condition: None,
+        }],
     }
 }
 

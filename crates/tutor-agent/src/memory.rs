@@ -6,12 +6,12 @@ use llm_adapter::types::{ChatRequest, Message, RequestContent, ResponseContent, 
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
-use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
-use llm_harness_runtime::workflow::model::{StepResult, Transition};
+use llm_harness_runtime::workflow::model::StepResult;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
 use crate::llm_provider::LlmConfig;
+use crate::runtime_engine::DeclarativeEdgeJudge;
 use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
 
 const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
@@ -114,23 +114,22 @@ pub async fn run_memory_workflow_with_client(
 }
 
 pub async fn run_memory_workflow_with_runtime(
-    client: Arc<dyn Provider>,
-    model: &str,
+    _client: Arc<dyn Provider>,
+    _model: &str,
     input: &MemoryWorkflowInput,
     engine_config: WorkflowEngineConfig,
 ) -> Result<MemoryWorkflowOutput> {
     validate_memory_workflow()?;
+    let workflow = memory_workflow();
     let engine = WorkflowEngine::new(
-        memory_workflow(),
+        workflow.clone(),
         engine_config,
-        Arc::new(MemoryTerminalJudge),
+        Arc::new(DeclarativeEdgeJudge::new(&workflow)),
     )
     .map_err(|err| TutorError::Internal(format!("memory workflow initialization failed: {err}")))?
     .with_executor(
-        "tutor.memory.run",
-        Arc::new(MemoryWorkflowExecutor {
-            client,
-            model: model.to_string(),
+        "tutor.memory.prepare",
+        Arc::new(PrepareMemoryWorkflowExecutor {
             input: input.clone(),
         }),
     );
@@ -148,46 +147,44 @@ pub async fn run_memory_workflow_with_runtime(
         .and_then(|record| record.result)
         .and_then(|result| result.structured)
         .ok_or_else(|| TutorError::Internal("memory workflow did not return output".into()))?;
-    serde_json::from_value(structured)
-        .map_err(|err| TutorError::Internal(format!("invalid memory workflow output: {err}")))
+    let output: MemoryWorkflowOutput = serde_json::from_value(structured)
+        .map_err(|err| TutorError::Internal(format!("invalid memory workflow output: {err}")))?;
+    validate_memory_workflow_output(output, input.action)
 }
 
-struct MemoryWorkflowExecutor {
-    client: Arc<dyn Provider>,
-    model: String,
+struct PrepareMemoryWorkflowExecutor {
     input: MemoryWorkflowInput,
 }
 
-impl StepExecutor for MemoryWorkflowExecutor {
+impl StepExecutor for PrepareMemoryWorkflowExecutor {
     fn execute<'a>(
         &'a self,
-        _ctx: &'a ExecutorCtx<'a>,
+        ctx: &'a ExecutorCtx<'a>,
     ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
         Box::pin(async move {
-            let output =
-                run_memory_workflow_with_client(self.client.clone(), &self.model, &self.input)
-                    .await?;
+            {
+                let mut context = ctx.context.lock().await;
+                context.variables.insert(
+                    "memory_prompt".into(),
+                    serde_json::json!(memory_prompt(&self.input)),
+                );
+                context
+                    .variables
+                    .insert("memory_action".into(), serde_json::json!(self.input.action));
+                context.variables.insert(
+                    "memory_target_path".into(),
+                    serde_json::json!(self.input.target_path.clone()),
+                );
+            }
             Ok(StepResult {
-                output: output.report_markdown.clone(),
-                structured: Some(serde_json::to_value(output)?),
+                output: "memory workflow input prepared".into(),
+                structured: Some(serde_json::json!({ "prepared": true })),
                 tool_calls_count: 0,
                 session_id: String::new(),
                 cost: CostAggregate::default(),
                 started_at: None,
                 ended_at: None,
             })
-        })
-    }
-}
-
-struct MemoryTerminalJudge;
-
-impl StepTransitionJudge for MemoryTerminalJudge {
-    fn decide<'a>(&'a self, _ctx: &StepCtx<'a>) -> BoxFuture<'a, Transition> {
-        Box::pin(async {
-            Transition::Abort {
-                reason: "memory workflow complete".into(),
-            }
         })
     }
 }
@@ -215,8 +212,40 @@ pub fn parse_memory_workflow_output(
             "memory workflow must not return proposed_markdown".into(),
         ));
     }
+    validate_memory_workflow_output(
+        MemoryWorkflowOutput {
+            report_markdown,
+            proposed_markdown,
+            facts: parsed.facts,
+            edits: parsed.edits,
+            changed: parsed.changed,
+        },
+        action,
+    )
+}
+
+fn validate_memory_workflow_output(
+    output: MemoryWorkflowOutput,
+    action: MemoryWorkflowAction,
+) -> Result<MemoryWorkflowOutput> {
+    let report_markdown = output.report_markdown.trim().to_string();
+    if report_markdown.is_empty() {
+        return Err(TutorError::Internal(
+            "memory workflow report is empty".into(),
+        ));
+    }
+    let proposed_markdown = output
+        .proposed_markdown
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if proposed_markdown.is_some() {
+        return Err(TutorError::Internal(
+            "memory workflow must not return proposed_markdown".into(),
+        ));
+    }
+
     if action == MemoryWorkflowAction::Update {
-        for fact in &parsed.facts {
+        for fact in &output.facts {
             if fact.text.trim().is_empty() || fact.section.trim().is_empty() || fact.refs.is_empty()
             {
                 return Err(TutorError::Internal(
@@ -229,27 +258,27 @@ pub fn parse_memory_workflow_output(
                 ));
             }
         }
-        if parsed.changed && parsed.facts.is_empty() {
+        if output.changed && output.facts.is_empty() {
             return Err(TutorError::Internal(
                 "changed update workflow requires facts".into(),
             ));
         }
-        if !parsed.edits.is_empty() {
+        if !output.edits.is_empty() {
             return Err(TutorError::Internal(
                 "update workflow must not return edits".into(),
             ));
         }
     } else {
-        if !parsed.facts.is_empty() {
+        if !output.facts.is_empty() {
             return Err(TutorError::Internal(
                 "check and dedupe workflows must not return facts".into(),
             ));
         }
-        for edit in &parsed.edits {
+        for edit in &output.edits {
             validate_workflow_edit(edit)?;
         }
         if action == MemoryWorkflowAction::Dedupe
-            && parsed
+            && output
                 .edits
                 .iter()
                 .any(|edit| edit.op == MemoryWorkflowEditOp::Insert)
@@ -258,7 +287,7 @@ pub fn parse_memory_workflow_output(
                 "dedupe workflow must not insert new facts".into(),
             ));
         }
-        if action == MemoryWorkflowAction::Dedupe && parsed.changed && parsed.edits.is_empty() {
+        if action == MemoryWorkflowAction::Dedupe && output.changed && output.edits.is_empty() {
             return Err(TutorError::Internal(
                 "changed dedupe workflow requires edits".into(),
             ));
@@ -267,9 +296,9 @@ pub fn parse_memory_workflow_output(
     Ok(MemoryWorkflowOutput {
         report_markdown,
         proposed_markdown,
-        facts: parsed.facts,
-        edits: parsed.edits,
-        changed: parsed.changed,
+        facts: output.facts,
+        edits: output.edits,
+        changed: output.changed,
     })
 }
 
@@ -440,7 +469,7 @@ mod tests {
     use async_trait::async_trait;
     use llm_adapter::types::{ChatResponse, StopReason};
     use llm_adapter::{LlmError, ProviderCapabilities, StreamHandle};
-    use llm_harness_loop::test_utils::NoOpEnv;
+    use llm_harness_loop::test_utils::{MockLlmClient, MockResponse, NoOpEnv};
     use llm_harness_types::ExecutionEnv;
 
     use crate::runtime_engine::build_workflow_engine_config;
@@ -613,10 +642,14 @@ mod tests {
     #[tokio::test]
     async fn runtime_workflow_runs_memory_llm_step() {
         let dir = tempfile::TempDir::new().unwrap();
-        let provider = Arc::new(MockProvider {
-            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}"##.into(),
-            json_schema: true,
-        });
+        let client = Arc::new(MockLlmClient::new(vec![
+            MockResponse::tool_use(
+                "memory-submit",
+                "submit_step_result",
+                r##"{"result":{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}}"##,
+            ),
+            MockResponse::text("Memory update submitted."),
+        ]));
         let input = MemoryWorkflowInput {
             target_path: "L2/quiz.md".into(),
             action: MemoryWorkflowAction::Update,
@@ -626,17 +659,25 @@ mod tests {
                     .into(),
         };
         let engine_config = build_workflow_engine_config(
-            provider.clone(),
+            client.clone(),
             "mock-model",
             Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
             dir.path().join("memory-workflow-sessions"),
         );
+        let unused_provider = Arc::new(MockProvider {
+            text: "{}".into(),
+            json_schema: false,
+        });
 
         let output =
-            run_memory_workflow_with_runtime(provider, "mock-model", &input, engine_config)
+            run_memory_workflow_with_runtime(unused_provider, "mock-model", &input, engine_config)
                 .await
                 .unwrap();
 
+        assert_eq!(
+            client.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
         assert!(output.changed);
         assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
     }

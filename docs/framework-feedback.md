@@ -28,7 +28,8 @@
   - Eighth migration step: Memory assist/update/check/dedupe now has a runtime `WorkflowEngine` path. The web memory route builds a runtime workflow config with a JSONL session root and runs the LLM-backed memory workflow through a registered runtime executor.
   - Ninth migration step: Deep Solve now runs through runtime `WorkflowEngine`. Product code registers a retrieve executor, product tools/hooks, and a thin event bridge; runtime owns the plan/solve/synthesize LLM step sessions, step history, `submit_step_result` routing, and workflow transitions.
   - Tenth migration step: Quiz generation and verification now run as runtime LLM steps. Product code only collects sources into workflow context, publishes the final validated questions, and enforces a bounded repair loop through a thin workflow judge; the model submits structured quiz and verifier results through runtime `submit_step_result`.
-  - Remaining migration target: move Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
+  - Eleventh migration step: Memory assist/update/check/dedupe now runs as a runtime LLM step. Product code prepares the memory prompt in workflow context and validates the submitted structured memory result; the model submits memory facts/edits through runtime `submit_step_result`.
+  - Remaining migration target: remove the remaining legacy direct structured-output helpers once runtime exposes provider-native structured LLM step options, public declarative judges, and typed validation/retry helpers.
 
 - **Budget control semantics changed after the runtime update**
   - The current `BudgetControlAdapter` is a `ShouldStopHook`: returning `false` means "continue the agent loop", not "allow this one LLM call".
