@@ -41,6 +41,9 @@ Date: 2026-07-07
   product code.
 - The web UI consumes `runtime_usage` as the live context-usage fallback and
   budget spent source when provider message usage is unavailable.
+- Session restore also derives `latest_usage` from persisted `runtime_usage`
+  trace entries, so archived conversations keep runtime token usage even when
+  provider message usage is absent.
 
 ## Removed Or Avoided Product Reimplementations
 
@@ -109,4 +112,4 @@ Checked against local runtime checkout
   verifier repair, and publish behavior.
 - `cargo test -p tutor-web session --lib` covers runtime-backed session
   persistence, custom UI entries, citations, mentions, trace entries, and
-  compaction summaries.
+  compaction summaries, including restored runtime usage traces.

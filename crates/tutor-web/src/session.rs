@@ -291,11 +291,21 @@ impl SessionPool {
             .await?;
 
         for entry in entries.into_iter().rev() {
-            let SessionEntryPayload::Message(AgentMessage::Assistant(message)) = entry.payload
-            else {
-                continue;
-            };
-            return Ok(message.usage);
+            match entry.payload {
+                SessionEntryPayload::Custom { custom_type, data }
+                    if custom_type == "trace_event" =>
+                {
+                    if let Some(usage) = token_usage_from_runtime_trace(&data) {
+                        return Ok(Some(usage));
+                    }
+                }
+                SessionEntryPayload::Message(AgentMessage::Assistant(message)) => {
+                    if message.usage.is_some() {
+                        return Ok(message.usage);
+                    }
+                }
+                _ => {}
+            }
         }
 
         Ok(None)
@@ -714,6 +724,27 @@ fn persist_product_metadata(
     Ok(())
 }
 
+fn token_usage_from_runtime_trace(data: &serde_json::Value) -> Option<TokenUsage> {
+    if data.get("kind")?.as_str()? != "runtime_usage" {
+        return None;
+    }
+    let payload = data.get("payload")?;
+    Some(TokenUsage {
+        input_tokens: u32_from_json(payload.get("input_tokens")),
+        output_tokens: u32_from_json(payload.get("output_tokens")),
+        cache_read_tokens: u32_from_json(payload.get("cache_read_tokens")),
+        cache_creation_tokens: u32_from_json(payload.get("cache_write_tokens")),
+        reasoning_tokens: u32_from_json(payload.get("reasoning_tokens")),
+    })
+}
+
+fn u32_from_json(value: Option<&serde_json::Value>) -> u32 {
+    value
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,6 +786,46 @@ mod tests {
         let reopened = pool.open_runtime_session(&id).await.unwrap();
         let ctx = reopened.build_context().await.unwrap();
         assert_eq!(ctx.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn latest_usage_uses_runtime_usage_trace() {
+        let pool = test_pool();
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+
+        session
+            .append_message(tutor_agent::chat::assistant_message(
+                "answer without provider usage",
+            ))
+            .await
+            .unwrap();
+        pool.append_trace(
+            &id,
+            "runtime_usage",
+            serde_json::json!({
+                "capability": "chat",
+                "input_tokens": 12,
+                "output_tokens": 5,
+                "cache_read_tokens": 3,
+                "cache_write_tokens": 2,
+                "reasoning_tokens": 7,
+                "cost_usd": 0.01,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let usage = pool.latest_usage(&id).await.unwrap().unwrap();
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 5);
+        assert_eq!(usage.cache_read_tokens, 3);
+        assert_eq!(usage.cache_creation_tokens, 2);
+        assert_eq!(usage.reasoning_tokens, 7);
+        assert_eq!(usage.total_tokens(), 29);
     }
 
     #[test]
