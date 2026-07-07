@@ -25,6 +25,7 @@
   - Fifth migration step: Quiz generation now performs a controlled verifier repair pass that mirrors the runtime workflow's `verify_questions -> generate_questions` repair edge while the full `WorkflowEngine` execution path is being adopted.
   - Sixth migration step: `llm-tutor` now has a thin `runtime_engine` adapter that builds `WorkflowEngineConfig` from the product `ExecutionEnv`, LLM client, model, and runtime JSONL session factory. A smoke test runs an executor workflow through runtime `WorkflowEngine`.
   - Seventh migration step: Quiz generation now has a product runtime workflow path. `collect_sources`, `generate_questions`, `verify_questions`, and `publish_questions` run as runtime executor steps, and the repair edge is driven by `WorkflowEngine` transitions. The web Quiz route and chat `create_quiz` tool now call this runtime workflow path when an LLM is configured.
+  - Eighth migration step: Memory assist/update/check/dedupe now has a runtime `WorkflowEngine` path. The web memory route builds a runtime workflow config with a JSONL session root and runs the LLM-backed memory workflow through a registered runtime executor.
   - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz/Memory structured LLM calls from executor internals into native runtime LLM steps or subagent-style reviewers that use `submit_step_result`.
 
 - **Budget control semantics changed after the runtime update**

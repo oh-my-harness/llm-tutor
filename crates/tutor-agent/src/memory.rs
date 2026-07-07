@@ -1,11 +1,18 @@
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use llm_adapter::Provider;
 use llm_adapter::types::{ChatRequest, Message, RequestContent, ResponseContent, ResponseFormat};
+use llm_harness_runtime::control::cost::CostAggregate;
+use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
+use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
+use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
+use llm_harness_runtime::workflow::model::{StepResult, Transition};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
 use crate::llm_provider::LlmConfig;
+use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
 
 const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
 
@@ -104,6 +111,85 @@ pub async fn run_memory_workflow_with_client(
         .await
         .map_err(|err| TutorError::Internal(format!("memory LLM workflow failed: {err}")))?;
     parse_memory_workflow_output(&response_text(&response.content), input.action)
+}
+
+pub async fn run_memory_workflow_with_runtime(
+    client: Arc<dyn Provider>,
+    model: &str,
+    input: &MemoryWorkflowInput,
+    engine_config: WorkflowEngineConfig,
+) -> Result<MemoryWorkflowOutput> {
+    validate_memory_workflow()?;
+    let engine = WorkflowEngine::new(
+        memory_workflow(),
+        engine_config,
+        Arc::new(MemoryTerminalJudge),
+    )
+    .map_err(|err| TutorError::Internal(format!("memory workflow initialization failed: {err}")))?
+    .with_executor(
+        "tutor.memory.run",
+        Arc::new(MemoryWorkflowExecutor {
+            client,
+            model: model.to_string(),
+            input: input.clone(),
+        }),
+    );
+
+    engine
+        .run()
+        .await
+        .map_err(|err| TutorError::Internal(format!("memory workflow failed: {err}")))?;
+    let structured = engine
+        .step_history()
+        .await
+        .into_iter()
+        .rev()
+        .find(|record| record.step_id == "run_memory")
+        .and_then(|record| record.result)
+        .and_then(|result| result.structured)
+        .ok_or_else(|| TutorError::Internal("memory workflow did not return output".into()))?;
+    serde_json::from_value(structured)
+        .map_err(|err| TutorError::Internal(format!("invalid memory workflow output: {err}")))
+}
+
+struct MemoryWorkflowExecutor {
+    client: Arc<dyn Provider>,
+    model: String,
+    input: MemoryWorkflowInput,
+}
+
+impl StepExecutor for MemoryWorkflowExecutor {
+    fn execute<'a>(
+        &'a self,
+        _ctx: &'a ExecutorCtx<'a>,
+    ) -> BoxFuture<'a, anyhow::Result<StepResult>> {
+        Box::pin(async move {
+            let output =
+                run_memory_workflow_with_client(self.client.clone(), &self.model, &self.input)
+                    .await?;
+            Ok(StepResult {
+                output: output.report_markdown.clone(),
+                structured: Some(serde_json::to_value(output)?),
+                tool_calls_count: 0,
+                session_id: String::new(),
+                cost: CostAggregate::default(),
+                started_at: None,
+                ended_at: None,
+            })
+        })
+    }
+}
+
+struct MemoryTerminalJudge;
+
+impl StepTransitionJudge for MemoryTerminalJudge {
+    fn decide<'a>(&'a self, _ctx: &StepCtx<'a>) -> BoxFuture<'a, Transition> {
+        Box::pin(async {
+            Transition::Abort {
+                reason: "memory workflow complete".into(),
+            }
+        })
+    }
 }
 
 pub fn parse_memory_workflow_output(
@@ -354,6 +440,10 @@ mod tests {
     use async_trait::async_trait;
     use llm_adapter::types::{ChatResponse, StopReason};
     use llm_adapter::{LlmError, ProviderCapabilities, StreamHandle};
+    use llm_harness_loop::test_utils::NoOpEnv;
+    use llm_harness_types::ExecutionEnv;
+
+    use crate::runtime_engine::build_workflow_engine_config;
 
     struct MockProvider {
         text: String,
@@ -516,6 +606,37 @@ mod tests {
         let output = run_memory_workflow_with_client(provider, "mock-model", &input)
             .await
             .unwrap();
+        assert!(output.changed);
+        assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
+    }
+
+    #[tokio::test]
+    async fn runtime_workflow_runs_memory_llm_step() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let provider = Arc::new(MockProvider {
+            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}"##.into(),
+            json_schema: true,
+        });
+        let input = MemoryWorkflowInput {
+            target_path: "L2/quiz.md".into(),
+            action: MemoryWorkflowAction::Update,
+            current_markdown: "# Quiz memory\n\n".into(),
+            consolidation_input_json:
+                r#"{"chunk":{"citeableRefs":["quiz:q1"]},"target":{"allowedSections":["Weak topics"]}}"#
+                    .into(),
+        };
+        let engine_config = build_workflow_engine_config(
+            provider.clone(),
+            "mock-model",
+            Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
+            dir.path().join("memory-workflow-sessions"),
+        );
+
+        let output =
+            run_memory_workflow_with_runtime(provider, "mock-model", &input, engine_config)
+                .await
+                .unwrap();
+
         assert!(output.changed);
         assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
     }

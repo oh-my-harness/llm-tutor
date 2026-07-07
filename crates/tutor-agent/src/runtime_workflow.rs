@@ -1,12 +1,11 @@
-use llm_harness_runtime::workflow::model::{
-    ConditionExpr, Edge, EdgeCondition, Step, Workflow,
-};
+use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, Step, Workflow};
 use llm_harness_runtime::workflow::plan::validate_workflow;
 
 use crate::error::{Result, TutorError};
 
 pub const DEEP_SOLVE_WORKFLOW_ID: &str = "tutor.deep_solve";
 pub const QUIZ_GENERATION_WORKFLOW_ID: &str = "tutor.quiz_generation";
+pub const MEMORY_WORKFLOW_ID: &str = "tutor.memory";
 
 pub fn deep_solve_workflow() -> Workflow {
     Workflow {
@@ -137,6 +136,27 @@ pub fn validate_quiz_generation_workflow() -> Result<()> {
     })
 }
 
+pub fn memory_workflow() -> Workflow {
+    Workflow {
+        entry_step: "run_memory".into(),
+        steps: vec![Step::executor(
+            "run_memory",
+            "Run memory workflow",
+            "tutor.memory.run",
+            None,
+        )],
+        edges: vec![],
+    }
+}
+
+pub fn validate_memory_workflow() -> Result<()> {
+    validate_workflow(&memory_workflow()).map_err(|err| {
+        TutorError::Internal(format!(
+            "runtime workflow validation failed for {MEMORY_WORKFLOW_ID}: {err}"
+        ))
+    })
+}
+
 fn route_condition(route: &str) -> EdgeCondition {
     EdgeCondition::Expr(ConditionExpr::Eq {
         pointer: "/route".into(),
@@ -170,6 +190,11 @@ mod tests {
     #[test]
     fn quiz_generation_workflow_is_valid_runtime_workflow() {
         validate_quiz_generation_workflow().unwrap();
+    }
+
+    #[test]
+    fn memory_workflow_is_valid_runtime_workflow() {
+        validate_memory_workflow().unwrap();
     }
 
     #[test]

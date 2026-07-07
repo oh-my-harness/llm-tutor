@@ -74,7 +74,10 @@ async fn main() -> anyhow::Result<()> {
             notebook.clone(),
             quizzes.clone(),
         ))
-        .merge(routes::memory::memory_router(memory.clone()))
+        .merge(routes::memory::memory_router(
+            memory.clone(),
+            config.data_dir.join("workflow-sessions").join("memory"),
+        ))
         .merge(routes::settings::settings_router(settings))
         .merge(routes::sessions::sessions_router(
             pool.clone(),

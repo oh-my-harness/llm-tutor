@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -7,6 +8,8 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use llm_harness_runtime_sandbox_os::OsEnv;
+use llm_harness_types::ExecutionEnv;
 use serde::Deserialize;
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
@@ -64,39 +67,48 @@ struct MemoryLlmConfig {
     context_window_tokens: Option<u32>,
 }
 
-async fn list_files(State(store): State<Arc<MemoryStore>>) -> impl IntoResponse {
-    match store.list() {
+#[derive(Clone)]
+pub(crate) struct MemoryState {
+    store: Arc<MemoryStore>,
+    workflow_root: PathBuf,
+}
+
+async fn list_files(State(state): State<MemoryState>) -> impl IntoResponse {
+    match state.store.list() {
         Ok(files) => (StatusCode::OK, Json(serde_json::json!({ "files": files }))).into_response(),
         Err(err) => error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
     }
 }
 
 async fn get_file(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Query(query): Query<MemoryFileQuery>,
 ) -> impl IntoResponse {
-    match store.read(&query.path) {
+    match state.store.read(&query.path) {
         Ok(file) => (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
 
 async fn update_file(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Query(query): Query<MemoryFileQuery>,
     Json(req): Json<UpdateMemoryFileRequest>,
 ) -> impl IntoResponse {
-    match store.write(&query.path, req.markdown) {
+    match state.store.write(&query.path, req.markdown) {
         Ok(file) => (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
 
 async fn list_events(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Query(query): Query<EventsQuery>,
 ) -> impl IntoResponse {
-    match store.recent_events(query.limit.unwrap_or(50).clamp(1, 200)) {
+    match state
+        .store
+        .recent_events(query.limit.unwrap_or(50).clamp(1, 200))
+    {
         Ok(events) => (
             StatusCode::OK,
             Json(serde_json::json!({ "events": events })),
@@ -107,10 +119,10 @@ async fn list_events(
 }
 
 async fn get_source(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Query(query): Query<SourceQuery>,
 ) -> impl IntoResponse {
-    match store.resolve_source_ref(&query.reference) {
+    match state.store.resolve_source_ref(&query.reference) {
         Ok(source) => (
             StatusCode::OK,
             Json(serde_json::json!({ "source": source })),
@@ -120,8 +132,8 @@ async fn get_source(
     }
 }
 
-async fn preview_consolidation(State(store): State<Arc<MemoryStore>>) -> impl IntoResponse {
-    match store.consolidation_preview() {
+async fn preview_consolidation(State(state): State<MemoryState>) -> impl IntoResponse {
+    match state.store.consolidation_preview() {
         Ok(preview) => (
             StatusCode::OK,
             Json(serde_json::json!({ "preview": preview })),
@@ -132,20 +144,20 @@ async fn preview_consolidation(State(store): State<Arc<MemoryStore>>) -> impl In
 }
 
 async fn apply_consolidation(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Json(req): Json<ApplyConsolidationRequest>,
 ) -> impl IntoResponse {
-    match store.write(&req.target_path, req.markdown) {
+    match state.store.write(&req.target_path, req.markdown) {
         Ok(file) => (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
 }
 
 async fn undo_memory(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Json(req): Json<UndoMemoryRequest>,
 ) -> impl IntoResponse {
-    match store.undo_latest_write(&req.target_path) {
+    match state.store.undo_latest_write(&req.target_path) {
         Ok(result) => (
             StatusCode::OK,
             Json(serde_json::json!({ "result": result })),
@@ -156,12 +168,19 @@ async fn undo_memory(
 }
 
 async fn assist_memory(
-    State(store): State<Arc<MemoryStore>>,
+    State(state): State<MemoryState>,
     Json(req): Json<AssistMemoryRequest>,
 ) -> impl IntoResponse {
     if let Some(llm) = req.llm {
-        return match assist_memory_with_llm(&store, req.target_path, req.action, req.markdown, llm)
-            .await
+        return match assist_memory_with_llm(
+            &state.store,
+            &state.workflow_root,
+            req.target_path,
+            req.action,
+            req.markdown,
+            llm,
+        )
+        .await
         {
             Ok(result) => (
                 StatusCode::OK,
@@ -171,7 +190,10 @@ async fn assist_memory(
             Err(err) => error_response(StatusCode::BAD_REQUEST, err),
         };
     }
-    match store.assist(&req.target_path, req.action, req.markdown) {
+    match state
+        .store
+        .assist(&req.target_path, req.action, req.markdown)
+    {
         Ok(result) => (
             StatusCode::OK,
             Json(serde_json::json!({ "result": result })),
@@ -183,6 +205,7 @@ async fn assist_memory(
 
 async fn assist_memory_with_llm(
     store: &MemoryStore,
+    workflow_root: &PathBuf,
     target_path: String,
     action: MemoryAssistAction,
     markdown: Option<String>,
@@ -199,28 +222,27 @@ async fn assist_memory_with_llm(
         }
     };
     if action == MemoryAssistAction::Update {
-        return assist_memory_update_with_llm(store, target_path, current, &llm).await;
+        return assist_memory_update_with_llm(store, workflow_root, target_path, current, &llm)
+            .await;
     }
     let input = store
         .consolidation_input(&target_path, action, Some(current.clone()))
         .map_err(|err| err.to_string())?;
     let consolidation_input_json =
         serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?;
-    let output = tutor_agent::memory::run_memory_workflow(
-        &llm,
-        &tutor_agent::memory::MemoryWorkflowInput {
-            target_path: target_path.clone(),
-            action: match action {
-                MemoryAssistAction::Update => tutor_agent::memory::MemoryWorkflowAction::Update,
-                MemoryAssistAction::Check => tutor_agent::memory::MemoryWorkflowAction::Check,
-                MemoryAssistAction::Dedupe => tutor_agent::memory::MemoryWorkflowAction::Dedupe,
-            },
-            current_markdown: current,
-            consolidation_input_json,
+    let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
+        target_path: target_path.clone(),
+        action: match action {
+            MemoryAssistAction::Update => tutor_agent::memory::MemoryWorkflowAction::Update,
+            MemoryAssistAction::Check => tutor_agent::memory::MemoryWorkflowAction::Check,
+            MemoryAssistAction::Dedupe => tutor_agent::memory::MemoryWorkflowAction::Dedupe,
         },
-    )
-    .await
-    .map_err(|err| err.to_string())?;
+        current_markdown: current,
+        consolidation_input_json,
+    };
+    let output = run_memory_runtime_workflow(&llm, workflow_root, &workflow_input)
+        .await
+        .map_err(|err| err.to_string())?;
     let output_json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
     let edits = workflow_edits_to_memory_edits(&output.edits);
     store
@@ -263,6 +285,7 @@ async fn assist_memory_with_llm(
 
 async fn assist_memory_update_with_llm(
     store: &MemoryStore,
+    workflow_root: &PathBuf,
     target_path: String,
     current: String,
     llm: &LlmConfig,
@@ -287,17 +310,15 @@ async fn assist_memory_update_with_llm(
         }
         let consolidation_input_json =
             serde_json::to_string_pretty(input).map_err(|err| err.to_string())?;
-        let output = tutor_agent::memory::run_memory_workflow(
-            llm,
-            &tutor_agent::memory::MemoryWorkflowInput {
-                target_path: target_path.clone(),
-                action: tutor_agent::memory::MemoryWorkflowAction::Update,
-                current_markdown: current.clone(),
-                consolidation_input_json,
-            },
-        )
-        .await
-        .map_err(|err| err.to_string())?;
+        let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
+            target_path: target_path.clone(),
+            action: tutor_agent::memory::MemoryWorkflowAction::Update,
+            current_markdown: current.clone(),
+            consolidation_input_json,
+        };
+        let output = run_memory_runtime_workflow(llm, workflow_root, &workflow_input)
+            .await
+            .map_err(|err| err.to_string())?;
         for fact in &output.facts {
             facts.push(MemoryFact {
                 text: fact.text.clone(),
@@ -411,7 +432,30 @@ fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {
     ))
 }
 
-pub fn memory_router(store: Arc<MemoryStore>) -> Router {
+async fn run_memory_runtime_workflow(
+    llm: &LlmConfig,
+    workflow_root: &PathBuf,
+    input: &tutor_agent::memory::MemoryWorkflowInput,
+) -> tutor_agent::Result<tutor_agent::memory::MemoryWorkflowOutput> {
+    let cwd = std::env::current_dir()
+        .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
+    let env = Arc::new(OsEnv::new(cwd)) as Arc<dyn ExecutionEnv>;
+    let client = llm.build_client();
+    let engine_config = tutor_agent::runtime_engine::build_workflow_engine_config(
+        client.clone(),
+        llm.model.clone(),
+        env,
+        workflow_root.join("memory"),
+    );
+    tutor_agent::memory::run_memory_workflow_with_runtime(client, &llm.model, input, engine_config)
+        .await
+}
+
+pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>) -> Router {
+    let state = MemoryState {
+        store,
+        workflow_root: workflow_root.into(),
+    };
     Router::new()
         .route("/api/memory/files", get(list_files))
         .route("/api/memory/file", get(get_file).patch(update_file))
@@ -427,7 +471,7 @@ pub fn memory_router(store: Arc<MemoryStore>) -> Router {
         )
         .route("/api/memory/undo", axum::routing::post(undo_memory))
         .route("/api/memory/assist", axum::routing::post(assist_memory))
-        .with_state(store)
+        .with_state(state)
 }
 
 fn error_response(status: StatusCode, message: String) -> axum::response::Response {
@@ -445,7 +489,7 @@ mod tests {
     async fn lists_and_updates_memory_file() {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
-        let app = memory_router(store);
+        let app = memory_router(store, dir.path().join("workflow-sessions"));
 
         let response = app
             .clone()
@@ -493,7 +537,7 @@ mod tests {
                 serde_json::json!({}),
             )
             .unwrap();
-        let app = memory_router(store);
+        let app = memory_router(store, dir.path().join("workflow-sessions"));
 
         let response = app
             .clone()
@@ -539,7 +583,7 @@ mod tests {
     async fn assists_memory_check_and_dedupe() {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
-        let app = memory_router(store);
+        let app = memory_router(store, dir.path().join("workflow-sessions"));
 
         let markdown = "# Quiz memory\n\n- Same fact. <!--m_01-->\n- Same fact. <!--m_02-->\n\n[^1]: quiz:q1\n[^1]: quiz:q1";
         let response = app
@@ -588,7 +632,7 @@ mod tests {
         store
             .write("L2/chat.md", "# Chat memory\n\n- Original.".into())
             .unwrap();
-        let app = memory_router(store);
+        let app = memory_router(store, dir.path().join("workflow-sessions"));
 
         let response = app
             .clone()
@@ -633,7 +677,7 @@ mod tests {
                 serde_json::json!({ "question_id": "q1" }),
             )
             .unwrap();
-        let app = memory_router(store);
+        let app = memory_router(store, dir.path().join("workflow-sessions"));
 
         let response = app
             .oneshot(
