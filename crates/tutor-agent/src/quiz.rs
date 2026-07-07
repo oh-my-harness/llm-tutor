@@ -77,7 +77,36 @@ pub async fn generate_quiz_questions_with_client(
         ));
     }
 
-    let prompt = generation_prompt(config, chunks);
+    let mut questions = generate_quiz_attempt(client.clone(), model, config, chunks, None).await?;
+    repair_supporting_quotes_against_chunks(&mut questions, chunks);
+    match verify_quiz_questions_with_client(client.clone(), model, &questions, chunks).await {
+        Ok(()) => Ok(questions),
+        Err(first_error) => {
+            let repair_feedback = first_error.to_string();
+            let mut repaired_questions =
+                generate_quiz_attempt(client.clone(), model, config, chunks, Some(&repair_feedback))
+                    .await?;
+            repair_supporting_quotes_against_chunks(&mut repaired_questions, chunks);
+            verify_quiz_questions_with_client(client, model, &repaired_questions, chunks)
+                .await
+                .map_err(|second_error| {
+                    TutorError::Internal(format!(
+                        "quiz verifier rejected generated questions after repair attempt: first attempt: {first_error}; repair attempt: {second_error}"
+                    ))
+                })?;
+            Ok(repaired_questions)
+        }
+    }
+}
+
+async fn generate_quiz_attempt(
+    client: Arc<dyn Provider>,
+    model: &str,
+    config: &QuizGenerationConfig,
+    chunks: &[QuizSourceChunk],
+    repair_feedback: Option<&str>,
+) -> Result<Vec<GeneratedQuizQuestion>> {
+    let prompt = generation_prompt(config, chunks, repair_feedback);
     let mut builder = ChatRequest::builder(model, 2048)
         .message(Message::System(system_prompt()))
         .message(Message::User(vec![RequestContent::Text(prompt)]))
@@ -98,10 +127,7 @@ pub async fn generate_quiz_questions_with_client(
         .await
         .map_err(|err| TutorError::Internal(format!("quiz LLM generation failed: {err}")))?;
     let text = response_text(&response.content);
-    let mut questions = parse_generated_quiz(&text, config.question_count, chunks.len())?;
-    repair_supporting_quotes_against_chunks(&mut questions, chunks);
-    verify_quiz_questions_with_client(client, model, &questions, chunks).await?;
-    Ok(questions)
+    parse_generated_quiz(&text, config.question_count, chunks.len())
 }
 
 async fn verify_quiz_questions_with_client(
@@ -220,7 +246,11 @@ fn verification_system_prompt() -> String {
     "You are a strict quiz verifier. Return only JSON. Reject any question whose correct answer, explanation, or citation is not directly supported by the cited source chunks.".into()
 }
 
-fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) -> String {
+fn generation_prompt(
+    config: &QuizGenerationConfig,
+    chunks: &[QuizSourceChunk],
+    repair_feedback: Option<&str>,
+) -> String {
     let topic = config
         .topic
         .as_deref()
@@ -247,11 +277,21 @@ fn generation_prompt(config: &QuizGenerationConfig, chunks: &[QuizSourceChunk]) 
             format!("\nLearner memory for personalization only, not factual support:\n{value}\n")
         })
         .unwrap_or_default();
+    let repair = repair_feedback
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            format!(
+                "\nPrevious draft was rejected by the verifier. Repair these issues and return a fresh complete JSON object:\n{value}\n"
+            )
+        })
+        .unwrap_or_default();
 
     format!(
-        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n{memory}\nRules:\n- Use learner memory only to choose focus, difficulty, tags, and explanation style.\n- Use only facts that are directly supported by the supplied sources.\n- The option at correct_option_index must be the only best answer.\n- The explanation must explicitly explain why the correct option is correct and why the key distractor is not supported.\n- citation_indices must point only to source chunks that support the correct answer.\n- supporting_quote must be an exact short quote copied from one cited source chunk and must support the correct answer.\n- Do not cite learner memory.\n- Do not cite a source chunk merely because it is topically related.\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"supporting_quote\":\"exact quote from cited source\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
+        "Create {count} single-choice questions.\nTopic: {topic}\nDifficulty: {difficulty}\n{memory}{repair}\nRules:\n- Use learner memory only to choose focus, difficulty, tags, and explanation style.\n- Use only facts that are directly supported by the supplied sources.\n- The option at correct_option_index must be the only best answer.\n- The explanation must explicitly explain why the correct option is correct and why the key distractor is not supported.\n- citation_indices must point only to source chunks that support the correct answer.\n- supporting_quote must be an exact short quote copied from one cited source chunk and must support the correct answer.\n- Do not cite learner memory.\n- Do not cite a source chunk merely because it is topically related.\n\nSources:\n{sources}\n\nReturn JSON exactly like:\n{{\"questions\":[{{\"stem\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"],\"correct_option_index\":0,\"explanation\":\"...\",\"supporting_quote\":\"exact quote from cited source\",\"citation_indices\":[0],\"tags\":[\"...\"]}}]}}",
         count = config.question_count.clamp(1, 10),
         difficulty = config.difficulty,
+        repair = repair,
     )
 }
 
@@ -510,6 +550,75 @@ mod tests {
         assert_eq!(questions[0].options[0], "Corrects mask patterns");
     }
 
+    struct RepairingQuizProvider {
+        calls: AtomicUsize,
+    }
+
+    impl RepairingQuizProvider {
+        fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for RepairingQuizProvider {
+        fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities::new(false, false, true)
+        }
+
+        async fn chat(&self, _req: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let content = match call {
+                0 => r#"{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#,
+                1 => r#"{"verdict":"fail","issues":[{"question_index":0,"severity":"high","message":"correct answer contradicts explanation and source"}]}"#,
+                2 => r#"{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#,
+                _ => r#"{"verdict":"pass","issues":[]}"#,
+            };
+            Ok(ChatResponse {
+                id: "fake".into(),
+                model: "fake-model".into(),
+                content: vec![ResponseContent::Text(content.into())],
+                stop_reason: StopReason::EndTurn,
+                usage: Usage::default(),
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _req: &ChatRequest,
+        ) -> std::result::Result<StreamHandle, LlmError> {
+            unimplemented!("quiz generation uses non-streaming chat in this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn repairs_once_when_verifier_rejects_first_draft() {
+        let provider = Arc::new(RepairingQuizProvider::new());
+        let questions = generate_quiz_questions_with_client(
+            provider.clone(),
+            "fake-model",
+            &QuizGenerationConfig {
+                topic: Some("OPC".into()),
+                difficulty: "medium".into(),
+                question_count: 1,
+                memory_markdown: None,
+            },
+            &[QuizSourceChunk {
+                source: "source.md".into(),
+                text: "OPC corrects lithography mask patterns before wafer exposure.".into(),
+                score: Some(0.9),
+            }],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
+        assert_eq!(questions[0].stem, "Repaired draft");
+        assert_eq!(questions[0].correct_option_index, 0);
+    }
+
     #[test]
     fn parses_and_validates_generated_quiz_json() {
         let text = r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#;
@@ -535,10 +644,32 @@ mod tests {
                 text: "OPC corrects lithography mask patterns.".into(),
                 score: None,
             }],
+            None,
         );
 
         assert!(prompt.contains("Learner memory for personalization only"));
         assert!(prompt.contains("Do not cite learner memory"));
+    }
+
+    #[test]
+    fn generation_prompt_can_include_repair_feedback() {
+        let prompt = generation_prompt(
+            &QuizGenerationConfig {
+                topic: Some("OPC".into()),
+                difficulty: "medium".into(),
+                question_count: 1,
+                memory_markdown: None,
+            },
+            &[QuizSourceChunk {
+                source: "source.md".into(),
+                text: "OPC corrects lithography mask patterns.".into(),
+                score: None,
+            }],
+            Some("question 0 high: explanation contradicts answer"),
+        );
+
+        assert!(prompt.contains("Previous draft was rejected by the verifier"));
+        assert!(prompt.contains("explanation contradicts answer"));
     }
 
     #[test]
@@ -566,6 +697,18 @@ mod tests {
         let err = parse_generated_quiz(text, 1, 1).unwrap_err().to_string();
 
         assert!(err.contains("duplicate options"));
+    }
+
+    #[test]
+    fn verifier_rejects_answer_explanation_contradictions() {
+        let err = parse_quiz_verification(
+            r#"{"verdict":"fail","issues":[{"question_index":0,"severity":"high","message":"correct answer contradicts explanation"}]}"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("rejected"));
+        assert!(err.contains("contradicts explanation"));
     }
 
     #[test]

@@ -345,9 +345,11 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 - [x] Add controlled LLM verifier stage.
 - [x] Add structured verifier output.
 - [x] Declare and validate Quiz flow as a runtime workflow.
+- [x] Repair once and re-verify before surfacing unresolved verifier failures.
+- [x] Add tests for answer/explanation/citation contradiction cases.
 - [ ] Execute Quiz generation/verification through runtime `WorkflowEngine`.
-- [ ] Repair once and re-verify, then discard unresolved questions.
-- [ ] Add tests for answer/explanation/citation contradiction cases.
+- [ ] Move verifier repair routing from the transitional direct-call path into
+  `WorkflowEngine` execution.
 
 ## 9. Acceptance Criteria
 

@@ -22,6 +22,7 @@
   - Second migration step: Quiz generation now defines its controlled product flow (`collect_sources -> generate_questions -> verify_questions -> publish_questions`) as a runtime `Workflow` and validates it through `validate_workflow` before generation.
   - Third migration step: ordinary Chat, Code Exec, and the existing Deep Solve phases now construct harnesses through runtime `HarnessBuilder` instead of manually assembling `AgentHarnessOptions`; product code only maps tools, prompts, and hooks into a thin builder config.
   - Fourth migration step: Deep Solve and Quiz workflow edges now use runtime-evaluable `EdgeCondition::Expr` predicates instead of legacy label strings, so the built-in `EdgeConditionJudge` can route them once execution moves to `WorkflowEngine`.
+  - Fifth migration step: Quiz generation now performs a controlled verifier repair pass that mirrors the runtime workflow's `verify_questions -> generate_questions` repair edge while the full `WorkflowEngine` execution path is being adopted.
   - Remaining migration target: replace `SolveOrchestrator`'s sequential phase loop with `WorkflowEngine`, and move Quiz generation/verification execution from direct structured API calls into a runtime workflow/subagent-style reviewer.
 
 - **Budget control semantics changed after the runtime update**
@@ -40,8 +41,10 @@
   - Actual: `AuditEntry` is public with required hash fields that callers must guess at. The sink then overwrites them. Unclear contract.
   - Suggestion: split into `AuditPayload` (caller-provided) and `AuditEntry` (sink-computed with hash chain), or make hash fields `Option` with `take()` semantics.
 
-- **`SolveOrchestrator` patterns repeat harness setup code across four phases**
-  - Not a framework bug, but notable: every harness call repeats `AnthropicProvider::builder`, `AgentHarness::new_in_memory`, `subscribe`, event loop. A shared harness factory or builder pattern would reduce boilerplate.
+- **Resolved: repeated harness setup has been consolidated**
+  - Earlier `SolveOrchestrator` phases repeated manual `AgentHarnessOptions` and harness setup code.
+  - `llm-tutor` now uses a local thin `runtime_harness` adapter over runtime `HarnessBuilder`, keeping product code focused on prompts, tools, and hooks while the runtime owns harness assembly.
+  - Follow-up: replace the remaining phase loop with `WorkflowEngine` so step execution, transition judging, and retries are also runtime-owned.
 
 - **Session option/metadata types are not re-exported from the root facade**
   - Expected: common session types used with `JsonlSessionRepo` can be imported from `llm_harness_agent::{...}` or the prelude.
@@ -94,7 +97,7 @@
 | Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
 | SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
-| No shared harness builder in the public API | Every call site repeats `new_in_memory`, `subscribe`, event loop | Low |
+| WorkflowEngine migration bridge still needs product adapters | Existing product flows need event bridges, executor state mapping, and structured `submit_step_result` prompts before they can stop using direct phase loops | Medium |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
 | No normalized model metadata API | Apps duplicate `/models` probing, auth headers, context-window parsing, and embedding dimension capability discovery | Medium |
@@ -103,7 +106,7 @@
 
 1. Add `BeforeToolCallCtx::new_test(name, args)` that uses a dummy assistant message internally
 2. Make `AuditEntry.hash` and `AuditEntry.prev_hash` optional with internal fill-in, or split into payload vs entry types
-3. Consider adding `AgentHarnessBuilder` that caches provider/client construction and event subscription setup
+3. Continue documenting `HarnessBuilder` examples for app-layer harness factories and plugin-based hook injection
 4. Re-export common session repo option and metadata types from the facade/prelude
 5. Add `Session::set_name` or metadata updates for `SessionInfo`
 6. Add a typed structured-output helper for provider-aware JSON/schema generation

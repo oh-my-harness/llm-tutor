@@ -185,4 +185,56 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn deep_solve_workflow_routes_on_structured_route_field() {
+        let workflow = deep_solve_workflow();
+        let conditions = workflow
+            .edges
+            .iter()
+            .filter(|edge| edge.from == "solve")
+            .map(|edge| (&edge.to, edge.condition.as_ref().unwrap()))
+            .collect::<Vec<_>>();
+
+        assert!(conditions.contains(&(
+            &"plan".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/route".into(),
+                value: serde_json::json!("replan"),
+            })
+        )));
+        assert!(conditions.contains(&(
+            &"synthesize".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/route".into(),
+                value: serde_json::json!("finish"),
+            })
+        )));
+    }
+
+    #[test]
+    fn quiz_workflow_routes_on_verifier_structured_fields() {
+        let workflow = quiz_generation_workflow();
+        let conditions = workflow
+            .edges
+            .iter()
+            .filter(|edge| edge.from == "verify_questions")
+            .map(|edge| (&edge.to, edge.condition.as_ref().unwrap()))
+            .collect::<Vec<_>>();
+
+        assert!(conditions.contains(&(
+            &"publish_questions".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/verdict".into(),
+                value: serde_json::json!("pass"),
+            })
+        )));
+        assert!(conditions.contains(&(
+            &"generate_questions".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/action".into(),
+                value: serde_json::json!("repair"),
+            })
+        )));
+    }
 }
