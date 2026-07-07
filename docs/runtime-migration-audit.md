@@ -47,6 +47,12 @@ mentions, and citations.
 - `QuizWorkflowJudge` remains as a bounded semantic repair policy because
   runtime declarative edges cannot yet express "repair once, then fail" based on
   verifier output and step history.
+  - Audit note: runtime `WorkflowEngine::with_max_steps` was checked as a
+    possible replacement. It is a global step-history guard, not a transition
+    visit policy. With the current Quiz graph, `max_steps = 5` blocks the
+    successful repair path before `publish_questions`; `max_steps = 6` allows a
+    second verifier failure to enter a third generation attempt. Therefore it
+    cannot replace the product judge without changing Quiz semantics.
 - Settings diagnostics still probe providers directly because model metadata
   discovery is not normalized at the adapter/runtime boundary.
 - Text streaming still emits raw `TextDelta` because runtime deltas do not carry
