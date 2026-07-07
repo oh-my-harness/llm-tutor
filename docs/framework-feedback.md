@@ -103,6 +103,12 @@
   - Actual: `llm-tutor` previously wrote an additional custom `compact_summary` entry after each chat turn, which duplicated runtime-owned session/compaction state.
   - Change: removed the product-layer summary mirror. Session detail responses still expose `compact_summary`, but it is now derived only from the latest runtime compaction entry.
 
+- **Resolved: final assistant bubbles now follow the runtime final-answer contract**
+  - Expected: UIs should restore durable assistant bubbles only from runtime `AssistantMessageKind::FinalAnswer`; intermediate `Progress` messages may remain in runtime context but should not appear as final chat answers.
+  - Actual: Chat/Code Exec previously treated every `MessageEnd` and streamed `TextDelta` as candidate final answer text, so progress before tool calls could be returned or restored as a normal assistant bubble.
+  - Change: Chat/Code Exec now return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles.
+  - Remaining gap: streamed `TextDelta` is still emitted immediately for UX. If the runtime later exposes per-delta final/progress classification, the UI can avoid briefly showing progress text in the main stream.
+
 ## Positive Validations
 
 - **CompositeBeforeToolCallHook** can layer domain-specific + cross-cutting hooks; current product code only needs human approval hooks after moving replan into workflow routing

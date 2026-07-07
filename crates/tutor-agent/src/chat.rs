@@ -223,14 +223,11 @@ async fn run_chat_inner(
 
         match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::MessageEnd { message, .. }) => {
-                for block in &message.content {
-                    if let ContentBlock::Text { text } = block {
-                        last_text = text.clone();
-                    }
+                if message.kind == AssistantMessageKind::FinalAnswer {
+                    last_text = message.text_content();
                 }
             }
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
-                last_text.push_str(text);
                 emit_content(&router.event_sink, text.clone(), true).await;
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -413,14 +410,12 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
         let AgentMessage::Assistant(message) = message else {
             return None;
         };
+        if message.kind != AssistantMessageKind::FinalAnswer {
+            return None;
+        }
 
-        message.content.iter().rev().find_map(|block| {
-            if let ContentBlock::Text { text } = block {
-                Some(text.clone())
-            } else {
-                None
-            }
-        })
+        let text = message.text_content();
+        (!text.is_empty()).then_some(text)
     })
 }
 

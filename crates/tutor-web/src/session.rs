@@ -6,7 +6,7 @@ use llm_harness_agent::{
     JsonlSessionRepo, Session, SessionRepo,
     session::{CreateSessionOptions, ListSessionOptions, SessionEntryPayload, SessionMetadata},
 };
-use llm_harness_types::{AgentMessage, EntryId, TokenUsage};
+use llm_harness_types::{AgentMessage, AssistantMessageKind, EntryId, TokenUsage};
 use serde::{Deserialize, Serialize};
 
 use crate::stream::TutorStream;
@@ -669,7 +669,12 @@ pub fn message_text(message: &llm_harness_types::AgentMessage) -> String {
 pub fn message_role(message: &llm_harness_types::AgentMessage) -> Option<&'static str> {
     match message {
         llm_harness_types::AgentMessage::User(_) => Some("user"),
-        llm_harness_types::AgentMessage::Assistant(_) => Some("assistant"),
+        llm_harness_types::AgentMessage::Assistant(message)
+            if message.kind == AssistantMessageKind::FinalAnswer =>
+        {
+            Some("assistant")
+        }
+        llm_harness_types::AgentMessage::Assistant(_) => None,
         _ => None,
     }
 }
@@ -750,6 +755,18 @@ mod tests {
         let reopened = pool.open_runtime_session(&id).await.unwrap();
         let ctx = reopened.build_context().await.unwrap();
         assert_eq!(ctx.messages.len(), 1);
+    }
+
+    #[test]
+    fn progress_assistant_messages_are_not_chat_bubbles() {
+        let mut message = tutor_agent::chat::assistant_message("thinking before a tool");
+        let AgentMessage::Assistant(assistant) = &mut message else {
+            panic!("expected assistant message");
+        };
+        assistant.kind = AssistantMessageKind::Progress;
+
+        assert_eq!(message_role(&message), None);
+        assert_eq!(message_text(&message), "thinking before a tool");
     }
 
     #[tokio::test]
