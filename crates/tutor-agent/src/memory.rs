@@ -38,6 +38,12 @@ pub struct MemoryWorkflowOutput {
     pub changed: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct MemoryWorkflowRun {
+    pub output: MemoryWorkflowOutput,
+    pub cost: CostAggregate,
+}
+
 #[derive(Debug, Deserialize)]
 struct MemoryWorkflowJson {
     report_markdown: String,
@@ -78,7 +84,7 @@ pub enum MemoryWorkflowEditOp {
 pub async fn run_memory_workflow_with_runtime(
     input: &MemoryWorkflowInput,
     engine_config: WorkflowEngineConfig,
-) -> Result<MemoryWorkflowOutput> {
+) -> Result<MemoryWorkflowRun> {
     validate_memory_workflow()?;
     let workflow = memory_workflow();
     let engine = WorkflowEngine::new(
@@ -94,7 +100,7 @@ pub async fn run_memory_workflow_with_runtime(
         }),
     );
 
-    engine
+    let result = engine
         .run()
         .await
         .map_err(|err| TutorError::Internal(format!("memory workflow failed: {err}")))?;
@@ -109,7 +115,11 @@ pub async fn run_memory_workflow_with_runtime(
         .ok_or_else(|| TutorError::Internal("memory workflow did not return output".into()))?;
     let output: MemoryWorkflowOutput = serde_json::from_value(structured)
         .map_err(|err| TutorError::Internal(format!("invalid memory workflow output: {err}")))?;
-    validate_memory_workflow_output(output, input.action)
+    let output = validate_memory_workflow_output(output, input.action)?;
+    Ok(MemoryWorkflowRun {
+        output,
+        cost: result.cost,
+    })
 }
 
 struct PrepareMemoryWorkflowExecutor {
@@ -489,7 +499,7 @@ mod tests {
             Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
             dir.path().join("memory-workflow-sessions"),
         );
-        let output = run_memory_workflow_with_runtime(&input, engine_config)
+        let run = run_memory_workflow_with_runtime(&input, engine_config)
             .await
             .unwrap();
 
@@ -497,6 +507,8 @@ mod tests {
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
             1
         );
+        assert_eq!(run.cost.total_input_tokens, 0);
+        let output = run.output;
         assert!(output.changed);
         assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
     }

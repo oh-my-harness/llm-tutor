@@ -44,11 +44,17 @@ struct GeneratedQuiz {
     questions: Vec<GeneratedQuizQuestion>,
 }
 
+#[derive(Debug, Clone)]
+pub struct QuizWorkflowOutput {
+    pub questions: Vec<GeneratedQuizQuestion>,
+    pub cost: CostAggregate,
+}
+
 pub async fn generate_quiz_questions_with_workflow(
     config: &QuizGenerationConfig,
     chunks: &[QuizSourceChunk],
     engine_config: WorkflowEngineConfig,
-) -> Result<Vec<GeneratedQuizQuestion>> {
+) -> Result<QuizWorkflowOutput> {
     validate_quiz_generation_workflow()?;
     if chunks.is_empty() {
         return Err(TutorError::Internal(
@@ -75,7 +81,7 @@ pub async fn generate_quiz_questions_with_workflow(
         )
         .with_max_retries(1);
 
-    engine
+    let result = engine
         .run()
         .await
         .map_err(|err| TutorError::Internal(format!("quiz workflow failed: {err}")))?;
@@ -93,8 +99,12 @@ pub async fn generate_quiz_questions_with_workflow(
     let questions = publish.get("questions").cloned().ok_or_else(|| {
         TutorError::Internal("quiz workflow publish result is missing questions".into())
     })?;
-    serde_json::from_value(questions)
-        .map_err(|err| TutorError::Internal(format!("invalid quiz workflow questions: {err}")))
+    let questions = serde_json::from_value(questions)
+        .map_err(|err| TutorError::Internal(format!("invalid quiz workflow questions: {err}")))?;
+    Ok(QuizWorkflowOutput {
+        questions,
+        cost: result.cost,
+    })
 }
 
 struct QuizWorkflowJudge;
@@ -449,7 +459,7 @@ mod tests {
             dir.path().join("quiz-workflow-sessions"),
         );
 
-        let questions = generate_quiz_questions_with_workflow(
+        let output = generate_quiz_questions_with_workflow(
             &QuizGenerationConfig {
                 topic: Some("OPC".into()),
                 difficulty: "medium".into(),
@@ -470,8 +480,9 @@ mod tests {
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
             4
         );
-        assert_eq!(questions[0].stem, "Repaired draft");
-        assert_eq!(questions[0].correct_option_index, 0);
+        assert_eq!(output.questions[0].stem, "Repaired draft");
+        assert_eq!(output.questions[0].correct_option_index, 0);
+        assert_eq!(output.cost.total_input_tokens, 0);
     }
 
     #[test]

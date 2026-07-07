@@ -393,7 +393,7 @@ async fn questions_for_hits(
         )
         .await?;
         Ok((
-            questions_from_generated(&quiz.config, hits, generated),
+            questions_from_generated(&quiz.config, hits, generated.questions),
             "llm_verifier_and_citation_check",
         ))
     } else {

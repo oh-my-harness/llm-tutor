@@ -240,10 +240,15 @@ async fn assist_memory_with_llm(
         current_markdown: current,
         consolidation_input_json,
     };
-    let output = run_memory_runtime_workflow(&llm, workflow_root, &workflow_input)
+    let run = run_memory_runtime_workflow(&llm, workflow_root, &workflow_input)
         .await
         .map_err(|err| err.to_string())?;
-    let output_json = serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?;
+    let output_json = serde_json::to_string_pretty(&serde_json::json!({
+        "output": &run.output,
+        "runtime_cost": &run.cost,
+    }))
+    .map_err(|err| err.to_string())?;
+    let output = run.output;
     let edits = workflow_edits_to_memory_edits(&output.edits);
     store
         .validate_text_edits_for_action(
@@ -298,6 +303,7 @@ async fn assist_memory_update_with_llm(
         )
         .map_err(|err| err.to_string())?;
     let mut outputs = Vec::new();
+    let mut runtime_costs = Vec::new();
     let mut facts = Vec::new();
     let mut citeable_refs = Vec::<String>::new();
     let mut trace_chunks = Vec::new();
@@ -316,9 +322,11 @@ async fn assist_memory_update_with_llm(
             current_markdown: current.clone(),
             consolidation_input_json,
         };
-        let output = run_memory_runtime_workflow(llm, workflow_root, &workflow_input)
+        let run = run_memory_runtime_workflow(llm, workflow_root, &workflow_input)
             .await
             .map_err(|err| err.to_string())?;
+        runtime_costs.push(run.cost);
+        let output = run.output;
         for fact in &output.facts {
             facts.push(MemoryFact {
                 text: fact.text.clone(),
@@ -373,7 +381,11 @@ async fn assist_memory_update_with_llm(
         edits: Vec::new(),
         trace: Some(MemoryAssistTrace {
             input_json: serde_json::to_string_pretty(&inputs).map_err(|err| err.to_string())?,
-            output_json: serde_json::to_string_pretty(&outputs).map_err(|err| err.to_string())?,
+            output_json: serde_json::to_string_pretty(&serde_json::json!({
+                "outputs": outputs,
+                "runtime_costs": runtime_costs,
+            }))
+            .map_err(|err| err.to_string())?,
             chunks: trace_chunks,
         }),
         changed,
@@ -436,7 +448,7 @@ async fn run_memory_runtime_workflow(
     llm: &LlmConfig,
     workflow_root: &PathBuf,
     input: &tutor_agent::memory::MemoryWorkflowInput,
-) -> tutor_agent::Result<tutor_agent::memory::MemoryWorkflowOutput> {
+) -> tutor_agent::Result<tutor_agent::memory::MemoryWorkflowRun> {
     let cwd = std::env::current_dir()
         .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
     let env = Arc::new(OsEnv::new(cwd)) as Arc<dyn ExecutionEnv>;

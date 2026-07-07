@@ -42,6 +42,9 @@ Date: 2026-07-07
 - Deep Solve workflow emits `runtime_usage` from runtime `TaskResult.cost`,
   so multi-step workflow usage follows the same product trace/UI/session
   restore path as ordinary harness turns.
+- Quiz generation and Memory workflows now return runtime `TaskResult.cost`
+  alongside their domain output, so callers no longer need to reconstruct
+  workflow usage from product-side state.
 - The web UI consumes `runtime_usage` as the live context-usage fallback and
   budget spent source when provider message usage is unavailable.
 - Session restore also derives `latest_usage` from persisted `runtime_usage`
@@ -94,7 +97,7 @@ Checked against local runtime checkout
 | Streaming deltas | Runtime still emits raw `TextDelta` without final/progress classification; classification is available at terminal message events. | Keep live streaming as raw text for now, while durable bubbles use final-answer events. |
 | Model metadata | Runtime accepts `ModelInfo` for context budgeting and compaction, but does not provide provider-normalized metadata discovery. | Keep product settings diagnostics for `/models` probing and inference until adapter/runtime owns discovery. |
 | Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. `HarnessBuilder` does inject `CostAccumulatorHook`, and the harness exposes `usage()`. | Emit and consume runtime usage traces from `AgentHarness::usage()` for observability, but keep budget limits as product config only until runtime separates accounting from loop continuation. |
-| Workflow usage | `WorkflowEngine::run()` returns `TaskResult.cost`, aggregated from step results. `WorkflowEngine::total_cost()` is also available for an active engine. | Deep Solve now emits `runtime_usage` from `TaskResult.cost`. Quiz and Memory workflows still return domain objects only; add an event/result wrapper if their usage must be shown in the chat/session UI. |
+| Workflow usage | `WorkflowEngine::run()` returns `TaskResult.cost`, aggregated from step results. `WorkflowEngine::total_cost()` is also available for an active engine. | Deep Solve emits `runtime_usage` from `TaskResult.cost`. Quiz and Memory workflow helpers return their domain output plus runtime cost; Memory traces also preserve the cost payload. A future UI pass can decide how to summarize non-chat workflow costs. |
 
 ## Next Runtime API Requests
 
@@ -113,7 +116,12 @@ Checked against local runtime checkout
   runtime usage traces for Chat, Code Exec, and Deep Solve, Deep Solve workflow
   events, and Code Exec sandbox execution.
 - `cargo test -p tutor-agent quiz --lib` covers Quiz runtime workflow generation,
-  verifier repair, and publish behavior.
+  verifier repair, publish behavior, and returned workflow cost.
+- `cargo test -p tutor-agent memory --lib` covers Memory runtime workflow output
+  validation and returned workflow cost.
+- `cargo test -p tutor-web routes::quiz --lib` and
+  `cargo test -p tutor-web routes::memory --lib` cover web route compatibility
+  after exposing runtime workflow cost through the agent boundary.
 - `cargo test -p tutor-web session --lib` covers runtime-backed session
   persistence, custom UI entries, citations, mentions, trace entries, and
   compaction summaries, including restored runtime usage traces.
