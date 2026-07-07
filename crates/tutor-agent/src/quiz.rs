@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use llm_adapter::Provider;
-use llm_adapter::types::{ChatRequest, Message, RequestContent, ResponseContent, ResponseFormat};
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
@@ -11,7 +10,6 @@ use llm_harness_runtime::workflow::model::{StepResult, Transition};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
-use crate::llm_provider::LlmConfig;
 use crate::runtime_workflow::{quiz_generation_workflow, validate_quiz_generation_workflow};
 
 #[derive(Debug, Clone)]
@@ -45,69 +43,6 @@ pub struct GeneratedQuizQuestion {
 #[derive(Debug, Deserialize)]
 struct GeneratedQuiz {
     questions: Vec<GeneratedQuizQuestion>,
-}
-
-#[derive(Debug, Deserialize)]
-struct QuizVerification {
-    verdict: String,
-    #[serde(default)]
-    issues: Vec<QuizVerificationIssue>,
-}
-
-#[derive(Debug, Deserialize)]
-struct QuizVerificationIssue {
-    question_index: Option<usize>,
-    severity: Option<String>,
-    message: String,
-}
-
-pub async fn generate_quiz_questions(
-    llm: &LlmConfig,
-    config: &QuizGenerationConfig,
-    chunks: &[QuizSourceChunk],
-) -> Result<Vec<GeneratedQuizQuestion>> {
-    generate_quiz_questions_with_client(llm.build_client(), &llm.model, config, chunks).await
-}
-
-pub async fn generate_quiz_questions_with_client(
-    client: Arc<dyn Provider>,
-    model: &str,
-    config: &QuizGenerationConfig,
-    chunks: &[QuizSourceChunk],
-) -> Result<Vec<GeneratedQuizQuestion>> {
-    validate_quiz_generation_workflow()?;
-
-    if chunks.is_empty() {
-        return Err(TutorError::Internal(
-            "quiz generation has no source chunks".into(),
-        ));
-    }
-
-    let mut questions = generate_quiz_attempt(client.clone(), model, config, chunks, None).await?;
-    repair_supporting_quotes_against_chunks(&mut questions, chunks);
-    match verify_quiz_questions_with_client(client.clone(), model, &questions, chunks).await {
-        Ok(()) => Ok(questions),
-        Err(first_error) => {
-            let repair_feedback = first_error.to_string();
-            let mut repaired_questions = generate_quiz_attempt(
-                client.clone(),
-                model,
-                config,
-                chunks,
-                Some(&repair_feedback),
-            )
-            .await?;
-            repair_supporting_quotes_against_chunks(&mut repaired_questions, chunks);
-            verify_quiz_questions_with_client(client, model, &repaired_questions, chunks)
-                .await
-                .map_err(|second_error| {
-                    TutorError::Internal(format!(
-                        "quiz verifier rejected generated questions after repair attempt: first attempt: {first_error}; repair attempt: {second_error}"
-                    ))
-                })?;
-            Ok(repaired_questions)
-        }
-    }
 }
 
 pub async fn generate_quiz_questions_with_workflow(
@@ -296,66 +231,6 @@ fn workflow_step_result(output: String, structured: serde_json::Value) -> StepRe
     }
 }
 
-async fn generate_quiz_attempt(
-    client: Arc<dyn Provider>,
-    model: &str,
-    config: &QuizGenerationConfig,
-    chunks: &[QuizSourceChunk],
-    repair_feedback: Option<&str>,
-) -> Result<Vec<GeneratedQuizQuestion>> {
-    let prompt = generation_prompt(config, chunks, repair_feedback);
-    let mut builder = ChatRequest::builder(model, 2048)
-        .message(Message::System(system_prompt()))
-        .message(Message::User(vec![RequestContent::Text(prompt)]))
-        .temperature(0.2);
-
-    if client.capabilities().supports_json_schema() {
-        builder = builder.response_format(ResponseFormat::JsonSchema {
-            name: "quiz_questions".into(),
-            schema: quiz_schema(),
-            strict: Some(true),
-        });
-    } else {
-        builder = builder.response_format(ResponseFormat::JsonObject);
-    }
-
-    let response = client
-        .chat(&builder.build())
-        .await
-        .map_err(|err| TutorError::Internal(format!("quiz LLM generation failed: {err}")))?;
-    let text = response_text(&response.content);
-    parse_generated_quiz(&text, config.question_count, chunks.len())
-}
-
-async fn verify_quiz_questions_with_client(
-    client: Arc<dyn Provider>,
-    model: &str,
-    questions: &[GeneratedQuizQuestion],
-    chunks: &[QuizSourceChunk],
-) -> Result<()> {
-    let prompt = verification_prompt(questions, chunks)?;
-    let mut builder = ChatRequest::builder(model, 1024)
-        .message(Message::System(verification_system_prompt()))
-        .message(Message::User(vec![RequestContent::Text(prompt)]))
-        .temperature(0.0);
-
-    if client.capabilities().supports_json_schema() {
-        builder = builder.response_format(ResponseFormat::JsonSchema {
-            name: "quiz_verification".into(),
-            schema: verification_schema(),
-            strict: Some(true),
-        });
-    } else {
-        builder = builder.response_format(ResponseFormat::JsonObject);
-    }
-
-    let response = client
-        .chat(&builder.build())
-        .await
-        .map_err(|err| TutorError::Internal(format!("quiz verifier failed: {err}")))?;
-    parse_quiz_verification(&response_text(&response.content))
-}
-
 pub fn parse_generated_quiz(
     text: &str,
     expected_count: usize,
@@ -435,14 +310,6 @@ fn validate_questions(
     Ok(questions)
 }
 
-fn system_prompt() -> String {
-    "You generate grounded tutor quiz questions. Return only valid JSON. Every question must be answerable from the supplied source chunks. The correct answer, explanation, citation_indices, and supporting_quote must all agree with each other.".into()
-}
-
-fn verification_system_prompt() -> String {
-    "You are a strict quiz verifier. Return only JSON. Reject any question whose correct answer, explanation, or citation is not directly supported by the cited source chunks.".into()
-}
-
 fn generation_prompt(
     config: &QuizGenerationConfig,
     chunks: &[QuizSourceChunk],
@@ -492,61 +359,6 @@ fn generation_prompt(
     )
 }
 
-fn verification_prompt(
-    questions: &[GeneratedQuizQuestion],
-    chunks: &[QuizSourceChunk],
-) -> Result<String> {
-    let payload = serde_json::json!({
-        "questions": questions,
-        "sources": chunks.iter().enumerate().map(|(index, chunk)| serde_json::json!({
-            "index": index,
-            "source": chunk.source,
-            "text": chunk.text,
-        })).collect::<Vec<_>>(),
-        "rules": [
-            "The correct option must be directly supported by the cited source chunks.",
-            "The explanation must not contradict the correct option.",
-            "supporting_quote must support the correct option.",
-            "citation_indices must not cite merely topical but unsupported chunks.",
-            "Return fail for any hallucination, answer/explanation mismatch, or wrong citation."
-        ]
-    });
-    serde_json::to_string_pretty(&payload)
-        .map_err(|err| TutorError::Internal(format!("failed to build quiz verifier prompt: {err}")))
-}
-
-fn parse_quiz_verification(text: &str) -> Result<()> {
-    let json_text = extract_json_object(text)
-        .ok_or_else(|| TutorError::Internal("quiz verifier output did not contain JSON".into()))?;
-    let parsed: QuizVerification = serde_json::from_str(json_text)
-        .map_err(|err| TutorError::Internal(format!("invalid quiz verifier JSON: {err}")))?;
-    if parsed.verdict.trim().eq_ignore_ascii_case("pass") {
-        return Ok(());
-    }
-
-    let issues = parsed
-        .issues
-        .into_iter()
-        .map(|issue| {
-            let location = issue
-                .question_index
-                .map(|index| format!("question {index}"))
-                .unwrap_or_else(|| "quiz".into());
-            let severity = issue.severity.unwrap_or_else(|| "issue".into());
-            format!("{location} {severity}: {}", issue.message)
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    Err(TutorError::Internal(format!(
-        "quiz verifier rejected generated questions{}",
-        if issues.is_empty() {
-            String::new()
-        } else {
-            format!(": {issues}")
-        }
-    )))
-}
-
 fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -593,238 +405,20 @@ fn source_quote_prefix(source_text: &str, max_chars: usize) -> String {
         .collect::<String>()
 }
 
-fn response_text(content: &[ResponseContent]) -> String {
-    content
-        .iter()
-        .filter_map(|block| match block {
-            ResponseContent::Text(text) => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
 fn extract_json_object(text: &str) -> Option<&str> {
     let start = text.find('{')?;
     let end = text.rfind('}')?;
     (start <= end).then_some(&text[start..=end])
 }
 
-fn quiz_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "questions": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "stem": { "type": "string" },
-                        "options": {
-                            "type": "array",
-                            "minItems": 2,
-                            "items": { "type": "string" }
-                        },
-                        "correct_option_index": { "type": "integer", "minimum": 0 },
-                        "explanation": { "type": "string" },
-                        "supporting_quote": { "type": "string" },
-                        "citation_indices": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": { "type": "integer", "minimum": 0 }
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": { "type": "string" }
-                        }
-                    },
-                    "required": ["stem", "options", "correct_option_index", "explanation", "supporting_quote", "citation_indices", "tags"]
-                }
-            }
-        },
-        "required": ["questions"]
-    })
-}
-
-fn verification_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "verdict": { "type": "string", "enum": ["pass", "fail"] },
-            "issues": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "question_index": { "type": ["integer", "null"], "minimum": 0 },
-                        "severity": { "type": ["string", "null"] },
-                        "message": { "type": "string" }
-                    },
-                    "required": ["question_index", "severity", "message"]
-                }
-            }
-        },
-        "required": ["verdict", "issues"]
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use llm_adapter::LlmError;
-    use llm_adapter::provider::ProviderCapabilities;
-    use llm_adapter::stream_handle::StreamHandle;
-    use llm_adapter::types::{ChatResponse, StopReason, Usage};
     use llm_harness_loop::test_utils::{MockLlmClient, MockResponse, NoOpEnv};
     use llm_harness_types::ExecutionEnv;
 
     use crate::runtime_engine::build_workflow_engine_config;
-
-    struct FakeQuizProvider {
-        calls: AtomicUsize,
-    }
-
-    impl FakeQuizProvider {
-        fn new() -> Self {
-            Self {
-                calls: AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Provider for FakeQuizProvider {
-        fn capabilities(&self) -> ProviderCapabilities {
-            ProviderCapabilities::new(false, false, true)
-        }
-
-        async fn chat(&self, _req: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
-            let call = self.calls.fetch_add(1, Ordering::SeqCst);
-            let content = if call == 0 {
-                r#"{"questions":[{"stem":"What does OPC do?","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source says OPC corrects mask patterns, so ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#
-            } else {
-                r#"{"verdict":"pass","issues":[]}"#
-            };
-            Ok(ChatResponse {
-                id: "fake".into(),
-                model: "fake-model".into(),
-                content: vec![ResponseContent::Text(content.into())],
-                stop_reason: StopReason::EndTurn,
-                usage: Usage::default(),
-            })
-        }
-
-        async fn chat_stream(
-            &self,
-            _req: &ChatRequest,
-        ) -> std::result::Result<StreamHandle, LlmError> {
-            unimplemented!("quiz generation uses non-streaming chat in this test")
-        }
-    }
-
-    #[tokio::test]
-    async fn generates_questions_with_fake_provider() {
-        let questions = generate_quiz_questions_with_client(
-            Arc::new(FakeQuizProvider::new()),
-            "fake-model",
-            &QuizGenerationConfig {
-                topic: Some("OPC".into()),
-                difficulty: "medium".into(),
-                question_count: 1,
-                memory_markdown: None,
-            },
-            &[QuizSourceChunk {
-                source: "source.md".into(),
-                text: "OPC corrects lithography mask patterns before wafer exposure.".into(),
-                score: Some(0.9),
-            }],
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(questions.len(), 1);
-        assert_eq!(questions[0].options[0], "Corrects mask patterns");
-    }
-
-    struct RepairingQuizProvider {
-        calls: AtomicUsize,
-    }
-
-    impl RepairingQuizProvider {
-        fn new() -> Self {
-            Self {
-                calls: AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Provider for RepairingQuizProvider {
-        fn capabilities(&self) -> ProviderCapabilities {
-            ProviderCapabilities::new(false, false, true)
-        }
-
-        async fn chat(&self, _req: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
-            let call = self.calls.fetch_add(1, Ordering::SeqCst);
-            let content = match call {
-                0 => {
-                    r#"{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#
-                }
-                1 => {
-                    r#"{"verdict":"fail","issues":[{"question_index":0,"severity":"high","message":"correct answer contradicts explanation and source"}]}"#
-                }
-                2 => {
-                    r#"{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#
-                }
-                _ => r#"{"verdict":"pass","issues":[]}"#,
-            };
-            Ok(ChatResponse {
-                id: "fake".into(),
-                model: "fake-model".into(),
-                content: vec![ResponseContent::Text(content.into())],
-                stop_reason: StopReason::EndTurn,
-                usage: Usage::default(),
-            })
-        }
-
-        async fn chat_stream(
-            &self,
-            _req: &ChatRequest,
-        ) -> std::result::Result<StreamHandle, LlmError> {
-            unimplemented!("quiz generation uses non-streaming chat in this test")
-        }
-    }
-
-    #[tokio::test]
-    async fn repairs_once_when_verifier_rejects_first_draft() {
-        let provider = Arc::new(RepairingQuizProvider::new());
-        let questions = generate_quiz_questions_with_client(
-            provider.clone(),
-            "fake-model",
-            &QuizGenerationConfig {
-                topic: Some("OPC".into()),
-                difficulty: "medium".into(),
-                question_count: 1,
-                memory_markdown: None,
-            },
-            &[QuizSourceChunk {
-                source: "source.md".into(),
-                text: "OPC corrects lithography mask patterns before wafer exposure.".into(),
-                score: Some(0.9),
-            }],
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
-        assert_eq!(questions[0].stem, "Repaired draft");
-        assert_eq!(questions[0].correct_option_index, 0);
-    }
 
     #[tokio::test]
     async fn runtime_workflow_repairs_and_publishes_quiz() {
@@ -863,7 +457,7 @@ mod tests {
         );
 
         let questions = generate_quiz_questions_with_workflow(
-            Arc::new(FakeQuizProvider::new()),
+            client.clone(),
             "fake-model",
             &QuizGenerationConfig {
                 topic: Some("OPC".into()),
@@ -881,7 +475,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(client.call_count.load(Ordering::SeqCst), 8);
+        assert_eq!(
+            client.call_count.load(std::sync::atomic::Ordering::SeqCst),
+            8
+        );
         assert_eq!(questions[0].stem, "Repaired draft");
         assert_eq!(questions[0].correct_option_index, 0);
     }
@@ -964,18 +561,6 @@ mod tests {
         let err = parse_generated_quiz(text, 1, 1).unwrap_err().to_string();
 
         assert!(err.contains("duplicate options"));
-    }
-
-    #[test]
-    fn verifier_rejects_answer_explanation_contradictions() {
-        let err = parse_quiz_verification(
-            r#"{"verdict":"fail","issues":[{"question_index":0,"severity":"high","message":"correct answer contradicts explanation"}]}"#,
-        )
-        .unwrap_err()
-        .to_string();
-
-        assert!(err.contains("rejected"));
-        assert!(err.contains("contradicts explanation"));
     }
 
     #[test]

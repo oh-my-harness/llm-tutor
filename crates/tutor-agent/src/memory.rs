@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use llm_adapter::Provider;
-use llm_adapter::types::{ChatRequest, Message, RequestContent, ResponseContent, ResponseFormat};
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
@@ -10,7 +9,6 @@ use llm_harness_runtime::workflow::model::StepResult;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
-use crate::llm_provider::LlmConfig;
 use crate::runtime_engine::DeclarativeEdgeJudge;
 use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
 
@@ -76,41 +74,6 @@ pub enum MemoryWorkflowEditOp {
     Replace,
     Delete,
     Insert,
-}
-
-pub async fn run_memory_workflow(
-    llm: &LlmConfig,
-    input: &MemoryWorkflowInput,
-) -> Result<MemoryWorkflowOutput> {
-    run_memory_workflow_with_client(llm.build_client(), &llm.model, input).await
-}
-
-pub async fn run_memory_workflow_with_client(
-    client: Arc<dyn Provider>,
-    model: &str,
-    input: &MemoryWorkflowInput,
-) -> Result<MemoryWorkflowOutput> {
-    let prompt = memory_prompt(input);
-    let mut builder = ChatRequest::builder(model, 2048)
-        .message(Message::System(system_prompt()))
-        .message(Message::User(vec![RequestContent::Text(prompt)]))
-        .temperature(0.1);
-
-    if client.capabilities().supports_json_schema() {
-        builder = builder.response_format(ResponseFormat::JsonSchema {
-            name: "memory_workflow".into(),
-            schema: memory_schema(),
-            strict: Some(true),
-        });
-    } else {
-        builder = builder.response_format(ResponseFormat::JsonObject);
-    }
-
-    let response = client
-        .chat(&builder.build())
-        .await
-        .map_err(|err| TutorError::Internal(format!("memory LLM workflow failed: {err}")))?;
-    parse_memory_workflow_output(&response_text(&response.content), input.action)
 }
 
 pub async fn run_memory_workflow_with_runtime(
@@ -341,10 +304,6 @@ fn validate_workflow_edit(edit: &MemoryWorkflowEdit) -> Result<()> {
     Ok(())
 }
 
-fn system_prompt() -> String {
-    "You maintain visible learner memory for a tutor product. Return only valid JSON. Memory is for personalization, learning state, preferences, weaknesses, scope, and teaching strategy; it is not a factual source. Preserve useful Markdown structure, remove duplicates, avoid inventing unsupported personal facts, and keep changes concise and auditable.".into()
-}
-
 fn memory_prompt(input: &MemoryWorkflowInput) -> String {
     let action_rules = match input.action {
         MemoryWorkflowAction::Update => {
@@ -380,130 +339,18 @@ fn line_numbered_markdown(markdown: &str) -> String {
         .join("\n")
 }
 
-fn response_text(content: &[ResponseContent]) -> String {
-    content
-        .iter()
-        .filter_map(|block| match block {
-            ResponseContent::Text(text) => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
 fn extract_json_object(text: &str) -> Option<&str> {
     let text = text.trim();
     (text.starts_with('{') && text.ends_with('}')).then_some(text)
 }
 
-fn memory_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-            "properties": {
-            "report_markdown": { "type": "string" },
-            "proposed_markdown": {
-                "anyOf": [
-                    { "type": "string" },
-                    { "type": "null" }
-                ]
-            },
-            "facts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "text": { "type": "string" },
-                        "section": { "type": "string" },
-                        "refs": {
-                            "type": "array",
-                            "items": { "type": "string" }
-                        }
-                    },
-                    "required": ["text", "section", "refs"]
-                }
-            },
-            "edits": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "op": { "type": "string", "enum": ["replace", "delete", "insert"] },
-                        "start_line": { "type": "integer", "minimum": 1 },
-                        "end_line": {
-                            "anyOf": [
-                                { "type": "integer", "minimum": 1 },
-                                { "type": "null" }
-                            ]
-                        },
-                        "text": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ]
-                        },
-                        "refs": {
-                            "type": "array",
-                            "items": { "type": "string" }
-                        },
-                        "reason": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ]
-                        }
-                    },
-                    "required": ["op", "start_line", "end_line", "text", "refs", "reason"]
-                }
-            },
-            "changed": { "type": "boolean" }
-        },
-        "required": ["report_markdown", "proposed_markdown", "facts", "edits", "changed"]
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use llm_adapter::types::{ChatResponse, StopReason};
-    use llm_adapter::{LlmError, ProviderCapabilities, StreamHandle};
     use llm_harness_loop::test_utils::{MockLlmClient, MockResponse, NoOpEnv};
     use llm_harness_types::ExecutionEnv;
 
     use crate::runtime_engine::build_workflow_engine_config;
-
-    struct MockProvider {
-        text: String,
-        json_schema: bool,
-    }
-
-    #[async_trait]
-    impl Provider for MockProvider {
-        fn capabilities(&self) -> ProviderCapabilities {
-            ProviderCapabilities::new(false, false, self.json_schema)
-        }
-
-        async fn chat(&self, _req: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
-            Ok(ChatResponse {
-                id: "mock".into(),
-                model: "mock".into(),
-                content: vec![ResponseContent::Text(self.text.clone())],
-                stop_reason: StopReason::EndTurn,
-                usage: Default::default(),
-            })
-        }
-
-        async fn chat_stream(
-            &self,
-            _req: &ChatRequest,
-        ) -> std::result::Result<StreamHandle, LlmError> {
-            Err(LlmError::InvalidRequest(
-                "streaming is not used in this test".into(),
-            ))
-        }
-    }
 
     #[test]
     fn parses_check_output_without_proposal() {
@@ -621,25 +468,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workflow_uses_llm_json_response() {
-        let provider = Arc::new(MockProvider {
-            text: r##"{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}"##.into(),
-            json_schema: true,
-        });
-        let input = MemoryWorkflowInput {
-            target_path: "L2/quiz.md".into(),
-            action: MemoryWorkflowAction::Update,
-            current_markdown: "# Quiz memory\n\n".into(),
-            consolidation_input_json: r#"{"chunk":{"citeableRefs":["quiz:q1"]},"target":{"allowedSections":["Weak topics"]}}"#.into(),
-        };
-        let output = run_memory_workflow_with_client(provider, "mock-model", &input)
-            .await
-            .unwrap();
-        assert!(output.changed);
-        assert_eq!(output.facts[0].refs, vec!["quiz:q1"]);
-    }
-
-    #[tokio::test]
     async fn runtime_workflow_runs_memory_llm_step() {
         let dir = tempfile::TempDir::new().unwrap();
         let client = Arc::new(MockLlmClient::new(vec![
@@ -664,13 +492,8 @@ mod tests {
             Arc::new(NoOpEnv) as Arc<dyn ExecutionEnv>,
             dir.path().join("memory-workflow-sessions"),
         );
-        let unused_provider = Arc::new(MockProvider {
-            text: "{}".into(),
-            json_schema: false,
-        });
-
         let output =
-            run_memory_workflow_with_runtime(unused_provider, "mock-model", &input, engine_config)
+            run_memory_workflow_with_runtime(client.clone(), "mock-model", &input, engine_config)
                 .await
                 .unwrap();
 
