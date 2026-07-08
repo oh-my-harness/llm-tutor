@@ -3,6 +3,7 @@ use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
 use std::time::Duration;
 
+use crate::text_decode::decode_response_text;
 use crate::web_search::WebSearchConfig;
 
 static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
@@ -127,7 +128,9 @@ impl WebFetchTool {
             anyhow::bail!("unsupported content type `{content_type}`");
         }
 
-        let body = response.text().await?;
+        let headers = response.headers().clone();
+        let bytes = response.bytes().await?;
+        let body = decode_response_text(&headers, &bytes);
         let page = extract_page_text(
             &body,
             &final_url,
@@ -303,6 +306,9 @@ mod tests {
             tool_use_id: "test-id".into(),
             turn_index: 0,
             assistant_message: Arc::new(llm_harness_types::AssistantMessage {
+                kind: llm_harness_types::AssistantMessageKind::FinalAnswer,
+                message_id: "test-message".into(),
+                turn_id: "test-turn".into(),
                 content: vec![],
                 usage: None,
                 stop_reason: None,

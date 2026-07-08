@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
+use crate::text_decode::decode_response_text;
+
 static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -144,7 +146,9 @@ impl WebSearchTool {
             .send()
             .await?
             .error_for_status()?;
-        let html = response.text().await?;
+        let headers = response.headers().clone();
+        let bytes = response.bytes().await?;
+        let html = decode_response_text(&headers, &bytes);
 
         Ok(parse_duckduckgo_lite_results(&html, limit))
     }
@@ -160,7 +164,9 @@ impl WebSearchTool {
             .send()
             .await?
             .error_for_status()?;
-        let html = response.text().await?;
+        let headers = response.headers().clone();
+        let bytes = response.bytes().await?;
+        let html = decode_response_text(&headers, &bytes);
         Ok(parse_duckduckgo_html_results(&html, limit))
     }
 
@@ -175,7 +181,9 @@ impl WebSearchTool {
             .send()
             .await?
             .error_for_status()?;
-        let html = response.text().await?;
+        let headers = response.headers().clone();
+        let bytes = response.bytes().await?;
+        let html = decode_response_text(&headers, &bytes);
         Ok(parse_bing_html_results(&html, limit))
     }
 
@@ -740,6 +748,9 @@ mod tests {
             tool_use_id: "test-id".into(),
             turn_index: 0,
             assistant_message: Arc::new(llm_harness_types::AssistantMessage {
+                kind: llm_harness_types::AssistantMessageKind::FinalAnswer,
+                message_id: "test-message".into(),
+                turn_id: "test-turn".into(),
                 content: vec![],
                 usage: None,
                 stop_reason: None,

@@ -8076,6 +8076,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
+ "encoding_rs",
  "futures",
  "llm-harness-runtime-sandbox-os",
  "llm-harness-types",

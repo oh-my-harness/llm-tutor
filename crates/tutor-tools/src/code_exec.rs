@@ -159,6 +159,9 @@ mod tests {
             tool_use_id: "test-id".into(),
             turn_index: 0,
             assistant_message: Arc::new(llm_harness_types::AssistantMessage {
+                kind: llm_harness_types::AssistantMessageKind::FinalAnswer,
+                message_id: "test-message".into(),
+                turn_id: "test-turn".into(),
                 content: vec![],
                 usage: None,
                 stop_reason: None,

@@ -1,6 +1,7 @@
 pub mod code_exec;
 pub mod rag_search;
 pub mod read_memory;
+mod text_decode;
 pub mod web_fetch;
 pub mod web_search;
 pub mod write_memory;
