@@ -9,6 +9,8 @@
   `AgentHarness::with_session` and runtime session repos.
 - If the framework API is awkward or missing a needed capability, record it in
   `docs/framework-feedback.md` instead of silently building a parallel system.
+- When diagnosing problems, prefer a root-cause design fix over accumulating
+  patches that make the project heavier or harder to reason about.
 - Keep adapters between product code and runtime code thin, explicit, and
   covered by boundary tests.
 - After completing a meaningful task, commit the changes promptly.
