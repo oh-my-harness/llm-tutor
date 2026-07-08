@@ -368,7 +368,7 @@ export function ChatBox({
                           </button>
                         </div>
                       )}
-                      {capability !== 'research' && msg.citations && msg.citations.length > 0 && (
+                      {msg.citations && msg.citations.length > 0 && (
                         <CitationList citations={msg.citations} onSourceNavigate={onSourceNavigate} />
                       )}
                       {msg.notebookEditProposal && onApplyNotebookEdit && (
