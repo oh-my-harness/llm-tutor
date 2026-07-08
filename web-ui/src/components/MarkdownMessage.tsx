@@ -138,9 +138,9 @@ export function SourceReferences({
           type="button"
           onClick={() => setExpanded((value) => !value)}
         >
-          Sources{expanded ? ' ▾' : ' ▸'}
+          Sources {expanded ? 'v' : '>'}
         </button>
-        <span className="text-gray-300">·</span>
+        <span className="text-gray-300">-</span>
         {references.map((reference) => (
           <SourceReferenceLink
             key={reference.id}
@@ -160,7 +160,7 @@ export function SourceReferences({
                 {typeof reference.score === 'number' && (
                   <span className="ml-1 text-gray-400">score {reference.score.toFixed(4)}</span>
                 )}
-                <span className="mx-1 text-gray-300">·</span>
+                <span className="mx-1 text-gray-300">-</span>
                 <span>{sourceReferenceSubtitle(reference)}</span>
                 {sourceReferenceBadges(reference).length > 0 && (
                   <span className="ml-1 text-gray-400">({sourceReferenceBadges(reference).join(', ')})</span>

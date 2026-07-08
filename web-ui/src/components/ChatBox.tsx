@@ -543,7 +543,7 @@ function NotebookEditProposalCard({
           <ProposalDetailList
             title="Suggested links"
             items={proposal.suggestedLinks.map((link) =>
-              `${link.text} -> [[${link.target}]]${link.reason ? ` 路 ${link.reason}` : ''}`,
+              `${link.text} -> [[${link.target}]]${link.reason ? ` - ${link.reason}` : ''}`,
             )}
           />
         )}
@@ -551,7 +551,7 @@ function NotebookEditProposalCard({
           <ProposalDetailList
             title="Suggested tags"
             items={proposal.suggestedTags.map((tag) =>
-              `${tag.action}: #${tag.tag.replace(/^#/, '')}${tag.reason ? ` 路 ${tag.reason}` : ''}`,
+              `${tag.action}: #${tag.tag.replace(/^#/, '')}${tag.reason ? ` - ${tag.reason}` : ''}`,
             )}
           />
         )}
@@ -1262,7 +1262,7 @@ function Composer({
                     selected={config.id === activeModel?.id}
                     icon={<Brain size={21} />}
                     title={config.name || config.model}
-                    description={`${llmApiModeLabel(config.provider)} 路 ${config.model}`}
+                    description={`${llmApiModeLabel(config.provider)} / ${config.model}`}
                     onClick={() => {
                       onLlmConfigChange(config.id)
                       setOpenMenu(null)
