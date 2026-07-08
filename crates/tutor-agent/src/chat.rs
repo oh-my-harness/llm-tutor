@@ -292,7 +292,7 @@ async fn run_chat_inner(
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
             if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
-                if capability == "research" && !text.trim().is_empty() {
+                if should_emit_final_answer_content(capability, &text) {
                     emit_content(&router.event_sink, text.clone(), true).await;
                 }
                 emit_trace(
@@ -326,7 +326,7 @@ async fn run_chat_inner(
 
         match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
-                if capability != "research" {
+                if should_emit_text_delta(capability) {
                     emit_content(&router.event_sink, text.clone(), true).await;
                 }
             }
@@ -451,6 +451,14 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
     } else {
         FinalAnswerMode::tool_with_text_fallback()
     }
+}
+
+fn should_emit_text_delta(capability: &str) -> bool {
+    capability != "research"
+}
+
+fn should_emit_final_answer_content(capability: &str, text: &str) -> bool {
+    capability == "research" && !text.trim().is_empty()
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -625,7 +633,8 @@ fn quiz_system_prompt() -> String {
 mod tests {
     use super::{
         chat_system_prompt, final_answer_mode_for_capability, organize_system_prompt,
-        quiz_system_prompt, research_system_prompt,
+        quiz_system_prompt, research_system_prompt, should_emit_final_answer_content,
+        should_emit_text_delta,
     };
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
@@ -673,6 +682,22 @@ mod tests {
             }
             other => panic!("expected final answer tool fallback, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn research_streaming_only_emits_final_report_content() {
+        assert!(!should_emit_text_delta("research"));
+        assert!(should_emit_text_delta("chat"));
+
+        assert!(should_emit_final_answer_content(
+            "research",
+            "# Research Report\n\nbody"
+        ));
+        assert!(!should_emit_final_answer_content("research", "   \n"));
+        assert!(!should_emit_final_answer_content(
+            "chat",
+            "# Chat answer should use normal text deltas"
+        ));
     }
 
     #[test]
