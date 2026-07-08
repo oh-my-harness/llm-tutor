@@ -368,7 +368,7 @@ export function ChatBox({
                           </button>
                         </div>
                       )}
-                      {msg.citations && msg.citations.length > 0 && (
+                      {capability !== 'research' && msg.citations && msg.citations.length > 0 && (
                         <CitationList citations={msg.citations} onSourceNavigate={onSourceNavigate} />
                       )}
                       {msg.notebookEditProposal && onApplyNotebookEdit && (
@@ -605,7 +605,7 @@ function CitationList({
   const references = citations.map(citationToSourceReference)
   return (
     <div className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
-      <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '缃戦〉鏉ユ簮' : '寮曠敤鏉ユ簮'}</div>
+      <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '网页来源' : '引用来源'}</div>
       <SourceReferences
         id={`chat-citations-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`}
         references={references}
