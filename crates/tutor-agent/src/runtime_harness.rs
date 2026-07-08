@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use llm_adapter::types::{Message as AdapterMessage, ResponseContent};
 use llm_harness_agent::{AgentHarness, HarnessHooks, ModelInfo, Plugin, Session};
-use llm_harness_loop::{FinalAnswerMode, LlmClient};
+use llm_harness_loop::{ConvertToLlmHook, DefaultConvertToLlm, FinalAnswerMode, LlmClient};
 use llm_harness_runtime::builder::HarnessBuilder;
-use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, PrepareNextTurnHook, Tool};
+use llm_harness_types::{
+    AgentError, AgentMessage, BeforeToolCallHook, ExecutionEnv, PrepareNextTurnHook, Tool,
+};
 
 use crate::error::{Result, TutorError};
 
@@ -32,6 +35,7 @@ pub async fn build_runtime_harness(
         .install(&hook_plugin)
         .system_prompt(Some(config.system_prompt))
         .model_info(Some(config.model_info))
+        .convert_to_llm(Some(Arc::new(OpenAiSafeContextConverter::default())))
         .final_answer_mode(FinalAnswerMode::tool_with_text_fallback());
 
     for tool in config.tools {
@@ -47,6 +51,37 @@ pub async fn build_runtime_harness(
             .await
             .map_err(|err| TutorError::Internal(err.to_string())),
     }
+}
+
+#[derive(Default)]
+struct OpenAiSafeContextConverter {
+    inner: DefaultConvertToLlm,
+}
+
+impl ConvertToLlmHook for OpenAiSafeContextConverter {
+    fn convert<'a>(
+        &'a self,
+        messages: &'a [AgentMessage],
+    ) -> futures::future::BoxFuture<'a, std::result::Result<Vec<AdapterMessage>, AgentError>> {
+        Box::pin(async move {
+            let converted = self.inner.convert(messages).await?;
+            Ok(converted
+                .into_iter()
+                .filter(|message| match message {
+                    AdapterMessage::Assistant(content) => assistant_has_openai_payload(content),
+                    _ => true,
+                })
+                .collect())
+        })
+    }
+}
+
+fn assistant_has_openai_payload(content: &[ResponseContent]) -> bool {
+    content.iter().any(|item| match item {
+        ResponseContent::Text(text) => !text.trim().is_empty(),
+        ResponseContent::ToolInvocation(_) => true,
+        ResponseContent::Reasoning { .. } => false,
+    })
 }
 
 struct HookPlugin {
@@ -65,5 +100,68 @@ impl Plugin for HookPlugin {
         target
             .prepare_next_turn
             .extend(self.hooks.prepare_next_turn.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use llm_harness_types::{AssistantMessage, AssistantMessageKind, ContentBlock, StopReason};
+
+    #[tokio::test]
+    async fn openai_safe_converter_drops_reasoning_only_assistant_messages() {
+        let converter = OpenAiSafeContextConverter::default();
+        let messages = vec![AgentMessage::Assistant(AssistantMessage {
+            kind: AssistantMessageKind::Progress,
+            message_id: "msg_reasoning".into(),
+            turn_id: "turn_reasoning".into(),
+            content: vec![ContentBlock::Thinking {
+                thinking: "internal reasoning only".into(),
+                signature: None,
+            }],
+            stop_reason: Some(StopReason::EndTurn),
+            timestamp: chrono::Utc::now(),
+            provider: None,
+            api: None,
+            model: None,
+            usage: None,
+            error_message: None,
+        })];
+
+        let converted = converter.convert(&messages).await.unwrap();
+
+        assert!(converted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn openai_safe_converter_keeps_tool_call_assistant_messages() {
+        let converter = OpenAiSafeContextConverter::default();
+        let messages = vec![AgentMessage::Assistant(AssistantMessage {
+            kind: AssistantMessageKind::Progress,
+            message_id: "msg_tool".into(),
+            turn_id: "turn_tool".into(),
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "plan".into(),
+                    signature: None,
+                },
+                ContentBlock::ToolUse {
+                    id: "call_1".into(),
+                    name: "web_search".into(),
+                    input: serde_json::json!({"query": "rust"}),
+                },
+            ],
+            stop_reason: Some(StopReason::ToolUse),
+            timestamp: chrono::Utc::now(),
+            provider: None,
+            api: None,
+            model: None,
+            usage: None,
+            error_message: None,
+        })];
+
+        let converted = converter.convert(&messages).await.unwrap();
+
+        assert_eq!(converted.len(), 1);
     }
 }

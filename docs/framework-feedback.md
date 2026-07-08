@@ -128,6 +128,12 @@
   - Change: Chat/Code Exec now match runtime `AgentEvent::FinalAnswer` / `Progress`, return only `FinalAnswer` text, and web session rendering ignores `Progress` assistant messages when mapping runtime messages to chat roles. Harness construction also enables runtime `FinalAnswerMode::tool_with_text_fallback()`, so models may use the built-in `final_answer` tool without losing plain-text compatibility.
   - Remaining gap: streamed `TextDelta` is still emitted immediately for UX. If the runtime later exposes per-delta final/progress classification, the UI can avoid briefly showing progress text in the main stream.
 
+- **OpenAI-compatible adapters still need to normalize reasoning-only assistant history**
+  - Expected: a prior assistant message containing only reasoning/thinking blocks should not be serialized as an invalid OpenAI-compatible assistant message.
+  - Actual: the `e200c12` runtime converter preserves `ResponseContent::Reasoning`; the `69a868f` OpenAI adapter serializes it as `reasoning_content`. Some OpenAI-compatible providers reject an assistant message that has neither `content` nor `tool_calls`, returning `Invalid assistant message: content or tool_calls must be set`.
+  - Product workaround: `llm-tutor` installs a thin `OpenAiSafeContextConverter` that delegates to runtime's `DefaultConvertToLlm` and then drops assistant history messages with no text and no tool invocations. Tool-call assistant messages are preserved, so OpenAI tool-call adjacency remains intact.
+  - Suggestion: handle this at the adapter/runtime boundary, either by omitting reasoning-only assistant messages for OpenAI-compatible wire formats or by mapping provider-supported reasoning history into a valid content representation.
+
 - **Resolved: workflow tests now follow runtime submit-step terminal semantics**
   - Expected: runtime `submit_step_result` should be enough to complete an LLM workflow step and provide structured output to the workflow engine.
   - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
