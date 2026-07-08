@@ -15,6 +15,7 @@ pub struct RuntimeHarnessConfig {
     pub model_info: ModelInfo,
     pub tools: Vec<Arc<dyn Tool>>,
     pub system_prompt: String,
+    pub final_answer_mode: FinalAnswerMode,
     pub before_tool_call: Vec<Arc<dyn BeforeToolCallHook>>,
     pub prepare_next_turn: Vec<Arc<dyn PrepareNextTurnHook>>,
 }
@@ -36,7 +37,7 @@ pub async fn build_runtime_harness(
         .system_prompt(Some(config.system_prompt))
         .model_info(Some(config.model_info))
         .convert_to_llm(Some(Arc::new(OpenAiSafeContextConverter::default())))
-        .final_answer_mode(FinalAnswerMode::tool_with_text_fallback());
+        .final_answer_mode(config.final_answer_mode);
 
     for tool in config.tools {
         builder = builder.tool(tool);

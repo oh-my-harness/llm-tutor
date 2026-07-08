@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use llm_harness_agent::{AgentHarnessEvent, Session};
-use llm_harness_loop::CompositeBeforeToolCallHook;
+use llm_harness_loop::{CompositeBeforeToolCallHook, FinalAnswerMode};
 use llm_harness_types::{AgentEvent, AgentMessage, AssistantMessageKind, BeforeToolCallHook};
 use tokio_util::sync::CancellationToken;
 use tutor_tools::CodeExecTool;
@@ -86,6 +86,7 @@ async fn run_code_exec_inner(
              call code_exec with Python to compute or verify the result before answering. If no \
              runnable code or computable task is provided, ask for the missing details."
                     .into(),
+                final_answer_mode: FinalAnswerMode::tool_with_text_fallback(),
                 before_tool_call,
                 prepare_next_turn: vec![],
             },

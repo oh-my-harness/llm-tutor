@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use llm_harness_agent::{AgentHarness, AgentHarnessEvent, Session};
+use llm_harness_loop::FinalAnswerMode;
 use llm_harness_types::{
     AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, CompactionError,
     ContentBlock, HarnessError, StopReason, UserMessage,
@@ -248,6 +249,7 @@ async fn run_chat_inner(
                 model_info: router.llm.model_info(8192),
                 tools,
                 system_prompt,
+                final_answer_mode: final_answer_mode_for_capability(capability),
                 before_tool_call: vec![],
                 prepare_next_turn: vec![],
             },
@@ -290,6 +292,9 @@ async fn run_chat_inner(
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
             if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
+                if capability == "research" && !text.trim().is_empty() {
+                    emit_content(&router.event_sink, text.clone(), true).await;
+                }
                 emit_trace(
                     &router.event_sink,
                     "final_answer",
@@ -321,7 +326,9 @@ async fn run_chat_inner(
 
         match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
-                emit_content(&router.event_sink, text.clone(), true).await;
+                if capability != "research" {
+                    emit_content(&router.event_sink, text.clone(), true).await;
+                }
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
                 tool_use_id,
@@ -436,6 +443,14 @@ async fn run_chat_inner(
     }
 
     Ok(last_text)
+}
+
+fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
+    if capability == "research" {
+        FinalAnswerMode::required_tool()
+    } else {
+        FinalAnswerMode::tool_with_text_fallback()
+    }
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -573,7 +588,9 @@ fn research_system_prompt() -> String {
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
-     Keep intermediate planning brief; the final report is the main deliverable."
+     Keep intermediate planning brief; the final report is the main deliverable. \
+     When the report is complete, call the final_answer tool with the full Markdown report text. \
+     Do not use final_answer for planning notes, search updates, or partial drafts."
         .into()
 }
 
@@ -607,8 +624,10 @@ fn quiz_system_prompt() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_system_prompt, organize_system_prompt, quiz_system_prompt, research_system_prompt,
+        chat_system_prompt, final_answer_mode_for_capability, organize_system_prompt,
+        quiz_system_prompt, research_system_prompt,
     };
+    use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
@@ -636,6 +655,24 @@ mod tests {
         assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
+        assert!(prompt.contains("final_answer"));
+    }
+
+    #[test]
+    fn research_requires_final_answer_tool() {
+        assert_eq!(
+            final_answer_mode_for_capability("research"),
+            FinalAnswerMode::required_tool()
+        );
+        match final_answer_mode_for_capability("chat") {
+            FinalAnswerMode::Tool(config) => {
+                assert_eq!(
+                    config.missing_behavior,
+                    FinalAnswerMissingBehavior::FallbackToText
+                );
+            }
+            other => panic!("expected final answer tool fallback, got {other:?}"),
+        }
     }
 
     #[test]
