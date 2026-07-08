@@ -124,12 +124,7 @@ async fn run_code_exec_inner(
         };
 
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
-            if let AgentEvent::FinalAnswer {
-                message_id,
-                turn_id,
-                text,
-            } = agent_event
-            {
+            if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
                 emit_trace(
                     &router.event_sink,
@@ -144,12 +139,7 @@ async fn run_code_exec_inner(
                 continue;
             }
 
-            if let AgentEvent::Progress {
-                message_id,
-                turn_id,
-                text,
-            } = agent_event
-            {
+            if let Some((message_id, turn_id, text)) = agent_event.as_progress() {
                 emit_trace(
                     &router.event_sink,
                     "assistant_progress",

@@ -1,10 +1,11 @@
 # Runtime Migration Audit
 
-Date: 2026-07-07
+Date: 2026-07-08
 
 ## Current Evidence
 
-- `llm-harness-runtime` main HEAD is `bea5374690192f2e32943073ced10f66c120db91`; the project is pinned to workflow branch commit `cc0b737a97966af57fd74bef148b2b9febcf1a75`.
+- `llm-harness-runtime` main HEAD is `bea5374690192f2e32943073ced10f66c120db91`; the project is pinned to issue #43 fix branch commit `e200c12a69b896a0d9ab70d2752f9dafcbfc07ad`.
+- The fix branch is behind open PR #44 and is not yet merged, so this is a deliberate temporary pin to validate OpenAI-compatible tool-call adjacency.
 - `Cargo.toml` and `Cargo.lock` pin all `llm-harness-*` crates to the same
   runtime revision.
 - `main` is synchronized with `origin/main` after the latest runtime migration
@@ -14,11 +15,12 @@ Date: 2026-07-07
 
 - Durable chat history uses `JsonlSessionRepo` and runtime `Session` APIs.
 - Chat, Research, Organize, Quiz-mode chat, and Code Exec harness setup uses
-  runtime `AgentHarnessOptions` directly because the workflow branch
-  `HarnessBuilder` does not expose all required setters.
+  runtime `HarnessBuilder`. Product hooks are injected through a minimal plugin,
+  while runtime owns provider resolution, final-answer mode, model metadata, and
+  cost hook injection.
 - Final assistant text is restored from runtime `AssistantMessageKind::FinalAnswer`
-  via `AgentEvent::FinalAnswer`.
-- Progress messages are detected through runtime `AgentEvent::Progress` and
+  via `AgentEvent::as_final_answer()`.
+- Progress messages are detected through runtime `AgentEvent::as_progress()` and
   are not restored as final chat bubbles.
   - Test evidence: `chat_returns_runtime_final_answer_not_progress_text` covers
     a progress `MessageEnd` followed by a final answer and asserts that the
@@ -35,8 +37,9 @@ Date: 2026-07-07
 - Quiz uses runtime LLM workflow steps and `submit_step_result` for generated
   questions and verifier results.
 - Workflow step progress was consumed from runtime `WorkflowEvent::StepProgress`
-  on `bea5374`; `cc0b737` no longer exposes that event, so the product bridge
-  currently emits workflow step start/finish/failure only.
+  on `bea5374`; `cc0b737` temporarily removed that event; `e200c12` exposes it
+  again. The product bridge currently still emits workflow step
+  start/finish/failure only.
 - Ordinary Chat and Code Exec turns emit `runtime_usage` trace events from
   runtime `AgentHarness::usage()`. This reuses the `CostAccumulatorHook`
   injected by `HarnessBuilder` instead of duplicating token accounting in
@@ -56,8 +59,8 @@ Date: 2026-07-07
 ## Removed Or Avoided Product Reimplementations
 
 Active source no longer contains the old Deep Solve `PhaseManager`,
-`ReplanHook`, `ReplanTool`, `SolveContext`, or direct `AgentHarnessOptions`
-construction paths.
+`ReplanHook`, `ReplanTool`, `SolveContext`, or ordinary direct
+`AgentHarnessOptions` construction paths.
 
 Product session storage does not duplicate message history. It stores product
 metadata and custom runtime session entries for UI concepts such as trace,
@@ -88,18 +91,19 @@ mentions, and citations.
 ## Latest Runtime API Recheck
 
 Checked against local runtime checkout
-`llm-harness-runtime-6a63eaf83d5f868e/cc0b737` on 2026-07-07.
+`llm-harness-runtime-6a63eaf83d5f868e/e200c12` on 2026-07-08.
 
 | Area | Runtime evidence | Product decision |
 | --- | --- | --- |
 | Declarative workflow routing | `workflow::judge::EdgeConditionJudge` and `NoopJudge` exist, but both are still `pub(crate)`. `WorkflowEngine` can auto-select the edge judge only when the provided judge reports `is_noop()`. | Keep the tiny `RuntimeDeclarativeJudge` marker until runtime exposes a public constructor/helper. |
 | Bounded verifier repair | `WorkflowEngine::with_max_steps` is a global step-count guard. Runtime docs recommend loop counters in structured state for custom routing; no transition-level visit cap is public. | Keep `QuizWorkflowJudge` for the current "repair once, then fail" semantic verifier loop. |
-| Harness setup | `AgentHarnessOptions` exposes `model_info`, system prompt, tools, final-answer mode, hooks, and session wiring. `HarnessBuilder` on `cc0b737` no longer exposes several of these setters. | Construct `AgentHarnessOptions` directly until builder parity is restored. |
-| Final answer contract | Runtime exposes `FinalAnswerMode`, `AgentEvent::FinalAnswer`, `AgentEvent::Progress`, and final/progress assistant message kinds. | Chat and Code Exec now consume these APIs; tests cover both paths. |
+| Harness setup | `HarnessBuilder` exposes `system_prompt`, `model_info`, `final_answer_mode`, provider registration, tools, and plugin hook registration. | Chat and Code Exec use `HarnessBuilder`; product hook vectors are injected through a tiny plugin. |
+| Final answer contract | Runtime exposes `FinalAnswerMode`, `AgentEvent::as_final_answer()`, `AgentEvent::as_progress()`, and final/progress assistant message kinds. | Chat and Code Exec consume these APIs; tests cover both paths. |
 | Streaming deltas | Runtime still emits raw `TextDelta` without final/progress classification; classification is available at terminal message events. | Keep live streaming as raw text for now, while durable bubbles use final-answer events. |
 | Model metadata | Runtime accepts `ModelInfo` for context budgeting and compaction, but does not provide provider-normalized metadata discovery. | Keep product settings diagnostics for `/models` probing and inference until adapter/runtime owns discovery. |
 | Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. `HarnessBuilder` does inject `CostAccumulatorHook`, and the harness exposes `usage()`. | Emit and consume runtime usage traces from `AgentHarness::usage()` for observability, but keep budget limits as product config only until runtime separates accounting from loop continuation. |
 | Workflow usage | `WorkflowEngine::run()` returns `TaskResult.cost`, aggregated from step results. `WorkflowEngine::total_cost()` is also available for an active engine. | Deep Solve emits `runtime_usage` from `TaskResult.cost`. Quiz and Memory workflow helpers return their domain output plus runtime cost; Memory traces also preserve the cost payload. A future UI pass can decide how to summarize non-chat workflow costs. |
+| Tool-call adjacency | PR #44 keeps provider-neutral runtime conversion from inserting assistant messages between consecutive tool results. | `llm-tutor` pins to the PR commit to validate Research/multi-tool paths until the fix is merged upstream. |
 
 ## Next Runtime API Requests
 

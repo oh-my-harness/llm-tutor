@@ -15,13 +15,13 @@
 
 ## Friction Points
 
-- **Runtime `workflow` branch can compile, but still has provider/tool-call gaps**
-  - `llm-tutor` tested `llm-harness-runtime` branch commit `cc0b737` and aligned `llm-api-adapter` to `de6015de`.
+- **Runtime `workflow` / issue #43 fix branch can compile, with provider tool-call adjacency improved**
+  - `llm-tutor` tested `llm-harness-runtime` issue #43 fix branch commit `e200c12` and aligned `llm-api-adapter` to `69a868f`.
+  - Runtime issue #43 remains open, but PR #44 (`Fix provider-specific tool message normalization boundary`) contains the relevant fix. The default converter no longer inserts an empty assistant between consecutive tool result messages, preserving OpenAI-compatible `assistant tool_calls -> tool -> tool` adjacency.
   - The branch adds workflow/subagent APIs and re-exports chat provider types from `llm_harness_loop`, but it still depends on the external `llm-api-adapter` repo. Embedding traits/types are not re-exported, so RAG code still needs a direct adapter dependency.
-  - `HarnessBuilder` no longer exposes `system_prompt`, `model_info`, or `final_answer_mode` setters even though `AgentHarnessOptions` still supports those fields. App code currently has to construct `AgentHarnessOptions` directly to preserve existing behavior.
-  - `submit_step_result` no longer behaves as a terminal step response in workflow tests; the runtime asks the model for a follow-up text turn after the tool result. That doubles provider calls for structured workflow steps unless the app provides extra mock/final text turns.
-  - The default LLM converter still treats consecutive tool result messages as user-like messages and inserts an empty assistant between them for alternation. That is invalid for OpenAI-compatible APIs when one assistant turn emits multiple tool calls, because all tool result messages must immediately follow the assistant tool-call message.
-  - Suggestion: expose builder setters for all common `AgentHarnessOptions` fields, re-export embedding provider types or provide a runtime embedding boundary, and make alternation provider-aware so OpenAI tool-call adjacency is preserved.
+  - `HarnessBuilder` again exposes `system_prompt`, `model_info`, and `final_answer_mode`, and product Chat/Code Exec harness construction now uses builder plus a thin plugin to inject product hooks.
+  - `submit_step_result` behaves as a terminal structured step response in workflow tests; no extra follow-up text turn is required for Memory/Quiz workflow mocks.
+  - Suggestion: merge PR #44 into the main/workflow line, re-export embedding provider types or provide a runtime embedding boundary, and keep provider-specific message normalization in adapter/provider code rather than the provider-neutral runtime converter.
 
 - **Status update: runtime workflow support is now available and consumed**
   - `llm-tutor` now pins `llm-harness-runtime` to workflow branch commit `cc0b737`, which includes expanded workflow and spawn/subagent modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
@@ -43,11 +43,12 @@
   - Fifteenth migration step: Quiz and Memory workflow APIs no longer accept duplicate client/model parameters; runtime client/model ownership now flows only through `WorkflowEngineConfig`.
   - Sixteenth migration step: upgraded all runtime crates to `cc0b737` and verified `tutor-agent` / `tutor-web` compile against the workflow runtime branch. The newest runtime still keeps `NoopJudge`, `EdgeConditionJudge`, and fixed-env helpers private, so the tiny product marker judge and env factory remain necessary thin adapters.
   - Seventeenth migration audit: re-tested `HarnessBuilder::budget(limit, None)` on `eea964b` for ordinary Chat/Code Exec harnesses. `cargo test -p tutor-agent --test mock_integration` still timed out, so product code continues to avoid wiring runtime budget hooks into one-turn harnesses until the stop semantics are safe for this usage.
-  - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and direct `AgentEvent::FinalAnswer` / `Progress` matching, so durable assistant bubbles no longer come from intermediate progress text.
-  - Nineteenth migration step: Deep Solve previously consumed runtime `WorkflowEvent::StepProgress`; `cc0b737` removed this event, so the current bridge reports workflow step start/finish/failure only.
+  - Eighteenth migration step: Chat/Code Exec now follow runtime's final-answer contract through `FinalAnswerMode::tool_with_text_fallback()` and `AgentEvent::as_final_answer()` / `as_progress()`, so durable assistant bubbles no longer come from intermediate progress text.
+  - Nineteenth migration step: Deep Solve previously consumed runtime `WorkflowEvent::StepProgress`; `cc0b737` removed this event, and `e200c12` restores it. The current product bridge still reports workflow step start/finish/failure only until the UI needs finer step-internal progress.
   - Twentieth migration step: Chat and Code Exec emit product `runtime_usage` traces from `AgentHarness::usage()`, and Deep Solve emits the same trace from runtime `TaskResult.cost`.
   - Twenty-first migration step: Quiz and Memory workflow helpers now return runtime `TaskResult.cost` alongside domain output, so callers no longer need to reconstruct workflow usage from app-layer state.
-  - Completion audit: the project pin is `cc0b737`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`de6015de`) and one runtime revision. Active source no longer contains the legacy Deep Solve phase-loop or app-side declarative edge evaluation paths. Chat/Code Exec currently construct `AgentHarnessOptions` directly because `HarnessBuilder` on this branch no longer exposes all required option setters.
+  - Twenty-second migration step: upgraded runtime crates to PR #44 commit `e200c12` and adapter to `69a868f`. Chat/Code Exec returned to `HarnessBuilder`, with product hooks injected through a minimal plugin, so runtime owns cost hook injection again.
+  - Completion audit: the project pin is `e200c12`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`69a868f`) and one runtime revision. Active source no longer contains the legacy Deep Solve phase-loop or app-side declarative edge evaluation paths. Chat/Code Exec construct harnesses through `HarnessBuilder`.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, safe budget policies, and normalized model metadata discovery.
 
 - **Budget control still needs a safer runtime API**
@@ -132,10 +133,10 @@
   - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
   - Change: Memory and Quiz workflow tests now model `submit_step_result` as the terminal step response, reducing unnecessary mock calls and aligning with runtime-managed structured step output.
 
-- **Regression: workflow step progress events are not available on `cc0b737`**
+- **Resolved: workflow step progress events are available again on `e200c12`**
   - Expected: product UI should reuse runtime workflow progress events for step-internal tool/message boundaries instead of inventing a parallel progress model.
-  - Actual: `bea5374` exposed `WorkflowEvent::StepProgress`, but `cc0b737` no longer does. The product event bridge now reports workflow step start/finish/failure only.
-  - Suggestion: restore a stable workflow progress event stream or document the replacement event surface.
+  - Actual: `cc0b737` temporarily removed `WorkflowEvent::StepProgress`, but PR #44 commit `e200c12` exposes it again.
+  - Current product decision: keep the existing coarse Deep Solve bridge for now; wire `StepProgress` into UI only when a concrete step-internal progress design is needed.
 
 ## Positive Validations
 

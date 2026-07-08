@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_harness_runtime::cost::CostAggregate;
+use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::model::StepResult;
@@ -477,14 +477,11 @@ mod tests {
     #[tokio::test]
     async fn runtime_workflow_runs_memory_llm_step() {
         let dir = tempfile::TempDir::new().unwrap();
-        let client = Arc::new(MockLlmClient::new(vec![
-            MockResponse::tool_use(
-                "memory-submit",
-                "submit_step_result",
-                r##"{"result":{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}}"##,
-            ),
-            MockResponse::text("Memory update submitted."),
-        ]));
+        let client = Arc::new(MockLlmClient::new(vec![MockResponse::tool_use(
+            "memory-submit",
+            "submit_step_result",
+            r##"{"result":{"report_markdown":"# Memory report\n\nExtracted recent quiz weakness.","proposed_markdown":null,"facts":[{"text":"Learner should review OPC distractors.","section":"Weak topics","refs":["quiz:q1"]}],"edits":[],"changed":true}}"##,
+        )]));
         let input = MemoryWorkflowInput {
             target_path: "L2/quiz.md".into(),
             action: MemoryWorkflowAction::Update,
@@ -505,7 +502,7 @@ mod tests {
 
         assert_eq!(
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
-            2
+            1
         );
         assert_eq!(run.cost.total_input_tokens, 0);
         let output = run.output;

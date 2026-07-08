@@ -1,5 +1,7 @@
 use futures::future::BoxFuture;
-use llm_harness_runtime::human_approval::{ApprovalDecision, ApprovalRequest, HumanApprover};
+use llm_harness_runtime::control::human_approval::{
+    ApprovalDecision, ApprovalRequest, HumanApprover,
+};
 
 /// Reads approval decision from stdin. Only suitable for CLI usage.
 pub struct TerminalApprover;

@@ -288,12 +288,7 @@ async fn run_chat_inner(
         };
 
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
-            if let AgentEvent::FinalAnswer {
-                message_id,
-                turn_id,
-                text,
-            } = agent_event
-            {
+            if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
                 emit_trace(
                     &router.event_sink,
@@ -308,12 +303,7 @@ async fn run_chat_inner(
                 continue;
             }
 
-            if let AgentEvent::Progress {
-                message_id,
-                turn_id,
-                text,
-            } = agent_event
-            {
+            if let Some((message_id, turn_id, text)) = agent_event.as_progress() {
                 emit_trace(
                     &router.event_sink,
                     "assistant_progress",
@@ -515,8 +505,8 @@ pub fn user_message(text: &str) -> AgentMessage {
 pub fn assistant_message(text: &str) -> AgentMessage {
     AgentMessage::Assistant(AssistantMessage {
         kind: AssistantMessageKind::FinalAnswer,
-        message_id: None,
-        turn_id: None,
+        message_id: "manual_assistant_message".into(),
+        turn_id: "manual_turn".into(),
         content: vec![ContentBlock::Text {
             text: text.to_string(),
         }],

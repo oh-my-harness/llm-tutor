@@ -4,8 +4,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use llm_adapter::provider::Provider;
 use llm_harness_agent::HarnessHooks;
-use llm_harness_runtime::audit::AuditEventType;
-use llm_harness_runtime::cost::CostAggregate;
+use llm_harness_runtime::control::cost::CostAggregate;
+use llm_harness_runtime::observability::audit::AuditEventType;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEvent};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::model::StepResult as RuntimeStepResult;
@@ -251,7 +251,8 @@ fn relay_deep_solve_workflow_events(
                 }
                 WorkflowEvent::Paused { .. }
                 | WorkflowEvent::Resumed
-                | WorkflowEvent::Cancelled { .. } => {}
+                | WorkflowEvent::Cancelled { .. }
+                | WorkflowEvent::StepProgress { .. } => {}
             }
         }
     })

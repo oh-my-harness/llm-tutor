@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use llm_harness_loop::LlmClient;
-use llm_harness_runtime::spawner::{EnvFactory, JsonlSessionFactory};
+use llm_harness_runtime::spawn::spawner::{EnvFactory, JsonlSessionFactory};
 use llm_harness_runtime::workflow::engine::WorkflowEngineConfig;
 use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
 use llm_harness_runtime::workflow::model::Transition;
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use futures::future::BoxFuture;
     use llm_harness_loop::test_utils::{MockLlmClient, NoOpEnv};
-    use llm_harness_runtime::cost::CostAggregate;
+    use llm_harness_runtime::control::cost::CostAggregate;
     use llm_harness_runtime::workflow::engine::WorkflowEngine;
     use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
     use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};

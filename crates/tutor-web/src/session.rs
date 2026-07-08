@@ -813,6 +813,7 @@ fn token_usage_from_runtime_trace(data: &serde_json::Value) -> Option<TokenUsage
         output_tokens: u32_from_json(payload.get("output_tokens")),
         cache_read_tokens: u32_from_json(payload.get("cache_read_tokens")),
         cache_creation_tokens: u32_from_json(payload.get("cache_write_tokens")),
+        reasoning_tokens: u32_from_json(payload.get("reasoning_tokens")),
     })
 }
 

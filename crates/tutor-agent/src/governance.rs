@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use llm_harness_runtime::audit::{AuditEntry, AuditEventType, AuditSink};
-use llm_harness_runtime::human_approval::HumanApprovalWrapper;
+use llm_harness_runtime::control::human_approval::HumanApprovalWrapper;
+use llm_harness_runtime::observability::audit::{AuditEntry, AuditEventType, AuditSink};
 use uuid::Uuid;
 
 /// Session-wide governance configuration shared across all harnesses.

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_harness_runtime::cost::CostAggregate;
+use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
@@ -436,25 +436,21 @@ mod tests {
                 "submit_step_result",
                 r#"{"result":{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
             ),
-            MockResponse::text("Draft submitted."),
             MockResponse::tool_use(
                 "verify-1",
                 "submit_step_result",
                 r#"{"result":{"verdict":"fail","action":"repair","issues":["correct answer contradicts explanation and source"]}}"#,
             ),
-            MockResponse::text("Verifier requested repair."),
             MockResponse::tool_use(
                 "gen-2",
                 "submit_step_result",
                 r#"{"result":{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
             ),
-            MockResponse::text("Repair submitted."),
             MockResponse::tool_use(
                 "verify-2",
                 "submit_step_result",
                 r#"{"result":{"verdict":"pass","issues":[]}}"#,
             ),
-            MockResponse::text("Verifier passed."),
         ]));
         let engine_config = build_workflow_engine_config(
             client.clone(),
@@ -482,7 +478,7 @@ mod tests {
 
         assert_eq!(
             client.call_count.load(std::sync::atomic::Ordering::SeqCst),
-            8
+            4
         );
         assert_eq!(output.questions[0].stem, "Repaired draft");
         assert_eq!(output.questions[0].correct_option_index, 0);

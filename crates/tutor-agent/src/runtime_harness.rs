@@ -1,14 +1,11 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use llm_harness_agent::{AgentHarness, AgentHarnessOptions, HarnessHooks, ModelInfo, Session};
+use llm_harness_agent::{AgentHarness, HarnessHooks, ModelInfo, Plugin, Session};
 use llm_harness_loop::{FinalAnswerMode, LlmClient};
-use llm_harness_runtime::cost_hook::CostAccumulatorHook;
-use llm_harness_types::{
-    AfterProviderResponseHook, BeforeToolCallHook, CostAggregate, ExecutionEnv,
-    PrepareNextTurnHook, Tool,
-};
+use llm_harness_runtime::builder::HarnessBuilder;
+use llm_harness_types::{BeforeToolCallHook, ExecutionEnv, PrepareNextTurnHook, Tool};
 
-use crate::error::Result;
+use crate::error::{Result, TutorError};
 
 pub struct RuntimeHarnessConfig {
     pub model: String,
@@ -29,21 +26,44 @@ pub async fn build_runtime_harness(
     hooks.before_tool_call = config.before_tool_call;
     hooks.prepare_next_turn = config.prepare_next_turn;
 
-    let cost = Arc::new(Mutex::new(CostAggregate::default()));
-    let accumulator: Arc<dyn AfterProviderResponseHook> =
-        Arc::new(CostAccumulatorHook::new(cost.clone(), None));
-    hooks.after_provider_response.push(accumulator);
+    let hook_plugin = HookPlugin { hooks };
+    let mut builder = HarnessBuilder::new(config.model.clone())
+        .provider(config.model.clone(), client)
+        .install(&hook_plugin)
+        .system_prompt(Some(config.system_prompt))
+        .model_info(Some(config.model_info))
+        .final_answer_mode(FinalAnswerMode::tool_with_text_fallback());
 
-    let mut opts = AgentHarnessOptions::new(config.model.clone());
-    opts.model_info = Some(config.model_info);
-    opts.tools = config.tools;
-    opts.hooks = hooks;
-    opts.system_prompt = Some(config.system_prompt);
-    opts.final_answer_mode = FinalAnswerMode::tool_with_text_fallback();
-    opts.cost = cost;
+    for tool in config.tools {
+        builder = builder.tool(tool);
+    }
 
     match session {
-        Some(session) => Ok(AgentHarness::with_session(client, env, session, opts)),
-        None => Ok(AgentHarness::new_in_memory(client, env, opts).await),
+        Some(session) => builder
+            .build_with_session(env, session)
+            .map_err(|err| TutorError::Internal(err.to_string())),
+        None => builder
+            .build(env)
+            .await
+            .map_err(|err| TutorError::Internal(err.to_string())),
+    }
+}
+
+struct HookPlugin {
+    hooks: HarnessHooks,
+}
+
+impl Plugin for HookPlugin {
+    fn name(&self) -> &str {
+        "tutor-runtime-hooks"
+    }
+
+    fn register_hooks(&self, target: &mut HarnessHooks) {
+        target
+            .before_tool_call
+            .extend(self.hooks.before_tool_call.clone());
+        target
+            .prepare_next_turn
+            .extend(self.hooks.prepare_next_turn.clone());
     }
 }

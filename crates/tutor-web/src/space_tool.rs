@@ -679,8 +679,8 @@ mod tests {
             turn_index: 0,
             assistant_message: Arc::new(llm_harness_types::AssistantMessage {
                 kind: llm_harness_types::AssistantMessageKind::FinalAnswer,
-                message_id: Some("test-message".into()),
-                turn_id: Some("test-turn".into()),
+                message_id: "test-message".into(),
+                turn_id: "test-turn".into(),
                 content: vec![],
                 usage: None,
                 stop_reason: None,
