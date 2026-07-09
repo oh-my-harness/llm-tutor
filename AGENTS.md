@@ -13,4 +13,8 @@
   patches that make the project heavier or harder to reason about.
 - Keep adapters between product code and runtime code thin, explicit, and
   covered by boundary tests.
+- When using PowerShell to inspect or transform text files, explicitly use
+  UTF-8 for files that may contain Chinese or other non-ASCII text, for example
+  `Get-Content -Encoding UTF8`, to avoid introducing mojibake into UI copy or
+  docs.
 - After completing a meaningful task, commit the changes promptly.
