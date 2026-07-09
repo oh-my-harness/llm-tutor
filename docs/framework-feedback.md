@@ -48,8 +48,14 @@
   - Twentieth migration step: Chat and Code Exec emit product `runtime_usage` traces from `AgentHarness::usage()`, and Deep Solve emits the same trace from runtime `TaskResult.cost`.
   - Twenty-first migration step: Quiz and Memory workflow helpers now return runtime `TaskResult.cost` alongside domain output, so callers no longer need to reconstruct workflow usage from app-layer state.
   - Twenty-second migration step: upgraded runtime crates to PR #44 commit `e200c12` and adapter to `69a868f`. Chat/Code Exec returned to `HarnessBuilder`, with product hooks injected through a minimal plugin, so runtime owns cost hook injection again.
+  - Twenty-third migration step: Research detailed runs now use runtime `WorkflowEngine` with explicit search, read, citation-check, and report steps. Product code only prepares the confirmed request, mounts existing tools, bridges workflow events into Research trace events, and persists the final report back to the current runtime session.
   - Completion audit: the project pin is `e200c12`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`69a868f`) and one runtime revision. Active source no longer contains the legacy Deep Solve phase-loop or app-side declarative edge evaluation paths. Chat/Code Exec construct harnesses through `HarnessBuilder`.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, safe budget policies, and normalized model metadata discovery.
+
+- **WorkflowEngine needs an app-friendly cancellation handle**
+  - Expected: app code can start `WorkflowEngine::run()` and connect an external stop token without owning a cloneable engine or manually spawning a task around internal step abort state.
+  - Actual: `WorkflowEngine::cancel()` exists but the engine is not cloneable, so a route that awaits `run()` directly cannot also call `cancel()` from an external `CancellationToken` without changing ownership structure.
+  - Suggestion: expose `run_with_cancel(token)` or a lightweight cloneable `WorkflowHandle` returned by `start()`, so product routes can wire stop buttons consistently across ordinary harness turns and multi-step workflows.
 
 - **Budget control still needs a safer runtime API**
   - Product code no longer constructs `BudgetControlAdapter` directly for ordinary harness setup; it now carries only the session budget limit in `GovernanceConfig`.

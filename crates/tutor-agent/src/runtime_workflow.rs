@@ -6,6 +6,7 @@ use crate::error::{Result, TutorError};
 pub const DEEP_SOLVE_WORKFLOW_ID: &str = "tutor.deep_solve";
 pub const QUIZ_GENERATION_WORKFLOW_ID: &str = "tutor.quiz_generation";
 pub const MEMORY_WORKFLOW_ID: &str = "tutor.memory";
+pub const RESEARCH_WORKFLOW_ID: &str = "tutor.research";
 
 pub fn deep_solve_workflow() -> Workflow {
     Workflow {
@@ -186,6 +187,91 @@ pub fn validate_memory_workflow() -> Result<()> {
     })
 }
 
+pub fn research_workflow() -> Workflow {
+    Workflow {
+        entry_step: "prepare_research".into(),
+        steps: vec![
+            Step::executor(
+                "prepare_research",
+                "Prepare research request",
+                "tutor.research.prepare",
+                None,
+            ),
+            Step::llm(
+                "search_sources",
+                "Search for sources",
+                "Read the workflow Context. The `research_request` variable contains the confirmed user request. \
+                 Generate focused search queries, call web_search for external evidence, and then call submit_step_result with \
+                 {\"queries\":[\"...\"],\"source_candidates\":[{\"title\":\"...\",\"url\":\"...\",\"snippet\":\"...\"}],\"failures\":[\"...\"]}. \
+                 If search fails, submit the failure instead of inventing sources.",
+                vec!["web_search".into()],
+            ),
+            Step::llm(
+                "read_sources",
+                "Read selected sources",
+                "Read the search_sources step history. Select the most relevant source URLs, call web_fetch for important pages, \
+                 and then call submit_step_result with \
+                 {\"sources\":[{\"title\":\"...\",\"url\":\"...\",\"summary\":\"...\",\"used_for\":\"...\"}],\"failures\":[\"...\"]}. \
+                 Do not include sources that were not searched or fetched.",
+                vec!["web_fetch".into()],
+            ),
+            Step::llm(
+                "check_citations",
+                "Check citation readiness",
+                "Read the fetched source summaries and decide whether the report has enough evidence. \
+                 Call submit_step_result with {\"verdict\":\"pass\",\"issues\":[]} when sources are sufficient. \
+                 If evidence is weak or citations cannot be matched, call submit_step_result with \
+                 {\"verdict\":\"fail\",\"issues\":[\"...\"],\"repair\":\"search\"}.",
+                vec![],
+            ),
+            Step::llm(
+                "write_report",
+                "Write research report",
+                "Read the workflow Context and prior step history. Write the final Markdown report grounded only in searched/fetched sources. \
+                 The report must include Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, and Sources. \
+                 Cite factual claims with numbered source references that match the Sources section. \
+                 Call submit_step_result with {\"markdown\":\"# ...\",\"sources\":[{\"title\":\"...\",\"url\":\"...\"}]} when complete.",
+                vec![],
+            ),
+        ],
+        edges: vec![
+            Edge {
+                from: "prepare_research".into(),
+                to: "search_sources".into(),
+                condition: Some(prepared_condition()),
+            },
+            Edge {
+                from: "search_sources".into(),
+                to: "read_sources".into(),
+                condition: None,
+            },
+            Edge {
+                from: "read_sources".into(),
+                to: "check_citations".into(),
+                condition: None,
+            },
+            Edge {
+                from: "check_citations".into(),
+                to: "write_report".into(),
+                condition: Some(verdict_condition("pass")),
+            },
+            Edge {
+                from: "check_citations".into(),
+                to: "search_sources".into(),
+                condition: Some(repair_condition("search")),
+            },
+        ],
+    }
+}
+
+pub fn validate_research_workflow() -> Result<()> {
+    validate_workflow(&research_workflow()).map_err(|err| {
+        TutorError::Internal(format!(
+            "runtime workflow validation failed for {RESEARCH_WORKFLOW_ID}: {err}"
+        ))
+    })
+}
+
 fn route_condition(route: &str) -> EdgeCondition {
     EdgeCondition::Expr(ConditionExpr::Eq {
         pointer: "/route".into(),
@@ -204,6 +290,13 @@ fn action_condition(action: &str) -> EdgeCondition {
     EdgeCondition::Expr(ConditionExpr::Eq {
         pointer: "/action".into(),
         value: serde_json::json!(action),
+    })
+}
+
+fn repair_condition(repair: &str) -> EdgeCondition {
+    EdgeCondition::Expr(ConditionExpr::Eq {
+        pointer: "/repair".into(),
+        value: serde_json::json!(repair),
     })
 }
 
@@ -234,11 +327,17 @@ mod tests {
     }
 
     #[test]
+    fn research_workflow_is_valid_runtime_workflow() {
+        validate_research_workflow().unwrap();
+    }
+
+    #[test]
     fn workflows_use_runtime_evaluable_edge_conditions() {
         for workflow in [
             deep_solve_workflow(),
             quiz_generation_workflow(),
             memory_workflow(),
+            research_workflow(),
         ] {
             for edge in workflow.edges {
                 assert!(
@@ -301,5 +400,52 @@ mod tests {
                 value: serde_json::json!("repair"),
             })
         )));
+    }
+
+    #[test]
+    fn research_workflow_routes_on_citation_verifier_fields() {
+        let workflow = research_workflow();
+        let conditions = workflow
+            .edges
+            .iter()
+            .filter(|edge| edge.from == "check_citations")
+            .map(|edge| (&edge.to, edge.condition.as_ref().unwrap()))
+            .collect::<Vec<_>>();
+
+        assert!(conditions.contains(&(
+            &"write_report".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/verdict".into(),
+                value: serde_json::json!("pass"),
+            })
+        )));
+        assert!(conditions.contains(&(
+            &"search_sources".to_string(),
+            &EdgeCondition::Expr(ConditionExpr::Eq {
+                pointer: "/repair".into(),
+                value: serde_json::json!("search"),
+            })
+        )));
+    }
+
+    #[test]
+    fn research_workflow_scopes_web_tools_to_search_and_read_steps() {
+        let workflow = research_workflow();
+        let search_tools = workflow
+            .steps
+            .iter()
+            .find(|step| step.id() == "search_sources")
+            .unwrap()
+            .allowed_tools();
+        let read_tools = workflow
+            .steps
+            .iter()
+            .find(|step| step.id() == "read_sources")
+            .unwrap()
+            .allowed_tools();
+
+        assert!(search_tools.contains(&"web_search".to_string()));
+        assert!(!search_tools.contains(&"web_fetch".to_string()));
+        assert!(read_tools.contains(&"web_fetch".to_string()));
     }
 }

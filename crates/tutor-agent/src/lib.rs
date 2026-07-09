@@ -8,6 +8,7 @@ pub mod governance;
 pub mod llm_provider;
 pub mod memory;
 pub mod quiz;
+pub mod research;
 pub mod runtime_engine;
 pub mod runtime_harness;
 pub mod runtime_workflow;

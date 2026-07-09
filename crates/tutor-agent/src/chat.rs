@@ -67,6 +67,18 @@ pub async fn run_research_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
+    if let Some(request) = last_user_text(&messages)
+        && should_start_research_workflow(&request)
+    {
+        let run = crate::research::run_research_workflow_with_runtime(
+            router,
+            crate::research::ResearchWorkflowInput { request },
+            None,
+            None,
+        )
+        .await?;
+        return Ok(run.markdown);
+    }
     run_chat_inner(
         router,
         "research",
@@ -92,6 +104,18 @@ pub async fn run_research_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
+    if should_start_research_workflow(question) {
+        let run = crate::research::run_research_workflow_with_runtime(
+            router,
+            crate::research::ResearchWorkflowInput {
+                request: question.to_string(),
+            },
+            Some(session),
+            abort_token,
+        )
+        .await?;
+        return Ok(run.markdown);
+    }
     run_chat_inner(
         router,
         "research",
@@ -459,6 +483,16 @@ fn looks_like_research_report(text: &str) -> bool {
         && (normalized.contains("## key findings") || normalized.contains("## analysis"))
 }
 
+fn should_start_research_workflow(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("start the detailed research workflow")
+        || normalized.contains("begin the detailed research workflow")
+        || normalized.contains("run the detailed research workflow")
+        || normalized.contains("confirmed plan")
+            && normalized.contains("detailed research workflow")
+            && (normalized.contains("search") || normalized.contains("report"))
+}
+
 pub(crate) async fn emit_runtime_usage(
     harness: &AgentHarness,
     router: &CapabilityRouter,
@@ -552,6 +586,24 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
 
         let text = message.text_content();
         (!text.is_empty()).then_some(text)
+    })
+}
+
+fn last_user_text(messages: &[AgentMessage]) -> Option<String> {
+    messages.iter().rev().find_map(|message| {
+        let AgentMessage::User(message) = message else {
+            return None;
+        };
+        let text = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        (!text.trim().is_empty()).then_some(text)
     })
 }
 

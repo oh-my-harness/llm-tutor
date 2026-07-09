@@ -12,6 +12,7 @@ mod memory_store;
 mod notebook_store;
 mod quiz_store;
 mod quiz_tool;
+mod research_tool;
 mod routes;
 mod session;
 mod settings_store;

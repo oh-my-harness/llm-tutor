@@ -390,26 +390,26 @@ The report remains a Notebook research entry even after saving. A future book ch
   question instead of calling `web_search`.
 - [x] Add tests where an explicit "start research" or confirmed plan enters the
   detailed workflow path.
-- [ ] Move detailed workflow execution from the prompt-driven harness path into
+- [x] Move detailed workflow execution from the prompt-driven harness path into
   the runtime `WorkflowEngine`.
 
 ### Phase 7: Detailed Research Workflow
 
-- [ ] Model the detailed research run as a runtime workflow using the available
+- [x] Model the detailed research run as a runtime workflow using the available
   runtime workflow APIs, instead of relying on a single prompt-driven harness
   turn.
-- [ ] Define workflow steps for scope confirmation, search query generation,
+- [x] Define workflow steps for scope confirmation, search query generation,
   search, source selection, source reading, synthesis, citation checking, and
   report publishing.
-- [ ] Preserve runtime ownership of provider calls, tool orchestration, trace,
+- [x] Preserve runtime ownership of provider calls, tool orchestration, trace,
   compaction, and session history; keep product code limited to plan/report
   schemas, product persistence, and UI event mapping.
-- [ ] Add bounded repair behavior for insufficient sources, failed fetches, or
+- [x] Add bounded repair behavior for insufficient sources, failed fetches, or
   citation mismatches.
-- [ ] Ensure the completed report is persisted as a durable
+- [x] Ensure the completed report is persisted as a durable
   `AssistantMessageKind::FinalAnswer` and as a `NotebookEntry(type =
   research_report)` when saved.
-- [ ] Add non-real-LLM workflow tests for search/fetch/report metadata and
+- [x] Add non-real-LLM workflow tests for search/fetch/report metadata and
   citation verification.
 
 ### Phase 8: Report Quality and Persistence Hardening

@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use futures::future::BoxFuture;
 use llm_adapter::types::{ContentKind, StopReason, StreamEvent, Usage};
+use llm_harness_agent::{JsonlSessionRepo, Session, SessionRepo, session::CreateSessionOptions};
 use llm_harness_loop::{
     LlmError,
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
@@ -10,7 +11,7 @@ use llm_harness_loop::{
 use llm_harness_runtime::observability::audit::AuditSink;
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::ExecutionEnv;
+use llm_harness_types::{AgentMessage, AssistantMessageKind, ExecutionEnv};
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
 use tutor_agent::event_sink::EventSink;
@@ -468,9 +469,25 @@ async fn research_explicit_start_enters_search_path() {
     let sink = Arc::new(TraceRecorder::default());
     let router = make_router(
         vec![
-            MockResponse::tool_use("search-1", "web_search", r#"{"query":"agent research workflow","top_k":3}"#),
-            MockResponse::text(
-                "# Report\n\n## Summary\n\nSearched the topic.\n\n## Key Findings\n\n- Finding.\n\n## Sources\n\n[1] Search result",
+            MockResponse::tool_use(
+                "submit-search",
+                "submit_step_result",
+                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-read",
+                "submit_step_result",
+                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-check",
+                "submit_step_result",
+                r#"{"result":{"verdict":"pass","issues":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-report",
+                "submit_step_result",
+                r##"{"result":{"markdown":"# Report\n\n## Summary\n\nSearched the topic.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
             ),
         ],
         make_governance(None),
@@ -488,21 +505,82 @@ async fn research_explicit_start_enters_search_path() {
     assert!(answer.contains("Report"));
     let events = sink.events();
     assert!(
-        events
-            .iter()
-            .any(|(kind, data)| { kind == "tool_call" && data["tool"] == "web_search" }),
-        "explicit research start should call web_search: {events:?}"
+        events.iter().any(|(kind, data)| {
+            kind == "workflow_validated"
+                && data["capability"] == "research"
+                && data["workflow"] == "tutor.research"
+        }),
+        "explicit research start should enter runtime workflow: {events:?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|(kind, data)| { kind == "research_search" && data["capability"] == "research" }),
-        "explicit research start should emit research_search: {events:?}"
+        events.iter().any(|(kind, data)| {
+            kind == "research_stage_start"
+                && data["capability"] == "research"
+                && data["stage"] == "search"
+        }),
+        "explicit research start should emit search stage: {events:?}"
     );
     assert!(
         events
             .iter()
             .any(|(kind, _)| { kind == "research_report_done" }),
         "explicit research start should emit report done: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn research_workflow_persists_final_report_to_session() {
+    let dir = TempDir::new().unwrap();
+    let repo = JsonlSessionRepo::new(dir.path().join("sessions"));
+    let storage = repo.create(CreateSessionOptions::default()).await.unwrap();
+    let session = Session::new(storage.clone());
+    let inspect_session = Session::new(storage);
+    let router = make_router(
+        vec![
+            MockResponse::tool_use(
+                "submit-search",
+                "submit_step_result",
+                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-read",
+                "submit_step_result",
+                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-check",
+                "submit_step_result",
+                r#"{"result":{"verdict":"pass","issues":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-report",
+                "submit_step_result",
+                r##"{"result":{"markdown":"# Report\n\n## Summary\n\nPersisted report.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
+            ),
+        ],
+        make_governance(None),
+    )
+    .with_workflow_root(dir.path().join("workflow-sessions"));
+
+    let answer = router
+        .run_with_session(
+            Capability::Research,
+            session,
+            "Start the detailed research workflow for agent research workflow.",
+        )
+        .await
+        .unwrap();
+    assert!(answer.contains("Persisted report"));
+
+    let context = inspect_session.build_context().await.unwrap();
+    assert!(
+        context.messages.iter().any(|message| matches!(
+            message,
+            AgentMessage::Assistant(assistant)
+                if assistant.kind == AssistantMessageKind::FinalAnswer
+                    && assistant.text_content().contains("Persisted report")
+        )),
+        "research workflow report should be stored as FinalAnswer: {:?}",
+        context.messages
     );
 }
