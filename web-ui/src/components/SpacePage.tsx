@@ -138,6 +138,7 @@ export function SpacePage({
   const [quizSourceFilter, setQuizSourceFilter] = useState<QuizSourceFilter>('all')
   const [notebookEntries, setNotebookEntries] = useState<NotebookEntry[]>([])
   const [notebookFolders, setNotebookFolders] = useState<string[]>([])
+  const [expandedNotebookFolders, setExpandedNotebookFolders] = useState<Set<string>>(() => loadExpandedNotebookFolders())
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null)
   const [activeNotebookDetail, setActiveNotebookDetail] = useState<NotebookEntry | null>(null)
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([])
@@ -150,6 +151,7 @@ export function SpacePage({
   const [status, setStatus] = useState('Ready')
   const [loading, setLoading] = useState(false)
   const [spaceNavCollapsed, setSpaceNavCollapsed] = useState(false)
+  const knownNotebookFolderPathsRef = useRef<Set<string> | null>(null)
   const visibleTabs = mode === 'notebook' ? [notebookTab] : spaceTabs
 
   const filteredQuizzes = useMemo(
@@ -162,6 +164,8 @@ export function SpacePage({
     activeNotebookDetail?.id === activeNotebookId
       ? activeNotebookDetail
       : notebookEntries.find((entry) => entry.id === activeNotebookId) ?? null
+  const notebookTree = useMemo(() => buildNotebookTree(notebookEntries, notebookFolders), [notebookEntries, notebookFolders])
+  const notebookFolderPaths = useMemo(() => collectNotebookFolderPaths(notebookTree), [notebookTree])
   const profile = useMemo(() => buildProfile(quizzes), [quizzes])
 
   useEffect(() => {
@@ -270,6 +274,29 @@ export function SpacePage({
   }, [refreshNotebook, refreshQuizzes, refreshMemory])
 
   useEffect(() => {
+    if (notebookFolderPaths.length === 0 && !knownNotebookFolderPathsRef.current) return
+    const currentPaths = new Set(notebookFolderPaths)
+    const knownPaths = knownNotebookFolderPathsRef.current
+    setExpandedNotebookFolders((current) => {
+      const next = new Set<string>()
+      for (const folderPath of current) {
+        if (currentPaths.has(folderPath)) next.add(folderPath)
+      }
+      if (knownPaths) {
+        for (const folderPath of currentPaths) {
+          if (!knownPaths.has(folderPath)) next.add(folderPath)
+        }
+      }
+      return setsEqual(current, next) ? current : next
+    })
+    knownNotebookFolderPathsRef.current = currentPaths
+  }, [notebookFolderPaths])
+
+  useEffect(() => {
+    saveExpandedNotebookFolders(expandedNotebookFolders)
+  }, [expandedNotebookFolders])
+
+  useEffect(() => {
     setActiveTab((current) => {
       if (mode === 'notebook') return 'notebook'
       return current === 'notebook' ? 'quiz_bank' : current
@@ -327,6 +354,29 @@ export function SpacePage({
     else void refreshMemory()
   }
 
+  const toggleNotebookFolder = useCallback((folderPath: string) => {
+    setExpandedNotebookFolders((current) => {
+      const next = new Set(current)
+      if (next.has(folderPath)) next.delete(folderPath)
+      else next.add(folderPath)
+      return next
+    })
+  }, [])
+
+  const expandNotebookFolderPath = useCallback((folderPath?: string) => {
+    if (!folderPath) return
+    const normalized = folderPath.replace(/\/+$/, '')
+    if (!normalized) return
+    setExpandedNotebookFolders((current) => {
+      const next = new Set(current)
+      const segments = normalized.split('/').filter(Boolean)
+      for (let index = 0; index < segments.length; index += 1) {
+        next.add(segments.slice(0, index + 1).join('/'))
+      }
+      return next
+    })
+  }, [])
+
   const createNotebookEntry = async (folderPath?: string) => {
     const title = 'Untitled note'
     const markdown = '# Untitled note\n\n'
@@ -347,6 +397,7 @@ export function SpacePage({
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const entry = data.entry as NotebookEntry
+      expandNotebookFolderPath(folderPath)
       setNotebookEntries((items) => [entry, ...items.filter((item) => item.id !== entry.id)])
       setActiveNotebookId(entry.id)
       setStatus('Notebook entry created')
@@ -372,6 +423,7 @@ export function SpacePage({
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+      expandNotebookFolderPath((data.folder as NotebookFolder | undefined)?.path ?? path)
       setStatus(`Created folder: ${(data.folder as NotebookFolder | undefined)?.path ?? path}`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
@@ -545,6 +597,7 @@ export function SpacePage({
         <NotebookTab
           entries={notebookEntries}
           folders={notebookFolders}
+          expandedFolders={expandedNotebookFolders}
           activeEntry={activeNotebookEntry}
           status={status}
           loading={loading}
@@ -552,6 +605,7 @@ export function SpacePage({
           editTitle={editTitle}
           editMarkdown={editMarkdown}
           onSelectEntry={setActiveNotebookId}
+          onToggleFolder={toggleNotebookFolder}
           onCreateEntry={(folderPath) => void createNotebookEntry(folderPath)}
           onCreateFolder={(parentPath) => void createNotebookFolder(parentPath)}
           onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
@@ -646,6 +700,7 @@ export function SpacePage({
           <NotebookTab
             entries={notebookEntries}
             folders={notebookFolders}
+            expandedFolders={expandedNotebookFolders}
             activeEntry={activeNotebookEntry}
             status={status}
             loading={loading}
@@ -653,6 +708,7 @@ export function SpacePage({
             editTitle={editTitle}
             editMarkdown={editMarkdown}
             onSelectEntry={setActiveNotebookId}
+            onToggleFolder={toggleNotebookFolder}
             onCreateEntry={(folderPath) => void createNotebookEntry(folderPath)}
             onCreateFolder={(parentPath) => void createNotebookFolder(parentPath)}
             onDeleteEntry={(entry) => void deleteNotebookEntry(entry)}
@@ -703,6 +759,7 @@ export function SpacePage({
 function NotebookTab({
   entries,
   folders,
+  expandedFolders,
   activeEntry,
   status,
   loading,
@@ -710,6 +767,7 @@ function NotebookTab({
   editTitle,
   editMarkdown,
   onSelectEntry,
+  onToggleFolder,
   onCreateEntry,
   onCreateFolder,
   onDeleteEntry,
@@ -723,6 +781,7 @@ function NotebookTab({
 }: {
   entries: NotebookEntry[]
   folders: string[]
+  expandedFolders: Set<string>
   activeEntry: NotebookEntry | null
   status: string
   loading: boolean
@@ -730,6 +789,7 @@ function NotebookTab({
   editTitle: string
   editMarkdown: string
   onSelectEntry: (id: string) => void
+  onToggleFolder: (folderPath: string) => void
   onCreateEntry: (folderPath?: string) => void
   onCreateFolder: (parentPath?: string) => void
   onDeleteEntry: (entry: NotebookEntry) => void
@@ -744,30 +804,6 @@ function NotebookTab({
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const [relationsCollapsed, setRelationsCollapsed] = useState(true)
   const notebookTree = useMemo(() => buildNotebookTree(entries, folders), [entries, folders])
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
-  const folderPaths = useMemo(() => collectNotebookFolderPaths(notebookTree), [notebookTree])
-  const knownFolderPathsRef = useRef<Set<string>>(new Set())
-
-  useEffect(() => {
-    setExpandedFolders((current) => {
-      const next = new Set(current)
-      const known = knownFolderPathsRef.current
-      for (const folderPath of folderPaths) {
-        if (known.size === 0 || !known.has(folderPath)) next.add(folderPath)
-      }
-      knownFolderPathsRef.current = new Set(folderPaths)
-      return next
-    })
-  }, [folderPaths])
-
-  const toggleFolder = useCallback((folderPath: string) => {
-    setExpandedFolders((current) => {
-      const next = new Set(current)
-      if (next.has(folderPath)) next.delete(folderPath)
-      else next.add(folderPath)
-      return next
-    })
-  }, [])
 
   const wikiLinkResolver = useCallback((target: string): SourceReference | undefined => {
     if (!activeEntry) return undefined
@@ -833,7 +869,7 @@ function NotebookTab({
               nodes={notebookTree}
               activeEntryId={activeEntry?.id ?? null}
               expandedFolders={expandedFolders}
-              onToggleFolder={toggleFolder}
+              onToggleFolder={onToggleFolder}
               onSelectEntry={onSelectEntry}
               onCreateEntry={onCreateEntry}
               onCreateFolder={onCreateFolder}
@@ -1118,6 +1154,7 @@ type FlatNotebookTreeRow = {
 
 const NOTEBOOK_TREE_ROW_HEIGHT = 32
 const NOTEBOOK_TREE_OVERSCAN_ROWS = 12
+const NOTEBOOK_EXPANDED_FOLDERS_KEY = 'llm-tutor:notebook-expanded-folders'
 
 function NotebookFileTree({
   nodes,
@@ -1921,6 +1958,34 @@ function flattenVisibleNotebookTree(
   }
   visit(nodes, 0)
   return rows
+}
+
+function loadExpandedNotebookFolders() {
+  try {
+    const raw = window.localStorage.getItem(NOTEBOOK_EXPANDED_FOLDERS_KEY)
+    if (!raw) return new Set<string>()
+    const values = JSON.parse(raw)
+    if (!Array.isArray(values)) return new Set<string>()
+    return new Set(values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function saveExpandedNotebookFolders(folders: Set<string>) {
+  try {
+    window.localStorage.setItem(NOTEBOOK_EXPANDED_FOLDERS_KEY, JSON.stringify([...folders].sort()))
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+}
+
+function setsEqual(left: Set<string>, right: Set<string>) {
+  if (left.size !== right.size) return false
+  for (const item of left) {
+    if (!right.has(item)) return false
+  }
+  return true
 }
 
 function notebookEntryPathSegments(entry: NotebookEntry) {
