@@ -447,6 +447,44 @@ Detailed right-click menu items and per-surface actions are intentionally out of
 scope for this note and should be specified during the desktop polish design
 slice.
 
+### Phase 6: Desktop App Feel Polish
+
+Status: planned.
+
+Tasks:
+
+- [ ] Audit browser-default behaviors that are visible in the desktop app,
+      including top-level scrolling, browser context menus, drag/drop defaults,
+      in-window link navigation, focus outlines, and text/image selection where
+      they conflict with app behavior.
+- [ ] Lock the top-level app shell so the window itself does not behave like a
+      scrolling web page.
+- [ ] Make scrolling pane-local for Chat history, Notebook tree, editors,
+      Knowledge lists, Research reports, Trace, Settings, and other work areas.
+- [ ] Add an app-owned context menu framework that can replace the browser
+      context menu in desktop mode.
+- [ ] Define high-level context menu capability areas for Notebook, Chat,
+      Knowledge, Research, Books, Settings, and source references without
+      finalizing individual menu items yet.
+- [ ] Implement the first context menu slice for the highest-value surface after
+      detailed design chooses the menu items.
+- [ ] Route external web links through the system browser in desktop mode.
+- [ ] Use native desktop affordances for file/folder selection and revealing
+      local files where product flows already need those actions.
+- [ ] Add or plan app-level shortcuts and command palette behavior for common
+      desktop workflows.
+- [ ] Add desktop QA checks for browser-default interaction regressions, pane
+      scrolling behavior, context menu ownership, and external link handling.
+
+Acceptance:
+
+- The app no longer exposes obvious browser context menus in normal desktop
+  workflows.
+- The top-level window stays fixed while the active work pane owns scrolling.
+- External links and local file/folder actions use desktop-appropriate behavior.
+- Each major surface has a documented context menu capability area, even if not
+  every concrete menu item is implemented in the first polish slice.
+
 ## 13. Done Criteria for v0.1 Desktop Release
 
 - A Windows desktop artifact exists.
@@ -471,5 +509,5 @@ slice.
    once repository secrets and private dependency access are configured.
 5. Decide whether the first shared artifact is a portable build, NSIS installer,
    MSI, or a combination.
-6. Start a separate desktop polish design slice for native-app feel, context
-   menu capability areas, pane-local scrolling, and native file/link behavior.
+6. Execute Phase 6 for native-app feel, context menu capability areas,
+   pane-local scrolling, and native file/link behavior.
