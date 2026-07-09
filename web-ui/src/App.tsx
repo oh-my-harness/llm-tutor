@@ -1172,8 +1172,9 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
   const isWebToolResult =
     payload.kind === 'tool_result' && (payload.tool === 'web_search' || payload.tool === 'web_fetch')
   const isRagCitationEvent = payload.kind === 'rag_citations'
-  if (!isRagToolResult && !isWebToolResult && !isRagCitationEvent) return []
-  const details = payload.details
+  const isResearchReportDone = payload.kind === 'research_report_done'
+  if (!isRagToolResult && !isWebToolResult && !isRagCitationEvent && !isResearchReportDone) return []
+  const details = isResearchReportDone ? payload : payload.details
   if (!details || typeof details !== 'object') return []
   const sources = (details as { sources?: unknown }).sources
   if (!Array.isArray(sources)) return []
@@ -1181,13 +1182,27 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
     .map((source): Citation | null => {
       if (!source || typeof source !== 'object') return null
       const item = source as Record<string, unknown>
+      const url = typeof item.url === 'string' ? item.url : undefined
+      const title = typeof item.title === 'string' ? item.title : undefined
+      const sourceName =
+        typeof item.source === 'string' && item.source.trim()
+          ? item.source
+          : title || url || 'source'
+      const text =
+        typeof item.text === 'string' && item.text.trim()
+          ? item.text
+          : typeof item.summary === 'string' && item.summary.trim()
+            ? item.summary
+            : typeof item.snippet === 'string' && item.snippet.trim()
+              ? item.snippet
+              : url || sourceName
       return {
         index: typeof item.index === 'number' ? item.index : 0,
-        source: typeof item.source === 'string' ? item.source : 'source',
-        text: typeof item.text === 'string' ? item.text : '',
-        kind: item.kind === 'web' ? 'web' : 'rag',
-        title: typeof item.title === 'string' ? item.title : undefined,
-        url: typeof item.url === 'string' ? item.url : undefined,
+        source: sourceName,
+        text,
+        kind: item.kind === 'web' || url ? 'web' : 'rag',
+        title,
+        url,
         score: typeof item.score === 'number' ? item.score : null,
         kb: typeof item.kb === 'string' ? item.kb : undefined,
         documentId: typeof item.document_id === 'string' ? item.document_id : undefined,
@@ -1196,7 +1211,7 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
         page: typeof item.page === 'string' || typeof item.page === 'number' ? item.page : undefined,
       }
     })
-    .filter((source): source is Citation => Boolean(source && source.text))
+    .filter((source): source is Citation => Boolean(source && (source.text || source.url)))
 }
 
 function mergeCitations(existing: Citation[], incoming: Citation[]): Citation[] {

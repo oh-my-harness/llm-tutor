@@ -414,7 +414,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 8: Report Quality and Persistence Hardening
 
-- [ ] Ensure reloading the session preserves the report, source list, citations,
+- [x] Ensure reloading the session preserves the report, source list, citations,
   and research-plan metadata.
 - [ ] Improve source quality scoring.
 - [ ] Add report regeneration/versioning.
