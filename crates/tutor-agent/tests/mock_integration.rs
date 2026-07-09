@@ -584,3 +584,56 @@ async fn research_workflow_persists_final_report_to_session() {
         context.messages
     );
 }
+
+#[tokio::test]
+async fn research_workflow_fails_clearly_after_citation_repair_attempt() {
+    let router = make_router(
+        vec![
+            MockResponse::tool_use(
+                "submit-search-1",
+                "submit_step_result",
+                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[],"failures":["search unavailable"]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-read-1",
+                "submit_step_result",
+                r#"{"result":{"sources":[],"failures":["no sources to fetch"]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-check-1",
+                "submit_step_result",
+                r#"{"result":{"verdict":"fail","issues":["no verified sources"]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-search-2",
+                "submit_step_result",
+                r#"{"result":{"queries":["agent research workflow retry"],"source_candidates":[],"failures":["search still unavailable"]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-read-2",
+                "submit_step_result",
+                r#"{"result":{"sources":[],"failures":["fetch still unavailable"]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-check-2",
+                "submit_step_result",
+                r#"{"result":{"verdict":"fail","issues":["citations still unverified"]}}"#,
+            ),
+        ],
+        make_governance(None),
+    );
+
+    let err = router
+        .run(
+            Capability::Research,
+            "Start the detailed research workflow for agent research workflow.",
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("research citation check failed after repair attempt"),
+        "research workflow failure should explain the failed repair attempt: {err}"
+    );
+}

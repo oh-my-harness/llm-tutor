@@ -423,7 +423,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 - [x] Support Chat Quiz follow-up prompts that use a saved report as source material.
 - [x] Add PDF/webpage source ingestion into knowledge base.
-- [ ] Add longer-running deep research with parallel sub tasks.
+- [x] Add longer-running deep research with parallel sub tasks.
 
 ## 11. Acceptance Criteria
 

@@ -1,5 +1,6 @@
 use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, Step, Workflow};
 use llm_harness_runtime::workflow::plan::validate_workflow;
+use llm_harness_types::SYNC_SPAWN_TOOL_NAME;
 
 use crate::error::{Result, TutorError};
 
@@ -201,10 +202,12 @@ pub fn research_workflow() -> Workflow {
                 "search_sources",
                 "Search for sources",
                 "Read the workflow Context. The `research_request` variable contains the confirmed user request. \
-                 Generate focused search queries, call web_search for external evidence, and then call submit_step_result with \
+                 Generate focused search queries. For longer-running deep research or requests that explicitly ask for parallel investigation, \
+                 call sync_spawn_agent for independent subtopics before consolidating the search plan. \
+                 Call web_search for external evidence, and then call submit_step_result with \
                  {\"queries\":[\"...\"],\"source_candidates\":[{\"title\":\"...\",\"url\":\"...\",\"snippet\":\"...\"}],\"failures\":[\"...\"]}. \
                  If search fails, submit the failure instead of inventing sources.",
-                vec!["web_search".into()],
+                vec!["web_search".into(), SYNC_SPAWN_TOOL_NAME.into()],
             ),
             Step::llm(
                 "read_sources",
@@ -445,7 +448,9 @@ mod tests {
             .allowed_tools();
 
         assert!(search_tools.contains(&"web_search".to_string()));
+        assert!(search_tools.contains(&SYNC_SPAWN_TOOL_NAME.to_string()));
         assert!(!search_tools.contains(&"web_fetch".to_string()));
         assert!(read_tools.contains(&"web_fetch".to_string()));
+        assert!(!read_tools.contains(&SYNC_SPAWN_TOOL_NAME.to_string()));
     }
 }
