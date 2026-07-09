@@ -30,6 +30,12 @@ pub struct ResearchWorkflowInput {
 pub struct ResearchWorkflowSource {
     pub title: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_label: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +112,8 @@ pub async fn run_research_workflow_with_runtime(
         .find(|record| record.step_id == "write_report")
         .and_then(|record| record.result)
         .ok_or_else(|| TutorError::Internal("research workflow did not write report".into()))?;
-    let payload = report_payload(report)?;
+    let mut payload = report_payload(report)?;
+    score_research_sources(&mut payload.sources);
     if let Some(session) = session.as_ref() {
         session
             .append_message(assistant_message(&payload.markdown))
@@ -278,6 +285,61 @@ fn report_payload(result: StepResult) -> Result<ResearchReportPayload> {
     })
 }
 
+fn score_research_sources(sources: &mut [ResearchWorkflowSource]) {
+    for source in sources {
+        let score = source_quality_score(source);
+        source.score = Some(score);
+        source.quality_label = Some(source_quality_label(score).into());
+    }
+}
+
+fn source_quality_score(source: &ResearchWorkflowSource) -> f32 {
+    let mut score: f32 = 0.25;
+    let url = source.url.trim().to_ascii_lowercase();
+    let title = source.title.trim();
+    if url.starts_with("https://") {
+        score += 0.25;
+    } else if url.starts_with("http://") {
+        score += 0.12;
+    }
+    if title.len() >= 8 {
+        score += 0.15;
+    }
+    if source
+        .summary
+        .as_ref()
+        .is_some_and(|value| value.len() >= 40)
+    {
+        score += 0.15;
+    }
+    if source_domain(&url).is_some_and(|domain| {
+        domain.contains('.') && !domain.ends_with(".test") && !domain.ends_with(".invalid")
+    }) {
+        score += 0.15;
+    }
+    score.clamp(0.0, 0.95)
+}
+
+fn source_domain(url: &str) -> Option<&str> {
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    without_scheme
+        .split('/')
+        .next()
+        .filter(|value| !value.is_empty())
+}
+
+fn source_quality_label(score: f32) -> &'static str {
+    if score >= 0.75 {
+        "strong"
+    } else if score >= 0.5 {
+        "usable"
+    } else {
+        "weak"
+    }
+}
+
 fn workflow_step_result(output: String, structured: serde_json::Value) -> StepResult {
     StepResult {
         output,
@@ -420,4 +482,27 @@ async fn emit_workflow_runtime_usage(sink: &Option<SharedEventSink>, cost: &Cost
         }),
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scores_research_sources_with_quality_metadata() {
+        let mut sources = vec![ResearchWorkflowSource {
+            title: "Runtime workflow documentation".into(),
+            url: "https://docs.example.com/workflow".into(),
+            summary: Some(
+                "A reasonably detailed source summary about runtime workflow behavior.".into(),
+            ),
+            score: None,
+            quality_label: None,
+        }];
+
+        score_research_sources(&mut sources);
+
+        assert!(sources[0].score.is_some_and(|score| score >= 0.75));
+        assert_eq!(sources[0].quality_label.as_deref(), Some("strong"));
+    }
 }
