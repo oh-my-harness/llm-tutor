@@ -415,7 +415,7 @@ async fn run_chat_inner(
     )
     .await;
     emit_runtime_usage(&harness, router, capability).await;
-    if capability == "research" {
+    if capability == "research" && looks_like_research_report(&last_text) {
         emit_trace(
             &router.event_sink,
             "research_report_done",
@@ -450,6 +450,13 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
 fn should_emit_text_delta(capability: &str) -> bool {
     let _ = capability;
     true
+}
+
+fn looks_like_research_report(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("## summary")
+        && normalized.contains("## sources")
+        && (normalized.contains("## key findings") || normalized.contains("## analysis"))
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -590,7 +597,7 @@ fn research_system_prompt() -> String {
      (8) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
-     The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
+     When the Detailed Research Workflow completes, the report must be Markdown with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
      Keep workflow progress brief; the final report is the main deliverable."
         .into()
@@ -626,8 +633,8 @@ fn quiz_system_prompt() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_system_prompt, final_answer_mode_for_capability, organize_system_prompt,
-        quiz_system_prompt, research_system_prompt, should_emit_text_delta,
+        chat_system_prompt, final_answer_mode_for_capability, looks_like_research_report,
+        organize_system_prompt, quiz_system_prompt, research_system_prompt, should_emit_text_delta,
     };
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
@@ -690,6 +697,16 @@ mod tests {
     fn research_chat_emits_text_deltas_before_workflow() {
         assert!(should_emit_text_delta("research"));
         assert!(should_emit_text_delta("chat"));
+    }
+
+    #[test]
+    fn research_report_detection_requires_report_sections() {
+        assert!(!looks_like_research_report(
+            "Sure. What scope and output format should I use?"
+        ));
+        assert!(looks_like_research_report(
+            "# Topic\n\n## Summary\n\nBrief.\n\n## Key Findings\n\n- One.\n\n## Sources\n\n[1] Source"
+        ));
     }
 
     #[test]

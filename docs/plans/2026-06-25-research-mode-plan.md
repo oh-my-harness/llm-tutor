@@ -377,24 +377,27 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 6: Research Chat Before Workflow
 
-- [ ] Split Research behavior into conversational planning and detailed workflow
+- [x] Split Research behavior into conversational planning and detailed workflow
   execution.
-- [ ] Update the Research prompt so the agent does not automatically search or
+- [x] Update the Research prompt so the agent does not automatically search or
   write a report when the user's goal is underspecified.
-- [ ] Add a structured research-plan proposal surface or tool result that
+- [x] Add a structured research-plan proposal surface or tool result that
   captures topic, scope, source preferences, output format, depth, time range,
   Notebook/Knowledge Base usage, and estimated workflow steps.
-- [ ] Add UI affordance for confirming or revising the proposed research plan.
-- [ ] Keep normal streaming chat behavior during clarification and plan proposal.
-- [ ] Add tests where ambiguous Research requests produce a clarification
+- [x] Add UI affordance for confirming or revising the proposed research plan.
+- [x] Keep normal streaming chat behavior during clarification and plan proposal.
+- [x] Add tests where ambiguous Research requests produce a clarification
   question instead of calling `web_search`.
-- [ ] Add tests where an explicit "start research" or confirmed plan enters the
+- [x] Add tests where an explicit "start research" or confirmed plan enters the
   detailed workflow path.
+- [ ] Move detailed workflow execution from the prompt-driven harness path into
+  the runtime `WorkflowEngine`.
 
 ### Phase 7: Detailed Research Workflow
 
-- [ ] Model the detailed research run as a runtime workflow when runtime APIs are
-  sufficient, instead of relying only on a single prompt-driven harness turn.
+- [ ] Model the detailed research run as a runtime workflow using the available
+  runtime workflow APIs, instead of relying on a single prompt-driven harness
+  turn.
 - [ ] Define workflow steps for scope confirmation, search query generation,
   search, source selection, source reading, synthesis, citation checking, and
   report publishing.
@@ -411,10 +414,6 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 8: Report Quality and Persistence Hardening
 
-- [ ] Add `ResearchReport` UI message component.
-- [ ] Parse/attach report sources from trace or structured metadata.
-- [ ] Add a dedicated source list attached to the report metadata.
-- [ ] Add source citation display beyond generic message citations.
 - [ ] Ensure reloading the session preserves the report, source list, citations,
   and research-plan metadata.
 - [ ] Improve source quality scoring.

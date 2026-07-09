@@ -395,7 +395,7 @@ async fn research_emits_research_trace_events() {
     let sink = Arc::new(TraceRecorder::default());
     let router = make_router(
         vec![MockResponse::text(
-            "# Report\n\n## Sources\n\n[1] Mock source",
+            "# Report\n\n## Summary\n\nShort summary.\n\n## Key Findings\n\n- Finding.\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock source",
         )],
         make_governance(None),
     )
@@ -419,5 +419,90 @@ async fn research_emits_research_trace_events() {
             kind == "research_report_done" && data["capability"] == "research"
         }),
         "missing research report event: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn research_clarification_uses_chat_fallback_without_report_event() {
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![MockResponse::text(
+            "Sure. What scope, time range, and output format should I use?",
+        )],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone());
+
+    let answer = router
+        .run(
+            Capability::Research,
+            "hi, can you help me research something?",
+        )
+        .await
+        .unwrap();
+
+    assert!(answer.contains("scope"));
+    let events = sink.events();
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "final_answer" && data["capability"] == "research" }),
+        "missing research final answer trace: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|(kind, _)| { kind == "research_report_done" }),
+        "clarification should not be reported as a research report: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|(kind, data)| { kind == "tool_call" && data["tool"] == "web_search" }),
+        "clarification should not call web_search: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn research_explicit_start_enters_search_path() {
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![
+            MockResponse::tool_use("search-1", "web_search", r#"{"query":"agent research workflow","top_k":3}"#),
+            MockResponse::text(
+                "# Report\n\n## Summary\n\nSearched the topic.\n\n## Key Findings\n\n- Finding.\n\n## Sources\n\n[1] Search result",
+            ),
+        ],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone());
+
+    let answer = router
+        .run(
+            Capability::Research,
+            "Start the detailed research workflow for agent research workflow.",
+        )
+        .await
+        .unwrap();
+
+    assert!(answer.contains("Report"));
+    let events = sink.events();
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "tool_call" && data["tool"] == "web_search" }),
+        "explicit research start should call web_search: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, data)| { kind == "research_search" && data["capability"] == "research" }),
+        "explicit research start should emit research_search: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|(kind, _)| { kind == "research_report_done" }),
+        "explicit research start should emit report done: {events:?}"
     );
 }

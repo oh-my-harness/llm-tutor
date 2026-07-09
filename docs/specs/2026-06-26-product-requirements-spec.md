@@ -255,14 +255,14 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-314: Research trace events shall include planning, search, read, and report completion.
 - REQ-315: Research mode shall clearly state when search or fetch failed.
 - REQ-316: Research mode shall not cite sources that were not actually searched or fetched.
-- REQ-317: Research reports shall be saved as `NotebookEntry` records with `type = research_report`. Status: planned.
-- REQ-318: Research reports shall restore with structured metadata from Notebook entry data. Status: planned.
-- REQ-319: The UI shall provide a dedicated ResearchReport component. Status: planned.
-- REQ-320: The UI shall show a dedicated source list under each Research report. Status: planned.
+- REQ-317: Research reports shall be saved as `NotebookEntry` records with `type = research_report`. Status: implemented.
+- REQ-318: Research reports shall restore with structured metadata from Notebook entry data. Status: partially implemented; session reload restores report-like assistant messages and attached source metadata, while broader report/version restore hardening remains planned.
+- REQ-319: The UI shall provide a dedicated ResearchReport component. Status: implemented.
+- REQ-320: The UI shall show a dedicated source list under each Research report. Status: implemented.
 - REQ-321: Research reports shall support regeneration/versioning. Status: planned.
 - REQ-322: Research shall support longer-running multi-step/parallel deep research. Status: planned.
-- REQ-323: Research mode shall preserve normal conversational interaction for clarifying research goals, scope, source preferences, output format, depth, time range, and optional Notebook or Knowledge Base context before starting detailed research. Status: planned.
-- REQ-324: Research mode shall provide a detailed research workflow that can be explicitly started after the user's need is clear. The workflow shall cover search, source reading, source selection, synthesis, citation checking, and report generation; it shall not be forced for every Research message. Status: planned.
+- REQ-323: Research mode shall preserve normal conversational interaction for clarifying research goals, scope, source preferences, output format, depth, time range, and optional Notebook or Knowledge Base context before starting detailed research. Status: partially implemented; prompt policy, plain-text fallback, streaming, plan proposal, and UI confirmation entry are in place, with behavioral tests still being hardened.
+- REQ-324: Research mode shall provide a detailed research workflow that can be explicitly started after the user's need is clear. The workflow shall cover search, source reading, source selection, synthesis, citation checking, and report generation; it shall not be forced for every Research message. Status: partially implemented; current execution still uses the prompt-driven harness path and should move to runtime `WorkflowEngine`.
 
 ## 15. Books and Learning Records
 
