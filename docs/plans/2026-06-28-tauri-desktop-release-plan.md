@@ -1,8 +1,8 @@
 # Tauri Desktop Release Plan
 
-> Status: active planning | Date: 2026-06-28 | Scope: build the first usable
-> desktop release of `llm-tutor` with Tauri, bundled React UI, and a managed
-> `tutor-web` backend sidecar.
+> Status: implementation mostly complete; manual desktop QA pending | Date:
+> 2026-06-28 | Scope: build the first usable desktop release of `llm-tutor`
+> with Tauri, bundled React UI, and a managed `tutor-web` backend sidecar.
 
 ## 1. Goal
 
@@ -85,18 +85,18 @@ Desktop release should use the OS app data directory, for example on Windows:
 %APPDATA%\llm-tutor
 ```
 
-The sidecar should receive this directory through either:
+The backend supports receiving this directory through either:
 
 - environment variable: `LLM_TUTOR_HOME`,
 - or CLI argument: `--data-dir <path>`.
 
-Preferred v0.1 implementation:
+Current v0.1 implementation:
 
 ```text
 Tauri app starts
   -> resolve app_data_dir()
   -> create llm-tutor data directory if missing
-  -> spawn tutor-web with LLM_TUTOR_HOME=<app data dir>
+  -> spawn tutor-web with --data-dir <app data dir>
 ```
 
 ## 5. Port Strategy
@@ -109,7 +109,7 @@ Use:
 127.0.0.1:<dynamic port>
 ```
 
-Recommended v0.1 implementation:
+Current v0.1 implementation:
 
 1. Tauri finds a free TCP port.
 2. Tauri starts `tutor-web` with `--host 127.0.0.1 --port <port>`.
@@ -117,13 +117,14 @@ Recommended v0.1 implementation:
 4. Frontend asks Tauri for the backend URL.
 5. Frontend builds REST and WebSocket URLs from that base URL.
 
-Fallback if dynamic port is too slow to implement:
+Fallback design if dynamic port ever regresses:
 
 - use fixed `127.0.0.1:8080`,
 - detect conflict,
 - show a clear startup error.
 
-Dynamic port is preferred for the first real release.
+Dynamic port selection is implemented for both desktop development and release
+startup.
 
 ## 6. Frontend API Adaptation
 
@@ -134,24 +135,30 @@ The current web UI relies on Vite proxy in development:
 /ws  -> ws://localhost:8080
 ```
 
-Desktop mode has no Vite proxy, so frontend code should use a small API client:
+Desktop mode has no Vite proxy. The frontend now initializes a desktop API
+bridge that asks Tauri for the backend base URL and rewrites `/api` fetch/XHR
+calls to the sidecar. Code that builds explicit URLs should continue to use the
+shared helpers:
 
 ```text
-apiFetch("/api/sessions")
+fetch(apiUrl("/api/sessions"))
 apiUrl("/api/knowledge-bases")
 wsUrl("/ws/session/<id>")
 ```
 
-Behavior:
+Current behavior:
 
 - Browser/dev mode: keep relative URLs.
 - Tauri/desktop mode: use backend URL returned by Tauri command.
+- WebSocket URLs are built with `wsUrl(...)` from the same backend URL.
+- Existing component-level `fetch("/api/...")` calls are patched in desktop
+  mode, but new shared code should still prefer the API helpers.
 
 Do not scatter `http://127.0.0.1:<port>` construction across components.
 
 ## 7. Backend Changes
 
-`tutor-web` should support runtime configuration:
+`tutor-web` supports runtime configuration:
 
 ```text
 tutor-web --host 127.0.0.1 --port 43127 --data-dir <path>
@@ -163,13 +170,15 @@ If CLI arguments are not provided:
 - port defaults to `8080`,
 - data dir defaults to current existing behavior.
 
-Required backend tasks:
+Backend tasks:
 
-- add host/port/data-dir config parsing,
-- route all product stores through the configured data root,
-- ensure LanceDB/RAG root also lives under the configured data root,
-- ensure logs never print API keys,
-- return clear startup errors.
+- [x] add host/port/data-dir config parsing,
+- [x] support `LLM_TUTOR_HOME` as a data-root fallback,
+- [x] route product stores through the configured data root,
+- [x] ensure LanceDB/RAG root also lives under the configured data root,
+- [x] add backend Settings Store at `<data-dir>/settings.json`,
+- [x] avoid logging API keys in normal settings and startup flows,
+- [x] return clear startup errors from CLI argument parsing and bind failures.
 
 ## 8. Tauri App Structure
 
@@ -179,7 +188,10 @@ Add:
 src-tauri/
   Cargo.toml
   tauri.conf.json
+  tauri.release.conf.json
   src/main.rs
+  capabilities/
+  binaries/
   icons/
 ```
 
@@ -190,12 +202,13 @@ Tauri responsibilities:
 - spawn `tutor-web` sidecar,
 - stop sidecar on app exit,
 - expose `get_backend_url` command,
-- expose `open_data_dir` command later,
+- expose `get_data_dir` command,
+- expose `open_data_dir` command,
 - expose backend health state later.
 
 ## 9. Build and Packaging
 
-Recommended commands:
+Low-level commands:
 
 ```powershell
 # build frontend
@@ -206,23 +219,23 @@ cd ..
 # build backend sidecar
 cargo build --release -p tutor-web
 
-# build desktop bundle
-cargo tauri build
+# build desktop bundle with release sidecar config
+cargo tauri build --config src-tauri/tauri.release.conf.json
 ```
 
-Add a single release script:
+The primary release script is:
 
 ```text
 scripts/build-desktop.ps1
 ```
 
-The script should:
+The script:
 
-1. run frontend build,
-2. run backend release build,
-3. copy or let Tauri bundle the sidecar,
-4. run Tauri bundle,
-5. print output artifact paths.
+1. builds the backend release binary for the selected Rust target,
+2. copies it to the Tauri v2 sidecar filename under `src-tauri/binaries/`,
+3. runs `cargo tauri build --config src-tauri/tauri.release.conf.json`,
+4. lets Tauri run the configured `beforeBuildCommand` for `web-ui`,
+5. prints output artifact paths.
 
 First Windows artifacts:
 
@@ -242,7 +255,8 @@ macOS artifacts:
 
 Release automation:
 
-- `.github/workflows/release-desktop.yml` is the preferred release path.
+- `.github/workflows/release-desktop.yml` exists and is the preferred release
+  path once CI secrets and dependency access are configured.
 - Pushing a `v*` tag builds Windows and macOS desktop artifacts and uploads
   them to the matching GitHub Release.
 - Manual `workflow_dispatch` builds the same artifacts as workflow artifacts
@@ -269,12 +283,14 @@ Tasks:
 - [x] Configure dev URL to existing Vite dev server.
 - [x] Configure production dist path to `web-ui/dist`.
 - [x] Add basic app window title, icon placeholder, and app metadata.
+- [x] Add desktop dev script that builds `tutor-web` and starts Vite.
 - [ ] Verify desktop window can load existing UI.
 
 Acceptance:
 
-- `cargo tauri dev` opens the current UI.
-- No backend sidecar is required yet in this phase.
+- `cargo tauri dev` starts the Vite dev server and opens the current UI.
+- In debug desktop mode, Tauri starts a local `tutor-web` process via Cargo or
+  an existing debug binary.
 
 ### Phase 2: Backend Sidecar
 
@@ -389,7 +405,8 @@ Automation:
 - `scripts/qa-desktop.ps1` validates the release app binary, Tauri sidecar
   filename, bundle directory when present, and starts the release `tutor-web`
   binary with a temporary data directory to smoke-test `/api/sessions` and
-  `/api/knowledge-bases`.
+  `/api/knowledge-bases`; it also creates a test knowledge base and verifies
+  that `settings.json` can be written through `/api/settings`.
 - `docs/qa/desktop-v0.1.md` tracks the manual UI checks that cannot be safely
   completed by a shell script.
 
@@ -442,13 +459,17 @@ slice.
 - Local data persists across restart.
 - Build instructions are documented.
 
-## 14. Suggested First Implementation Order
+## 14. Remaining Implementation Order
 
-1. Add Tauri skeleton and load existing `web-ui`.
-2. Add backend host/port/data-dir args.
-3. Add sidecar spawn with fixed port.
-4. Replace fixed port with dynamic port.
-5. Add frontend API URL resolver.
-6. Move desktop data root to app data dir.
-7. Add build script.
-8. Run QA checklist.
+1. Run `scripts/build-desktop.ps1` on a local Windows machine with enough build
+   time and record the artifact path.
+2. Run `scripts/qa-desktop.ps1` against that artifact and fix any packaging or
+   sidecar issues it reports.
+3. Complete the manual checklist in `docs/qa/desktop-v0.1.md` on a clean
+   Windows profile or clean app data directory.
+4. Validate `.github/workflows/release-desktop.yml` with `workflow_dispatch`
+   once repository secrets and private dependency access are configured.
+5. Decide whether the first shared artifact is a portable build, NSIS installer,
+   MSI, or a combination.
+6. Start a separate desktop polish design slice for native-app feel, context
+   menu capability areas, pane-local scrolling, and native file/link behavior.
