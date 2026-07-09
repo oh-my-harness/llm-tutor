@@ -12,6 +12,7 @@ import {
   Edit3,
   FileText,
   FileQuestion,
+  Folder,
   SearchCheck,
   MessageSquare,
   Paperclip,
@@ -31,6 +32,11 @@ import { ResearchReportMessage, looksLikeResearchReport } from './ResearchReport
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
 type SpaceMentionFilter = 'all' | SpaceMention['type']
+
+export interface SaveToNotebookOptions {
+  folderPath?: string
+  newFolderPath?: string
+}
 
 interface Message {
   role: 'user' | 'assistant' | 'status'
@@ -146,7 +152,8 @@ interface Props {
   onKnowledgeBaseChange: (id: string) => void
   onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
-  onSaveToNotebook?: (markdown: string) => Promise<void>
+  notebookFolders?: string[]
+  onSaveToNotebook?: (markdown: string, options?: SaveToNotebookOptions) => Promise<void>
   onRegenerateResearch?: (markdown: string) => void
   onIngestResearchSources?: (sources: SourceReference[], markdown: string) => Promise<void>
   onApplyNotebookEdit?: (proposal: NotebookEditProposal) => Promise<void>
@@ -227,6 +234,7 @@ export function ChatBox({
   onKnowledgeBaseChange,
   onNotebookEnabledChange,
   onLlmConfigChange,
+  notebookFolders = [],
   onSaveToNotebook,
   onRegenerateResearch,
   onIngestResearchSources,
@@ -243,6 +251,10 @@ export function ChatBox({
   const [editingMessageText, setEditingMessageText] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [mentions, setMentions] = useState<SpaceMention[]>([])
+  const [saveNotebookMarkdown, setSaveNotebookMarkdown] = useState<string | null>(null)
+  const [saveNotebookFolder, setSaveNotebookFolder] = useState('')
+  const [saveNotebookNewFolder, setSaveNotebookNewFolder] = useState('')
+  const [saveNotebookBusy, setSaveNotebookBusy] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
@@ -289,6 +301,35 @@ export function ChatBox({
     setMentions((current) => current.filter((mention) => mention.id !== id))
   }
 
+  const openSaveNotebookDialog = (markdown: string) => {
+    setSaveNotebookMarkdown(markdown)
+    setSaveNotebookFolder('')
+    setSaveNotebookNewFolder('')
+  }
+
+  const closeSaveNotebookDialog = () => {
+    if (saveNotebookBusy) return
+    setSaveNotebookMarkdown(null)
+    setSaveNotebookFolder('')
+    setSaveNotebookNewFolder('')
+  }
+
+  const submitSaveNotebook = async () => {
+    if (!onSaveToNotebook || !saveNotebookMarkdown || saveNotebookBusy) return
+    setSaveNotebookBusy(true)
+    try {
+      await onSaveToNotebook(saveNotebookMarkdown, {
+        folderPath: saveNotebookFolder || undefined,
+        newFolderPath: saveNotebookNewFolder.trim() || undefined,
+      })
+      setSaveNotebookMarkdown(null)
+      setSaveNotebookFolder('')
+      setSaveNotebookNewFolder('')
+    } finally {
+      setSaveNotebookBusy(false)
+    }
+  }
+
   const handleScroll = () => {
     const el = scrollRef.current
     if (!el) return
@@ -306,6 +347,18 @@ export function ChatBox({
 
   return (
     <div className="flex h-full flex-col">
+      {saveNotebookMarkdown && (
+        <SaveNotebookDialog
+          folders={notebookFolders}
+          selectedFolder={saveNotebookFolder}
+          newFolder={saveNotebookNewFolder}
+          busy={saveNotebookBusy}
+          onSelectedFolderChange={setSaveNotebookFolder}
+          onNewFolderChange={setSaveNotebookNewFolder}
+          onCancel={closeSaveNotebookDialog}
+          onSave={() => void submitSaveNotebook()}
+        />
+      )}
       {empty ? (
         <div className="flex flex-1 items-center justify-center px-6 pb-16">
           <div className="w-full max-w-4xl">
@@ -383,7 +436,7 @@ export function ChatBox({
                     <ResearchReportMessage
                       text={msg.text}
                       sources={(msg.citations ?? []).map(citationToResearchSourceReference)}
-                      onSaveToNotebook={onSaveToNotebook}
+                      onSaveToNotebook={openSaveNotebookDialog}
                       onRegenerate={onRegenerateResearch}
                       onIngestSources={onIngestResearchSources}
                       onSourceNavigate={onSourceNavigate}
@@ -397,7 +450,7 @@ export function ChatBox({
                             className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
                             type="button"
                             onClick={() => {
-                              void onSaveToNotebook(msg.text)
+                              openSaveNotebookDialog(msg.text)
                             }}
                           >
                             <FileText size={16} />
@@ -1636,6 +1689,87 @@ function MentionSummary({
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+function SaveNotebookDialog({
+  folders,
+  selectedFolder,
+  newFolder,
+  busy,
+  onSelectedFolderChange,
+  onNewFolderChange,
+  onCancel,
+  onSave,
+}: {
+  folders: string[]
+  selectedFolder: string
+  newFolder: string
+  busy: boolean
+  onSelectedFolderChange: (value: string) => void
+  onNewFolderChange: (value: string) => void
+  onCancel: () => void
+  onSave: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/25 px-4">
+      <div className="w-full max-w-md rounded-lg border border-blue-100 bg-white shadow-2xl shadow-blue-950/15">
+        <div className="flex items-start gap-3 border-b border-gray-100 px-5 py-4">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+            <Folder size={18} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-gray-950">保存到笔记本</h3>
+            <p className="mt-1 text-xs text-gray-500">选择保存目录，或输入一个新的文件夹路径。</p>
+          </div>
+        </div>
+        <div className="space-y-4 px-5 py-4">
+          <label className="block">
+            <span className="text-xs font-medium text-gray-600">文件夹</span>
+            <select
+              className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              value={selectedFolder}
+              disabled={busy || Boolean(newFolder.trim())}
+              onChange={(event) => onSelectedFolderChange(event.target.value)}
+            >
+              <option value="">根目录</option>
+              {folders.map((folder) => (
+                <option key={folder} value={folder}>{folder}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-600">新建文件夹</span>
+            <input
+              className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              value={newFolder}
+              disabled={busy}
+              placeholder="例如 research/2026"
+              onChange={(event) => onNewFolderChange(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
+          <button
+            className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+          >
+            取消
+          </button>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-300"
+            type="button"
+            disabled={busy}
+            onClick={onSave}
+          >
+            <FileText size={16} />
+            保存
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

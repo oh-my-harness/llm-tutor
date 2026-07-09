@@ -384,6 +384,7 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-838: Notebook shall render Obsidian-style `[[wiki links]]` as navigable internal links and shall provide a clear unresolved-link path such as creating the missing target note. Status: partially implemented; link parsing and basic navigation exist, unresolved-link creation remains planned.
 - REQ-839: Notebook shall provide a collapsible selected-note information panel for backlinks, outgoing links, tags, source metadata, and local graph. Status: partially implemented; panel and collapse behavior exist, richer relation detail remains planned.
 - REQ-840: Notebook shall preserve user Markdown as much as possible, including unknown frontmatter, comments, aliases, and Obsidian-compatible syntax, unless the user explicitly applies a normalization or organization proposal. Status: planned.
+- REQ-841: Saving generated content to Notebook shall let the user choose the target vault folder or create a new folder before the entry is written. Status: implemented for Research report and Research chat answer save flows.
 
 ## 18. Quiz Bank
 

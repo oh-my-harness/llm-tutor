@@ -5,7 +5,7 @@ import type { SourceReference, SourceTarget } from './MarkdownMessage'
 interface Props {
   text: string
   sources?: SourceReference[]
-  onSaveToNotebook?: (markdown: string) => Promise<void>
+  onSaveToNotebook?: (markdown: string) => void
   onRegenerate?: (markdown: string) => void
   onIngestSources?: (sources: SourceReference[], markdown: string) => Promise<void>
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
@@ -41,26 +41,24 @@ export function ResearchReportMessage({
           </div>
           {(onRegenerate || onSaveToNotebook || onIngestSources) && (
             <div className="flex flex-wrap gap-2">
-          {onRegenerate && (
-            <button
-              className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
-              type="button"
-              onClick={() => onRegenerate(text)}
-            >
-              <RefreshCw size={15} />
-              Regenerate
-            </button>
-          )}
+              {onRegenerate && (
+                <button
+                  className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                  type="button"
+                  onClick={() => onRegenerate(text)}
+                >
+                  <RefreshCw size={15} />
+                  Regenerate
+                </button>
+              )}
               {onSaveToNotebook && (
                 <button
-              className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
-              type="button"
-              onClick={() => {
-                void onSaveToNotebook(text)
-              }}
-            >
-              <FileText size={15} />
-              保存到笔记本
+                  className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                  type="button"
+                  onClick={() => onSaveToNotebook(text)}
+                >
+                  <FileText size={15} />
+                  保存到笔记本
                 </button>
               )}
               {onIngestSources && sourceReferences.length > 0 && (
@@ -138,7 +136,7 @@ function sourceReferencesFromMarkdown(text: string): SourceReference[] {
       .replace(/^\d+[.)]\s*/, '')
       .replace(/^\[\d+\]\s*/, '')
       .replace(url ?? '', '')
-      .replace(/[-–—]\s*$/, '')
+      .replace(/[-\s*]+$/, '')
       .trim()
     const raw = url || line
     const target = sourceTargetFromRaw(raw)

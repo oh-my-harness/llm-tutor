@@ -1,7 +1,7 @@
 ﻿import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { ChatBox } from './components/ChatBox'
-import type { ChatAttachment, ContextStats, NotebookEditProposal, SpaceMention } from './components/ChatBox'
+import type { ChatAttachment, ContextStats, NotebookEditProposal, SaveToNotebookOptions, SpaceMention } from './components/ChatBox'
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
@@ -159,6 +159,7 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
+  const [notebookFolders, setNotebookFolders] = useState<string[]>([])
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [selectedNotebookEnabled, setSelectedNotebookEnabled] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -376,6 +377,15 @@ export default function App() {
     })
   }, [])
 
+  const refreshNotebookFolders = useCallback(async () => {
+    const res = await fetch('/api/notebook/entries?space_id=default')
+    if (!res.ok) {
+      throw new Error(`failed to load notebook folders: HTTP ${res.status}`)
+    }
+    const data = await safeJson(res)
+    setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+  }, [])
+
   useEffect(() => {
     const pending = pendingSessionSendRef.current
     if (!pending || pending.sessionId !== sessionId) return
@@ -424,7 +434,11 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Error', detail: message })
     })
-  }, [refreshSessions, refreshKnowledgeBases, pushStatus])
+    refreshNotebookFolders().catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Error', detail: message })
+    })
+  }, [refreshSessions, refreshKnowledgeBases, refreshNotebookFolders, pushStatus])
 
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = [], mentions: SpaceMention[] = []) => {
     try {
@@ -584,9 +598,26 @@ export default function App() {
     updateQuizInMessages(data.quiz as QuizSession)
   }, [updateQuizInMessages])
 
-  const handleSaveToNotebook = useCallback(async (markdown: string) => {
+  const handleSaveToNotebook = useCallback(async (markdown: string, options: SaveToNotebookOptions = {}) => {
     try {
       const title = titleFromMarkdown(markdown)
+      let folderPath = options.newFolderPath?.trim() || options.folderPath?.trim() || ''
+      if (folderPath) {
+        folderPath = normalizeNotebookFolderPath(folderPath)
+      }
+      if (options.newFolderPath?.trim()) {
+        const folderRes = await fetch('/api/notebook/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: folderPath }),
+        })
+        const folderData = await safeJson(folderRes)
+        if (!folderRes.ok) {
+          throw new Error(errorMessage(folderData, folderRes.status))
+        }
+        setNotebookFolders(((folderData.folders ?? []) as string[]).filter(Boolean))
+      }
+      const path = folderPath ? `${folderPath}/${notebookFileNameFromTitle(title)}` : undefined
       const res = await fetch('/api/notebook/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -594,6 +625,7 @@ export default function App() {
           space_id: 'default',
           entry_type: 'research_report',
           title,
+          path,
           markdown,
           metadata: {
             generatedBy: 'research',
@@ -608,12 +640,16 @@ export default function App() {
       if (!res.ok) {
         throw new Error(errorMessage(data, res.status))
       }
-      pushStatus({ kind: 'done', label: 'Saved', detail: `Notebook: ${title}` })
+      if (!options.newFolderPath?.trim()) {
+        void refreshNotebookFolders()
+      }
+      pushStatus({ kind: 'done', label: 'Saved', detail: folderPath ? `Notebook: ${folderPath}/${title}` : `Notebook: ${title}` })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Save failed', detail: message })
+      throw err
     }
-  }, [pushStatus, sessionId])
+  }, [pushStatus, refreshNotebookFolders, sessionId])
 
   const handleApplyNotebookEdit = useCallback(async (proposal: NotebookEditProposal) => {
     try {
@@ -1055,6 +1091,7 @@ export default function App() {
                   onKnowledgeBaseChange={handleKnowledgeBaseChange}
                   onNotebookEnabledChange={handleNotebookEnabledChange}
                   onLlmConfigChange={handleLlmConfigChange}
+                  notebookFolders={notebookFolders}
                   onSaveToNotebook={handleSaveToNotebook}
                   onRegenerateResearch={handleRegenerateResearch}
                   onIngestResearchSources={handleIngestResearchSources}
@@ -1681,6 +1718,27 @@ function titleFromMarkdown(markdown: string) {
   if (heading) return heading.replace(/^#\s+/, '').trim().slice(0, 80) || 'Research Report'
   const first = markdown.trim().split('\n').find((line) => line.trim())
   return first?.trim().slice(0, 80) || 'Research Report'
+}
+
+function normalizeNotebookFolderPath(path: string) {
+  return path
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => sanitizeNotebookPathPart(part))
+    .filter(Boolean)
+    .join('/')
+}
+
+function notebookFileNameFromTitle(title: string) {
+  return `${sanitizeNotebookPathPart(title) || 'Research Report'}.md`
+}
+
+function sanitizeNotebookPathPart(value: string) {
+  return value
+    .trim()
+    .replace(/[<>:"|?*\x00-\x1F]/g, '')
+    .replace(/[./\\]+$/g, '')
+    .slice(0, 80)
 }
 
 function researchSourceIngestText(source: SourceReference, markdown: string) {
