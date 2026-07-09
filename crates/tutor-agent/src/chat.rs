@@ -274,7 +274,6 @@ async fn run_chat_inner(
     let mut last_text = String::new();
     let mut last_error: Option<String> = None;
     let mut tool_names: HashMap<String, String> = HashMap::new();
-    let mut emitted_text_delta = false;
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
@@ -293,9 +292,6 @@ async fn run_chat_inner(
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
             if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
-                if should_emit_final_answer_content(capability, &text, emitted_text_delta) {
-                    emit_content(&router.event_sink, text.clone(), true).await;
-                }
                 emit_trace(
                     &router.event_sink,
                     "final_answer",
@@ -329,7 +325,6 @@ async fn run_chat_inner(
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 if should_emit_text_delta(capability) {
                     emit_content(&router.event_sink, text.clone(), true).await;
-                    emitted_text_delta = true;
                 }
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -455,14 +450,6 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
 fn should_emit_text_delta(capability: &str) -> bool {
     let _ = capability;
     true
-}
-
-fn should_emit_final_answer_content(
-    capability: &str,
-    text: &str,
-    emitted_text_delta: bool,
-) -> bool {
-    capability == "research" && !emitted_text_delta && !text.trim().is_empty()
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -605,9 +592,7 @@ fn research_system_prompt() -> String {
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
-     Keep workflow progress brief; the final report is the main deliverable. \
-     When the report is complete, call the final_answer tool with the full Markdown report text. \
-     Do not use final_answer for planning notes, search updates, or partial drafts."
+     Keep workflow progress brief; the final report is the main deliverable."
         .into()
 }
 
@@ -642,8 +627,7 @@ fn quiz_system_prompt() -> String {
 mod tests {
     use super::{
         chat_system_prompt, final_answer_mode_for_capability, organize_system_prompt,
-        quiz_system_prompt, research_system_prompt, should_emit_final_answer_content,
-        should_emit_text_delta,
+        quiz_system_prompt, research_system_prompt, should_emit_text_delta,
     };
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
@@ -677,7 +661,7 @@ mod tests {
         assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
-        assert!(prompt.contains("final_answer"));
+        assert!(!prompt.contains("final_answer"));
     }
 
     #[test]
@@ -706,22 +690,6 @@ mod tests {
     fn research_chat_emits_text_deltas_before_workflow() {
         assert!(should_emit_text_delta("research"));
         assert!(should_emit_text_delta("chat"));
-
-        assert!(should_emit_final_answer_content(
-            "research",
-            "# Research Report\n\nbody",
-            false
-        ));
-        assert!(!should_emit_final_answer_content(
-            "research",
-            "# Research Report\n\nbody",
-            true
-        ));
-        assert!(!should_emit_final_answer_content(
-            "chat",
-            "# Chat answer should use normal text deltas",
-            false
-        ));
     }
 
     #[test]
