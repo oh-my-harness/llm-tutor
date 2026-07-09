@@ -26,6 +26,7 @@ import { useI18n, type TranslationKey } from '../i18n'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
+import { ResearchReportMessage, looksLikeResearchReport } from './ResearchReportMessage'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
@@ -374,6 +375,13 @@ export function ChatBox({
                       citationList={(citations) => <CitationList citations={citations} onSourceNavigate={onSourceNavigate} />}
                       onAskStep={onAskDeepSolveStep}
                     />
+                  ) : capability === 'research' && looksLikeResearchReport(msg.text) ? (
+                    <ResearchReportMessage
+                      text={msg.text}
+                      sources={(msg.citations ?? []).map(citationToResearchSourceReference)}
+                      onSaveToNotebook={onSaveToNotebook}
+                      onSourceNavigate={onSourceNavigate}
+                    />
                   ) : (
                     <>
                       <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
@@ -659,6 +667,20 @@ function citationToSourceReference(citation: Citation, index: number): SourceRef
     },
     target,
   }
+}
+
+function citationToResearchSourceReference(citation: Citation, index: number): SourceReference {
+  const reference = citationToSourceReference(citation, index)
+  return {
+    ...reference,
+    description: truncateSourceDescription(reference.description),
+  }
+}
+
+function truncateSourceDescription(value?: string) {
+  if (!value) return value
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length > 420 ? `${normalized.slice(0, 420)}...` : normalized
 }
 
 function citationRawTarget(citation: Citation) {

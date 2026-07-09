@@ -354,11 +354,11 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 3: Report Result
 
-- [ ] Add `ResearchReport` UI message component.
-- [ ] Parse/attach report sources from trace or structured metadata.
+- [x] Add `ResearchReport` UI message component.
+- [x] Parse/attach report sources from trace or structured metadata.
 - [x] Render final report Markdown.
-- [ ] Add a dedicated source list attached to the report metadata.
-- [ ] Add source citation display beyond generic message citations.
+- [x] Add a dedicated source list attached to the report metadata.
+- [x] Add source citation display beyond generic message citations.
 
 ### Phase 4: Persistence
 
