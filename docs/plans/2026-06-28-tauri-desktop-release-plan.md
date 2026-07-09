@@ -405,7 +405,32 @@ Automation:
 | Tauri bundling sidecar complexity | Release build blocked | Start with portable/debug bundle if installer takes longer |
 | Windows code signing absent | Installer trust warnings | Accept for internal v0.1; plan signing before public release |
 
-## 12. Done Criteria for v0.1 Desktop Release
+## 12. Desktop App Feel Follow-up
+
+The first desktop release may still use the existing React UI, but the product
+should not continue to feel like a web page embedded inside a small browser.
+After the basic Tauri packaging path is stable, plan a desktop polish slice that
+makes the app behave like a local workspace.
+
+The follow-up should cover these areas at a product level:
+
+- replace browser-default interactions with app-owned interactions where they
+  are visible to users, including context menu entry points;
+- keep the top-level app shell fixed and make scrolling local to panes such as
+  chat history, Notebook tree, editors, trace panels, and inspectors;
+- use desktop-native capabilities where appropriate, including file/folder
+  pickers, opening external links in the system browser, revealing local files,
+  and future app-level shortcuts or command palette behavior;
+- define product-specific context menu capability areas for Notebook, Chat,
+  Knowledge, Research, Books, and other work surfaces in later detailed design;
+- preserve the existing local-first architecture and avoid rewriting backend
+  routes as Tauri commands unless a native capability genuinely requires it.
+
+Detailed right-click menu items and per-surface actions are intentionally out of
+scope for this note and should be specified during the desktop polish design
+slice.
+
+## 13. Done Criteria for v0.1 Desktop Release
 
 - A Windows desktop artifact exists.
 - User can launch the app without terminal commands.
@@ -417,7 +442,7 @@ Automation:
 - Local data persists across restart.
 - Build instructions are documented.
 
-## 13. Suggested First Implementation Order
+## 14. Suggested First Implementation Order
 
 1. Add Tauri skeleton and load existing `web-ui`.
 2. Add backend host/port/data-dir args.
