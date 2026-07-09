@@ -40,6 +40,7 @@ interface Message {
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
   quizPlan?: QuizPlan
+  researchPlan?: ResearchPlan
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
@@ -52,6 +53,20 @@ interface QuizPlan {
   difficulty: string
   questionCount: number
   notes: string[]
+}
+
+interface ResearchPlan {
+  title: string
+  topic: string
+  scope: string
+  outputFormat: string
+  depth: string
+  timeRange: string
+  sourcePreferences: string[]
+  useNotebook: boolean
+  useKnowledgeBase: boolean
+  steps: string[]
+  questions: string[]
 }
 
 interface Citation {
@@ -137,6 +152,7 @@ export default function App() {
   const pendingNotebookEditProposalRef = useRef<NotebookEditProposal | undefined>(undefined)
   const pendingQuizRef = useRef<QuizSession | undefined>(undefined)
   const pendingQuizPlanRef = useRef<QuizPlan | undefined>(undefined)
+  const pendingResearchPlanRef = useRef<ResearchPlan | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -197,7 +213,8 @@ export default function App() {
           const notebookEditProposal = pendingNotebookEditProposalRef.current
           const quiz = pendingQuizRef.current
           const quizPlan = pendingQuizPlanRef.current
-          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan) {
+          const researchPlan = pendingResearchPlanRef.current
+          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan || researchPlan) {
             setMessages((prev) => [
               ...dropTrailingTransientStatus(prev),
               {
@@ -208,6 +225,7 @@ export default function App() {
                 notebookEditProposal,
                 quiz,
                 quizPlan,
+                researchPlan,
               },
             ])
           } else {
@@ -218,6 +236,7 @@ export default function App() {
           pendingNotebookEditProposalRef.current = undefined
           pendingQuizRef.current = undefined
           pendingQuizPlanRef.current = undefined
+          pendingResearchPlanRef.current = undefined
           streamingRef.current = ''
           setStreamingText('')
           setRunning(false)
@@ -255,6 +274,10 @@ export default function App() {
         const quizPlan = quizPlanFromTrace(event.payload as Record<string, unknown>)
         if (quizPlan) {
           pendingQuizPlanRef.current = quizPlan
+        }
+        const researchPlan = researchPlanFromTrace(event.payload as Record<string, unknown>)
+        if (researchPlan) {
+          pendingResearchPlanRef.current = researchPlan
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -515,6 +538,7 @@ export default function App() {
       pendingNotebookEditProposalRef.current = undefined
       pendingQuizRef.current = undefined
       pendingQuizPlanRef.current = undefined
+      pendingResearchPlanRef.current = undefined
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       pendingSessionSendRef.current = { sessionId: nextSessionId, content: nextText, mentions: [] }
@@ -656,6 +680,7 @@ export default function App() {
     pendingNotebookEditProposalRef.current = undefined
     pendingQuizRef.current = undefined
     pendingQuizPlanRef.current = undefined
+    pendingResearchPlanRef.current = undefined
     setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
@@ -783,6 +808,7 @@ export default function App() {
       pendingNotebookEditProposalRef.current = undefined
       pendingQuizRef.current = undefined
       pendingQuizPlanRef.current = undefined
+      pendingResearchPlanRef.current = undefined
       setLatestUsage(null)
       setSessionId(id)
       try {
@@ -801,7 +827,10 @@ export default function App() {
           })),
           restoredTrace,
         )
-        const restored = attachRestoredQuizPlans(attachRestoredDeepSolve(withCitations, restoredTrace), restoredTrace)
+        const restored = attachRestoredResearchPlans(
+          attachRestoredQuizPlans(attachRestoredDeepSolve(withCitations, restoredTrace), restoredTrace),
+          restoredTrace,
+        )
         setMessages(restored)
         void attachRestoredQuizzes(restored, restoredTrace).then(setMessages)
         setTraceEntries(restoredTrace)
@@ -1241,6 +1270,38 @@ function quizPlanFromTrace(payload: Record<string, unknown>): QuizPlan | undefin
   }
 }
 
+function researchPlanFromTrace(payload: Record<string, unknown>): ResearchPlan | undefined {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'propose_research_plan' || payload.ok === false) return undefined
+  const details = payload.details
+  if (!details || typeof details !== 'object') return undefined
+  const item = details as Record<string, unknown>
+  const title = typeof item.title === 'string' && item.title.trim() ? item.title : 'Research plan'
+  const topic = typeof item.topic === 'string' && item.topic.trim() ? item.topic : 'selected topic'
+  const scope = typeof item.scope === 'string' && item.scope.trim() ? item.scope : 'to be confirmed'
+  const outputFormat = typeof item.output_format === 'string' && item.output_format.trim() ? item.output_format : 'Markdown report'
+  const depth = typeof item.depth === 'string' && item.depth.trim() ? item.depth : 'standard'
+  const timeRange = typeof item.time_range === 'string' && item.time_range.trim() ? item.time_range : 'not specified'
+  return {
+    title,
+    topic,
+    scope,
+    outputFormat,
+    depth,
+    timeRange,
+    sourcePreferences: stringListFromUnknown(item.source_preferences),
+    useNotebook: item.use_notebook === true,
+    useKnowledgeBase: item.use_knowledge_base === true,
+    steps: stringListFromUnknown(item.steps),
+    questions: stringListFromUnknown(item.questions),
+  }
+}
+
+function stringListFromUnknown(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : []
+}
+
 function notebookProposalKind(value: unknown): NotebookEditProposal['proposalKind'] {
   return value === 'links' || value === 'tags' || value === 'merge' || value === 'edit' ? value : 'edit'
 }
@@ -1401,6 +1462,22 @@ function attachRestoredQuizPlans(messages: Message[], traceEntries: TraceEntry[]
     const plan = plans[planIndex]
     planIndex += 1
     return plan ? { ...message, quizPlan: plan } : message
+  })
+}
+
+function attachRestoredResearchPlans(messages: Message[], traceEntries: TraceEntry[]): Message[] {
+  const plans = traceEntries
+    .map((entry) => researchPlanFromTrace(entry.payload))
+    .filter((plan): plan is ResearchPlan => Boolean(plan))
+  if (plans.length === 0) return messages
+
+  let planIndex = 0
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    if (message.quiz || message.quizPlan || message.researchPlan) return message
+    const plan = plans[planIndex]
+    planIndex += 1
+    return plan ? { ...message, researchPlan: plan } : message
   })
 }
 

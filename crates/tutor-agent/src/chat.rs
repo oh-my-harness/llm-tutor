@@ -274,6 +274,7 @@ async fn run_chat_inner(
     let mut last_text = String::new();
     let mut last_error: Option<String> = None;
     let mut tool_names: HashMap<String, String> = HashMap::new();
+    let mut emitted_text_delta = false;
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
@@ -292,7 +293,7 @@ async fn run_chat_inner(
         if let AgentHarnessEvent::Agent(agent_event) = event.as_ref() {
             if let Some((message_id, turn_id, text)) = agent_event.as_final_answer() {
                 last_text = text.clone();
-                if should_emit_final_answer_content(capability, &text) {
+                if should_emit_final_answer_content(capability, &text, emitted_text_delta) {
                     emit_content(&router.event_sink, text.clone(), true).await;
                 }
                 emit_trace(
@@ -328,6 +329,7 @@ async fn run_chat_inner(
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 if should_emit_text_delta(capability) {
                     emit_content(&router.event_sink, text.clone(), true).await;
+                    emitted_text_delta = true;
                 }
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -446,19 +448,21 @@ async fn run_chat_inner(
 }
 
 fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
-    if capability == "research" {
-        FinalAnswerMode::required_tool()
-    } else {
-        FinalAnswerMode::tool_with_text_fallback()
-    }
+    let _ = capability;
+    FinalAnswerMode::tool_with_text_fallback()
 }
 
 fn should_emit_text_delta(capability: &str) -> bool {
-    capability != "research"
+    let _ = capability;
+    true
 }
 
-fn should_emit_final_answer_content(capability: &str, text: &str) -> bool {
-    capability == "research" && !text.trim().is_empty()
+fn should_emit_final_answer_content(
+    capability: &str,
+    text: &str,
+    emitted_text_delta: bool,
+) -> bool {
+    capability == "research" && !emitted_text_delta && !text.trim().is_empty()
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -584,19 +588,24 @@ fn chat_system_prompt() -> String {
 }
 
 fn research_system_prompt() -> String {
-    "You are a research tutor. Your job is to turn the user's topic into a sourced, reusable research report. \
+    "You are a research tutor. Your job is to help the user clarify research needs and, when appropriate, turn a confirmed topic into a sourced, reusable research report. \
      Use read_memory only to adapt the report to the learner's preferences, scope, or prior weaknesses; \
      never use memory as a factual source. Use write_memory only when the user explicitly asks you to remember \
      a durable preference or approves recording it; research findings belong in reports, not memory. \
-     Follow this workflow: (1) briefly identify the research question and scope, \
+     Research has two modes: Research Chat and Detailed Research Workflow. \
+     In Research Chat, discuss the topic, ask focused clarification questions, and help define goal, scope, source preferences, output format, depth, time range, and whether Notebook or Knowledge Base context should be used. \
+     Do not call web_search, web_fetch, or produce a full report when the user's request is ambiguous or they are only discussing scope. \
+     When the research need is mostly clear but not confirmed, call propose_research_plan with the proposed topic, scope, output format, depth, time range, sources, and workflow steps, then ask the user to confirm or revise it. \
+     Start the Detailed Research Workflow only when the user explicitly asks to begin, confirms a proposed plan, or gives an unambiguous instruction to produce the report now. \
+     For the Detailed Research Workflow: (1) identify the confirmed research question and scope, \
      (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
      (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call search_notebook when Notebook is associated, (7) optionally call rag_search when a knowledge base is associated, \
-     (7) synthesize a Markdown report. Do not answer research requests from memory when external verification is needed. \
+     (8) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
      The final answer must be a Markdown report with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
-     Keep intermediate planning brief; the final report is the main deliverable. \
+     Keep workflow progress brief; the final report is the main deliverable. \
      When the report is complete, call the final_answer tool with the full Markdown report text. \
      Do not use final_answer for planning notes, search updates, or partial drafts."
         .into()
@@ -658,6 +667,10 @@ mod tests {
         let prompt = research_system_prompt();
         assert!(prompt.contains("Use read_memory only to adapt"));
         assert!(prompt.contains("research findings belong in reports"));
+        assert!(prompt.contains("Research Chat and Detailed Research Workflow"));
+        assert!(prompt.contains("Do not call web_search"));
+        assert!(prompt.contains("propose_research_plan"));
+        assert!(prompt.contains("explicitly asks to begin"));
         assert!(prompt.contains("call web_search"));
         assert!(prompt.contains("call web_fetch"));
         assert!(prompt.contains("read_space_item"));
@@ -668,12 +681,17 @@ mod tests {
     }
 
     #[test]
-    fn research_requires_final_answer_tool() {
-        assert_eq!(
-            final_answer_mode_for_capability("research"),
-            FinalAnswerMode::required_tool()
-        );
+    fn research_allows_chat_fallback_before_workflow() {
         match final_answer_mode_for_capability("chat") {
+            FinalAnswerMode::Tool(config) => {
+                assert_eq!(
+                    config.missing_behavior,
+                    FinalAnswerMissingBehavior::FallbackToText
+                );
+            }
+            other => panic!("expected final answer tool fallback, got {other:?}"),
+        }
+        match final_answer_mode_for_capability("research") {
             FinalAnswerMode::Tool(config) => {
                 assert_eq!(
                     config.missing_behavior,
@@ -685,18 +703,24 @@ mod tests {
     }
 
     #[test]
-    fn research_streaming_only_emits_final_report_content() {
-        assert!(!should_emit_text_delta("research"));
+    fn research_chat_emits_text_deltas_before_workflow() {
+        assert!(should_emit_text_delta("research"));
         assert!(should_emit_text_delta("chat"));
 
         assert!(should_emit_final_answer_content(
             "research",
-            "# Research Report\n\nbody"
+            "# Research Report\n\nbody",
+            false
         ));
-        assert!(!should_emit_final_answer_content("research", "   \n"));
+        assert!(!should_emit_final_answer_content(
+            "research",
+            "# Research Report\n\nbody",
+            true
+        ));
         assert!(!should_emit_final_answer_content(
             "chat",
-            "# Chat answer should use normal text deltas"
+            "# Chat answer should use normal text deltas",
+            false
         ));
     }
 

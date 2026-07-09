@@ -39,6 +39,7 @@ interface Message {
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
   quizPlan?: QuizPlan
+  researchPlan?: ResearchPlan
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
@@ -51,6 +52,20 @@ interface QuizPlan {
   difficulty: string
   questionCount: number
   notes: string[]
+}
+
+interface ResearchPlan {
+  title: string
+  topic: string
+  scope: string
+  outputFormat: string
+  depth: string
+  timeRange: string
+  sourcePreferences: string[]
+  useNotebook: boolean
+  useKnowledgeBase: boolean
+  steps: string[]
+  questions: string[]
 }
 
 export interface ChatAttachment {
@@ -343,6 +358,14 @@ export function ChatBox({
                     />
                   ) : msg.quizPlan ? (
                     <QuizPlanCard plan={msg.quizPlan} text={msg.text} />
+                  ) : msg.researchPlan ? (
+                    <ResearchPlanCard
+                      plan={msg.researchPlan}
+                      text={msg.text}
+                      onStart={() => {
+                        onSend(startResearchPrompt(msg.researchPlan!), [], [])
+                      }}
+                    />
                   ) : msg.deepSolve && msg.deepSolve.length > 0 ? (
                     <DeepSolveMessage
                       text={msg.text}
@@ -685,6 +708,114 @@ function QuizPlanCard({ plan, text }: { plan: QuizPlan; text: string }) {
       </div>
     </div>
   )
+}
+
+function ResearchPlanCard({
+  plan,
+  text,
+  onStart,
+}: {
+  plan: ResearchPlan
+  text: string
+  onStart: () => void
+}) {
+  return (
+    <div className="space-y-3 rounded-lg border border-blue-100 bg-white p-4">
+      {text.trim() && <MarkdownMessage text={text} />}
+      <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+            <SearchCheck size={17} />
+            Research plan
+          </div>
+          <button
+            className="inline-flex h-8 items-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
+            type="button"
+            onClick={onStart}
+          >
+            <SearchCheck size={15} />
+            Start detailed research
+          </button>
+        </div>
+        <div className="mt-3 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Title</span>
+            <p className="font-medium text-gray-950">{plan.title}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Topic</span>
+            <p>{plan.topic}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Scope</span>
+            <p>{plan.scope}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Output</span>
+            <p>
+              {plan.outputFormat} · {plan.depth}
+            </p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Time range</span>
+            <p>{plan.timeRange}</p>
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase text-gray-400">Context</span>
+            <p>
+              {[
+                plan.useNotebook ? 'Notebook' : null,
+                plan.useKnowledgeBase ? 'Knowledge Base' : null,
+              ].filter(Boolean).join(' + ') || 'Conversation and web sources'}
+            </p>
+          </div>
+        </div>
+        {plan.sourcePreferences.length > 0 && (
+          <div className="mt-3">
+            <span className="text-xs font-medium uppercase text-gray-400">Sources</span>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {plan.sourcePreferences.map((source) => (
+                <span key={source} className="rounded-full bg-white px-2 py-1 text-xs text-gray-600">
+                  {source}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {plan.steps.length > 0 && (
+          <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-gray-600">
+            {plan.steps.map((step, index) => (
+              <li key={`${index}:${step}`}>{step}</li>
+            ))}
+          </ol>
+        )}
+        {plan.questions.length > 0 && (
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
+            {plan.questions.map((question, index) => (
+              <li key={`${index}:${question}`}>{question}</li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-gray-500">Confirm, revise, or start the detailed research workflow.</p>
+      </div>
+    </div>
+  )
+}
+
+function startResearchPrompt(plan: ResearchPlan) {
+  return [
+    'Start the detailed research workflow for this confirmed plan.',
+    `Title: ${plan.title}`,
+    `Topic: ${plan.topic}`,
+    `Scope: ${plan.scope}`,
+    `Output format: ${plan.outputFormat}`,
+    `Depth: ${plan.depth}`,
+    `Time range: ${plan.timeRange}`,
+    plan.sourcePreferences.length > 0 ? `Source preferences: ${plan.sourcePreferences.join(', ')}` : '',
+    plan.useNotebook ? 'Use Notebook context if relevant.' : '',
+    plan.useKnowledgeBase ? 'Use the selected Knowledge Base if relevant.' : '',
+    'Search, read sources, synthesize the report, verify citations, and return the final Markdown report.',
+  ].filter(Boolean).join('\n')
 }
 
 function ChatQuizCard({

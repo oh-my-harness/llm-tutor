@@ -4,6 +4,7 @@ pub mod memory_store;
 pub mod notebook_store;
 pub mod quiz_store;
 pub mod quiz_tool;
+pub mod research_tool;
 pub mod routes;
 pub mod session;
 pub mod settings_store;

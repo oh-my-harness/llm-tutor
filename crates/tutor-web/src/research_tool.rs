@@ -1,0 +1,170 @@
+use futures::future::BoxFuture;
+use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use serde_json::json;
+
+static PROPOSE_RESEARCH_PLAN_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
+
+pub(crate) struct ProposeResearchPlanTool;
+
+impl Tool for ProposeResearchPlanTool {
+    fn name(&self) -> &str {
+        "propose_research_plan"
+    }
+
+    fn description(&self) -> &str {
+        "Show a research plan for user confirmation. Use this when the user's research goal is mostly clear but the detailed search/read/report workflow should not start until the user confirms. This tool does not search the web or create a report."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        PROPOSE_RESEARCH_PLAN_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Short plan title." },
+                    "topic": { "type": "string", "description": "Main research topic." },
+                    "scope": { "type": "string", "description": "Research scope and boundaries." },
+                    "output_format": { "type": "string", "description": "Requested output format such as brief, comparison table, Markdown report, or study note." },
+                    "depth": { "type": "string", "enum": ["quick", "standard", "deep"], "description": "Planned research depth." },
+                    "time_range": { "type": "string", "description": "Time range or freshness requirement." },
+                    "source_preferences": { "type": "array", "items": { "type": "string" }, "description": "Preferred source types such as official docs, papers, news, reports, or Notebook/Knowledge Base material." },
+                    "use_notebook": { "type": "boolean", "description": "Whether Notebook context should be used." },
+                    "use_knowledge_base": { "type": "boolean", "description": "Whether the selected Knowledge Base should be used." },
+                    "steps": { "type": "array", "items": { "type": "string" }, "description": "Planned workflow steps." },
+                    "questions": { "type": "array", "items": { "type": "string" }, "description": "Remaining confirmation questions or assumptions." }
+                }
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let title = optional_string(&args, "title").unwrap_or_else(|| "Research plan".into());
+            let topic = optional_string(&args, "topic").unwrap_or_else(|| "selected topic".into());
+            let scope = optional_string(&args, "scope").unwrap_or_else(|| "to be confirmed".into());
+            let output_format =
+                optional_string(&args, "output_format").unwrap_or_else(|| "Markdown report".into());
+            let depth = optional_string(&args, "depth").unwrap_or_else(|| "standard".into());
+            let time_range =
+                optional_string(&args, "time_range").unwrap_or_else(|| "not specified".into());
+            let source_preferences = string_array(&args, "source_preferences");
+            let steps = string_array(&args, "steps");
+            let questions = string_array(&args, "questions");
+            let use_notebook = args["use_notebook"].as_bool().unwrap_or(false);
+            let use_knowledge_base = args["use_knowledge_base"].as_bool().unwrap_or(false);
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Proposed research plan: {title}. Topic: {topic}. Scope: {scope}. Ask the user to confirm or revise before starting detailed research."
+                    ),
+                }],
+                details: json!({
+                    "title": title,
+                    "topic": topic,
+                    "scope": scope,
+                    "output_format": output_format,
+                    "depth": depth,
+                    "time_range": time_range,
+                    "source_preferences": source_preferences,
+                    "use_notebook": use_notebook,
+                    "use_knowledge_base": use_knowledge_base,
+                    "steps": steps,
+                    "questions": questions,
+                }),
+                terminate: false,
+            })
+        })
+    }
+}
+
+fn optional_string(args: &serde_json::Value, key: &str) -> Option<String> {
+    args[key]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn string_array(args: &serde_json::Value, key: &str) -> Vec<String> {
+    args[key]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use llm_harness_runtime_sandbox_os::OsEnv;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    fn make_ctx() -> ToolContext {
+        let (tx, _rx) = mpsc::channel(1);
+        ToolContext {
+            env: Arc::new(OsEnv::new(std::env::temp_dir())),
+            abort: CancellationToken::new(),
+            tool_use_id: "test-id".into(),
+            turn_index: 0,
+            assistant_message: Arc::new(llm_harness_types::AssistantMessage {
+                kind: llm_harness_types::AssistantMessageKind::FinalAnswer,
+                message_id: "test-message".into(),
+                turn_id: "test-turn".into(),
+                content: vec![],
+                usage: None,
+                stop_reason: None,
+                timestamp: chrono::Utc::now(),
+                provider: None,
+                api: None,
+                model: None,
+                error_message: None,
+            }),
+            update_tx: tx,
+        }
+    }
+
+    #[tokio::test]
+    async fn propose_research_plan_returns_structured_details() {
+        let tool = ProposeResearchPlanTool;
+        let ctx = make_ctx();
+        let result = tool
+            .execute(
+                json!({
+                    "title": "Runtime research",
+                    "topic": "llm-harness-runtime",
+                    "scope": "workflow APIs",
+                    "output_format": "Markdown report",
+                    "depth": "standard",
+                    "time_range": "2026",
+                    "source_preferences": ["official docs"],
+                    "use_notebook": true,
+                    "use_knowledge_base": false,
+                    "steps": ["Search", "Read", "Synthesize"],
+                    "questions": ["Confirm source scope"]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.details["title"], "Runtime research");
+        assert_eq!(result.details["topic"], "llm-harness-runtime");
+        assert_eq!(result.details["source_preferences"][0], "official docs");
+        assert_eq!(result.details["use_notebook"], true);
+        assert_eq!(result.terminate, false);
+    }
+}
