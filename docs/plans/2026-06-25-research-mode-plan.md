@@ -1,6 +1,6 @@
 # Research Mode Plan
 
-> Status: in progress | Date: 2026-06-25 | Last updated: 2026-06-26 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
+> Status: in progress | Date: 2026-06-25 | Last updated: 2026-07-09 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
 
 ## 1. Goal
 
@@ -82,6 +82,26 @@ Actions
 ```
 
 Progress items are small and collapsible. The final report is the only full-size assistant content.
+
+### Research Chat and Workflow Split
+
+Research mode should support both conversational clarification and a detailed
+research workflow.
+
+- Research Chat is the default interaction surface. The agent can discuss the
+  user's topic, clarify goals, scope, source preferences, output format, depth,
+  time range, and whether to use Notebook or Knowledge Base context.
+- Detailed Research Workflow is a capability available inside Research mode.
+  It should execute structured search, source reading, source selection,
+  synthesis, citation checking, and report generation after the research need is
+  clear.
+- Entering the detailed workflow is not mandatory for every Research message.
+  If the request is ambiguous, the agent should continue normal conversation and
+  ask focused follow-up questions.
+- When the request is clear enough, the agent should propose a brief research
+  plan and start the detailed workflow only after the user explicitly asks to
+  begin, confirms the plan, or gives an unambiguous instruction to produce the
+  report.
 
 ## 4. Layering
 

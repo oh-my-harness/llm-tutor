@@ -261,6 +261,8 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-320: The UI shall show a dedicated source list under each Research report. Status: planned.
 - REQ-321: Research reports shall support regeneration/versioning. Status: planned.
 - REQ-322: Research shall support longer-running multi-step/parallel deep research. Status: planned.
+- REQ-323: Research mode shall preserve normal conversational interaction for clarifying research goals, scope, source preferences, output format, depth, time range, and optional Notebook or Knowledge Base context before starting detailed research. Status: planned.
+- REQ-324: Research mode shall provide a detailed research workflow that can be explicitly started after the user's need is clear. The workflow shall cover search, source reading, source selection, synthesis, citation checking, and report generation; it shall not be forced for every Research message. Status: planned.
 
 ## 15. Books and Learning Records
 
