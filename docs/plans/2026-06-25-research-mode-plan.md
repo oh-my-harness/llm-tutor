@@ -103,6 +103,22 @@ research workflow.
   begin, confirms the plan, or gives an unambiguous instruction to produce the
   report.
 
+Target interaction states:
+
+```text
+research_chat
+  -> clarifying
+  -> plan_proposed
+  -> workflow_running
+  -> report_ready
+```
+
+`research_chat`, `clarifying`, and `plan_proposed` should behave like normal
+chat: text can stream, and the assistant may ask questions or refine the plan.
+`workflow_running` should behave like a structured task: progress is shown as
+compact status/trace events, intermediate drafts should not become assistant
+bubbles, and only the completed report should become the durable final answer.
+
 ## 4. Layering
 
 ### Runtime / Agent Layer
@@ -359,11 +375,54 @@ The report remains a Notebook research entry even after saving. A future book ch
 - [x] Add Save to book UI action.
 - [x] Add basic Book page chapter viewer.
 
-### Phase 6: Follow-up Work
+### Phase 6: Research Chat Before Workflow
+
+- [ ] Split Research behavior into conversational planning and detailed workflow
+  execution.
+- [ ] Update the Research prompt so the agent does not automatically search or
+  write a report when the user's goal is underspecified.
+- [ ] Add a structured research-plan proposal surface or tool result that
+  captures topic, scope, source preferences, output format, depth, time range,
+  Notebook/Knowledge Base usage, and estimated workflow steps.
+- [ ] Add UI affordance for confirming or revising the proposed research plan.
+- [ ] Keep normal streaming chat behavior during clarification and plan proposal.
+- [ ] Add tests where ambiguous Research requests produce a clarification
+  question instead of calling `web_search`.
+- [ ] Add tests where an explicit "start research" or confirmed plan enters the
+  detailed workflow path.
+
+### Phase 7: Detailed Research Workflow
+
+- [ ] Model the detailed research run as a runtime workflow when runtime APIs are
+  sufficient, instead of relying only on a single prompt-driven harness turn.
+- [ ] Define workflow steps for scope confirmation, search query generation,
+  search, source selection, source reading, synthesis, citation checking, and
+  report publishing.
+- [ ] Preserve runtime ownership of provider calls, tool orchestration, trace,
+  compaction, and session history; keep product code limited to plan/report
+  schemas, product persistence, and UI event mapping.
+- [ ] Add bounded repair behavior for insufficient sources, failed fetches, or
+  citation mismatches.
+- [ ] Ensure the completed report is persisted as a durable
+  `AssistantMessageKind::FinalAnswer` and as a `NotebookEntry(type =
+  research_report)` when saved.
+- [ ] Add non-real-LLM workflow tests for search/fetch/report metadata and
+  citation verification.
+
+### Phase 8: Report Quality and Persistence Hardening
+
+- [ ] Add `ResearchReport` UI message component.
+- [ ] Parse/attach report sources from trace or structured metadata.
+- [ ] Add a dedicated source list attached to the report metadata.
+- [ ] Add source citation display beyond generic message citations.
+- [ ] Ensure reloading the session preserves the report, source list, citations,
+  and research-plan metadata.
+- [ ] Improve source quality scoring.
+- [ ] Add report regeneration/versioning.
+
+### Phase 9: Follow-up Work
 
 - [x] Support Chat Quiz follow-up prompts that use a saved report as source material.
-- [ ] Improve source quality scoring.
-- [ ] Add report regeneration.
 - [ ] Add PDF/webpage source ingestion into knowledge base.
 - [ ] Add longer-running deep research with parallel sub tasks.
 
@@ -372,9 +431,14 @@ The report remains a Notebook research entry even after saving. A future book ch
 V1 is complete when:
 
 - a user can select Research mode in chat,
-- a research request triggers web search for external information,
+- an ambiguous research request can stay in normal chat and produce focused
+  clarification questions instead of immediately starting web search,
+- a clear request or confirmed research plan can explicitly start the detailed
+  research workflow,
+- a detailed research workflow triggers web search for external information,
 - the final answer is a report with a visible source list,
-- search/read progress is visible but not shown as normal assistant bubbles,
+- search/read progress during the detailed workflow is visible but not shown as
+  normal assistant bubbles,
 - the report can be saved as a book chapter,
 - reloading the session preserves the report and sources,
 - report generation can fail with a clear reason when search or fetch fails.
