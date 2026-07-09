@@ -1154,7 +1154,7 @@ type FlatNotebookTreeRow = {
 
 const NOTEBOOK_TREE_ROW_HEIGHT = 32
 const NOTEBOOK_TREE_OVERSCAN_ROWS = 12
-const NOTEBOOK_EXPANDED_FOLDERS_KEY = 'llm-tutor:notebook-expanded-folders'
+const NOTEBOOK_EXPANDED_FOLDERS_KEY = 'llm-tutor:notebook-expanded-folders:v2'
 
 function NotebookFileTree({
   nodes,
