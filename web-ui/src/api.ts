@@ -44,6 +44,13 @@ export async function openDesktopDataDir(): Promise<void> {
   await invoke('open_data_dir')
 }
 
+export async function openExternalUrl(url: string): Promise<boolean> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return false
+  await invoke('open_external_url', { url })
+  return true
+}
+
 async function initialize() {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return

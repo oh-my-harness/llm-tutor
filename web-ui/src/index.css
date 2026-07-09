@@ -1,5 +1,55 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+}
+
+[data-desktop="true"] img,
+[data-desktop="true"] a {
+  -webkit-user-drag: none;
+}
+
+.desktop-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 168px;
+  overflow: hidden;
+  border: 1px solid rgb(191 219 254);
+  border-radius: 0.5rem;
+  background: white;
+  box-shadow: 0 18px 45px rgb(15 23 42 / 16%);
+  padding: 0.25rem;
+}
+
+.desktop-context-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: rgb(31 41 55);
+}
+
+.desktop-context-menu button:not(:disabled):hover {
+  background: rgb(239 246 255);
+  color: rgb(29 78 216);
+}
+
+.desktop-context-menu button:disabled {
+  color: rgb(156 163 175);
+}
+
 .markdown-message {
   line-height: 1.6;
   overflow-wrap: anywhere;

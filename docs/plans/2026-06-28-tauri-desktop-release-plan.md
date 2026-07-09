@@ -449,7 +449,7 @@ slice.
 
 ### Phase 6: Desktop App Feel Polish
 
-Status: planned.
+Status: in progress.
 
 Tasks:
 
@@ -457,18 +457,18 @@ Tasks:
       including top-level scrolling, browser context menus, drag/drop defaults,
       in-window link navigation, focus outlines, and text/image selection where
       they conflict with app behavior.
-- [ ] Lock the top-level app shell so the window itself does not behave like a
+- [x] Lock the top-level app shell so the window itself does not behave like a
       scrolling web page.
 - [ ] Make scrolling pane-local for Chat history, Notebook tree, editors,
       Knowledge lists, Research reports, Trace, Settings, and other work areas.
-- [ ] Add an app-owned context menu framework that can replace the browser
+- [x] Add an app-owned context menu framework that can replace the browser
       context menu in desktop mode.
 - [ ] Define high-level context menu capability areas for Notebook, Chat,
       Knowledge, Research, Books, Settings, and source references without
       finalizing individual menu items yet.
-- [ ] Implement the first context menu slice for the highest-value surface after
-      detailed design chooses the menu items.
-- [ ] Route external web links through the system browser in desktop mode.
+- [x] Implement the first context menu slice with generic Copy/Open Link/Copy
+      Link actions plus editable-field Cut/Copy/Paste/Select All actions.
+- [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.
 - [ ] Add or plan app-level shortcuts and command palette behavior for common

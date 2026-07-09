@@ -79,6 +79,14 @@ fn open_data_dir(state: tauri::State<'_, BackendState>) -> Result<(), String> {
     open_directory(&state.data_dir).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !is_allowed_external_url(&url) {
+        return Err("unsupported external URL".into());
+    }
+    open_url(&url).map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -87,7 +95,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
             get_data_dir,
-            open_data_dir
+            open_data_dir,
+            open_external_url
         ])
         .setup(|app| {
             let port = find_free_port()?;
@@ -217,6 +226,30 @@ fn open_directory(path: &Path) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+fn open_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(url).spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(url).spawn()?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(url).spawn()?;
+    }
+
+    Ok(())
+}
+
+fn is_allowed_external_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")
 }
 
 #[cfg(debug_assertions)]
