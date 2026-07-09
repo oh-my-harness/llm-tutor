@@ -417,7 +417,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 - [x] Ensure reloading the session preserves the report, source list, citations,
   and research-plan metadata.
 - [x] Improve source quality scoring.
-- [ ] Add report regeneration/versioning.
+- [x] Add report regeneration/versioning.
 
 ### Phase 9: Follow-up Work
 

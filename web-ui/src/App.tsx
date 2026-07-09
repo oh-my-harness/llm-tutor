@@ -597,6 +597,9 @@ export default function App() {
           markdown,
           metadata: {
             generatedBy: 'research',
+            reportVersion: 1,
+            generatedAt: new Date().toISOString(),
+            sourceSessionId: sessionId,
           },
           source_session_id: sessionId,
         }),
@@ -660,6 +663,20 @@ export default function App() {
     ]
       .filter(Boolean)
       .join('\n\n')
+    void handleSend(prompt)
+  }, [handleSend])
+
+  const handleRegenerateResearch = useCallback((markdown: string) => {
+    const title = titleFromMarkdown(markdown)
+    const prompt = [
+      'Start the detailed research workflow to regenerate this report as a new version.',
+      `Previous report title: ${title}`,
+      'Refresh the search, read current or better sources, re-check citations, and return a new final Markdown report.',
+      'Keep the same general scope unless newer evidence suggests a better framing.',
+      '',
+      'Previous report:',
+      markdown,
+    ].join('\n')
     void handleSend(prompt)
   }, [handleSend])
 
@@ -1003,6 +1020,7 @@ export default function App() {
                   onNotebookEnabledChange={handleNotebookEnabledChange}
                   onLlmConfigChange={handleLlmConfigChange}
                   onSaveToNotebook={handleSaveToNotebook}
+                  onRegenerateResearch={handleRegenerateResearch}
                   onApplyNotebookEdit={handleApplyNotebookEdit}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}

@@ -147,6 +147,7 @@ interface Props {
   onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
   onSaveToNotebook?: (markdown: string) => Promise<void>
+  onRegenerateResearch?: (markdown: string) => void
   onApplyNotebookEdit?: (proposal: NotebookEditProposal) => Promise<void>
   onQuizAnswer?: (quizId: string, questionId: string, selectedOptionId: string) => Promise<void>
   onQuizFinish?: (quizId: string) => Promise<void>
@@ -226,6 +227,7 @@ export function ChatBox({
   onNotebookEnabledChange,
   onLlmConfigChange,
   onSaveToNotebook,
+  onRegenerateResearch,
   onApplyNotebookEdit,
   onQuizAnswer,
   onQuizFinish,
@@ -380,6 +382,7 @@ export function ChatBox({
                       text={msg.text}
                       sources={(msg.citations ?? []).map(citationToResearchSourceReference)}
                       onSaveToNotebook={onSaveToNotebook}
+                      onRegenerate={onRegenerateResearch}
                       onSourceNavigate={onSourceNavigate}
                     />
                   ) : (
