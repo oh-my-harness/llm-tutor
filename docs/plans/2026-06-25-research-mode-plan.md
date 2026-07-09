@@ -422,7 +422,7 @@ The report remains a Notebook research entry even after saving. A future book ch
 ### Phase 9: Follow-up Work
 
 - [x] Support Chat Quiz follow-up prompts that use a saved report as source material.
-- [ ] Add PDF/webpage source ingestion into knowledge base.
+- [x] Add PDF/webpage source ingestion into knowledge base.
 - [ ] Add longer-running deep research with parallel sub tasks.
 
 ## 11. Acceptance Criteria

@@ -110,7 +110,7 @@
 - REQ-131: Chunking shall be upgraded from basic splitting to paragraph/token-aware splitting. Status: planned.
 - REQ-132: Retrieval quality shall support reranking or improved scoring. Status: planned.
 - REQ-133: Citations shall support better location metadata such as page, paragraph, or chunk highlight. Status: planned.
-- REQ-134: Web pages and fetched sources shall be ingestible into a knowledge base. Status: planned.
+- REQ-134: Web pages and fetched sources shall be ingestible into a knowledge base. Status: implemented for Research report sources through the existing Knowledge Base document ingestion path.
 
 ## 8. Embedding Configuration
 

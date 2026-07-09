@@ -680,6 +680,42 @@ export default function App() {
     void handleSend(prompt)
   }, [handleSend])
 
+  const handleIngestResearchSources = useCallback(async (sources: SourceReference[], markdown: string) => {
+    if (!selectedKnowledgeBaseId) {
+      pushStatus({ kind: 'error', label: 'No Knowledge Base', detail: 'Select a Knowledge Base before adding report sources.' })
+      return
+    }
+    const usableSources = sources.filter((source) => source.target?.type === 'web' || source.metadata?.url || source.raw)
+    if (usableSources.length === 0) {
+      pushStatus({ kind: 'error', label: 'No sources', detail: 'This report has no importable sources.' })
+      return
+    }
+    pushStatus({ kind: 'tool', label: 'Adding sources', detail: `${usableSources.length} source(s)` })
+    try {
+      for (const source of usableSources) {
+        const sourceUrl = source.target?.type === 'web' ? source.target.url : source.metadata?.url
+        const text = researchSourceIngestText(source, markdown)
+        const res = await fetch(`/api/knowledge-bases/${encodeURIComponent(selectedKnowledgeBaseId)}/documents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: sourceUrl || source.title || source.raw || 'research-source',
+            text,
+          }),
+        })
+        const data = await safeJson(res)
+        if (!res.ok) throw new Error(errorMessage(data, res.status))
+        const job = data.job && typeof data.job === 'object' ? data.job as Record<string, unknown> : null
+        await pollIngestionJob(job?.id)
+      }
+      await refreshKnowledgeBases()
+      pushStatus({ kind: 'done', label: 'Sources added', detail: `${usableSources.length} source(s) indexed` })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: 'Source import failed', detail: message })
+    }
+  }, [pushStatus, refreshKnowledgeBases, selectedKnowledgeBaseId])
+
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     persistSettings(nextSettings)
@@ -1021,6 +1057,7 @@ export default function App() {
                   onLlmConfigChange={handleLlmConfigChange}
                   onSaveToNotebook={handleSaveToNotebook}
                   onRegenerateResearch={handleRegenerateResearch}
+                  onIngestResearchSources={handleIngestResearchSources}
                   onApplyNotebookEdit={handleApplyNotebookEdit}
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
@@ -1644,6 +1681,40 @@ function titleFromMarkdown(markdown: string) {
   if (heading) return heading.replace(/^#\s+/, '').trim().slice(0, 80) || 'Research Report'
   const first = markdown.trim().split('\n').find((line) => line.trim())
   return first?.trim().slice(0, 80) || 'Research Report'
+}
+
+function researchSourceIngestText(source: SourceReference, markdown: string) {
+  const url = source.target?.type === 'web' ? source.target.url : source.metadata?.url
+  return [
+    `# ${source.title || source.raw || 'Research source'}`,
+    '',
+    url ? `URL: ${url}` : '',
+    source.score !== undefined && source.score !== null ? `Quality score: ${source.score.toFixed(2)}` : '',
+    '',
+    source.description || source.raw,
+    '',
+    '## Source report context',
+    titleFromMarkdown(markdown),
+  ].filter((line) => line !== '').join('\n')
+}
+
+async function pollIngestionJob(jobId: unknown) {
+  if (typeof jobId !== 'string' || !jobId) {
+    throw new Error('ingestion did not return a job id')
+  }
+  for (;;) {
+    const res = await fetch(`/api/ingest-jobs/${encodeURIComponent(jobId)}`)
+    const data = await safeJson(res)
+    if (!res.ok) throw new Error(errorMessage(data, res.status))
+    const job = data.job as { status?: string; error?: string | null; message?: string | null }
+    if (job.status === 'done') return
+    if (job.status === 'error') throw new Error(job.error || job.message || 'ingestion failed')
+    await delay(500)
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function formatBytes(bytes: number) {

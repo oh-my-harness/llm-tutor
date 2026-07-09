@@ -7,6 +7,7 @@ interface Props {
   sources?: SourceReference[]
   onSaveToNotebook?: (markdown: string) => Promise<void>
   onRegenerate?: (markdown: string) => void
+  onIngestSources?: (sources: SourceReference[], markdown: string) => Promise<void>
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }
 
@@ -15,6 +16,7 @@ export function ResearchReportMessage({
   sources = [],
   onSaveToNotebook,
   onRegenerate,
+  onIngestSources,
   onSourceNavigate,
 }: Props) {
   const title = researchReportTitle(text)
@@ -37,8 +39,8 @@ export function ResearchReportMessage({
               {sourceStats.kb > 0 && <span>{sourceStats.kb} knowledge</span>}
             </div>
           </div>
-          {(onRegenerate || onSaveToNotebook) && (
-          <div className="flex flex-wrap gap-2">
+          {(onRegenerate || onSaveToNotebook || onIngestSources) && (
+            <div className="flex flex-wrap gap-2">
           {onRegenerate && (
             <button
               className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
@@ -49,8 +51,8 @@ export function ResearchReportMessage({
               Regenerate
             </button>
           )}
-          {onSaveToNotebook && (
-            <button
+              {onSaveToNotebook && (
+                <button
               className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
               type="button"
               onClick={() => {
@@ -59,9 +61,21 @@ export function ResearchReportMessage({
             >
               <FileText size={15} />
               保存到笔记本
-            </button>
-          )}
-          </div>
+                </button>
+              )}
+              {onIngestSources && sourceReferences.length > 0 && (
+                <button
+                  className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                  type="button"
+                  onClick={() => {
+                    void onIngestSources(sourceReferences, text)
+                  }}
+                >
+                  <BookOpen size={15} />
+                  Add sources to KB
+                </button>
+              )}
+            </div>
           )}
         </div>
       </header>
