@@ -3,6 +3,18 @@ import { openExternalUrl } from './api'
 let initialized = false
 let contextMenuElement: HTMLDivElement | null = null
 
+export interface DesktopContextAction {
+  label: string
+  run?: () => void
+  disabled?: boolean
+}
+
+export function openDesktopContextMenu(x: number, y: number, actions: DesktopContextAction[]) {
+  if (document.documentElement.dataset.desktop !== 'true') return false
+  showDesktopContextMenu(x, y, actions)
+  return true
+}
+
 export async function initializeDesktopBehavior() {
   if (initialized) return
   initialized = true
@@ -20,6 +32,7 @@ function installDesktopContextMenu() {
     const target = event.target
     if (!(target instanceof Element)) return
     if (target.closest('[data-browser-context-menu="true"]')) return
+    if (target.closest('[data-surface-context-menu="true"]')) return
 
     event.preventDefault()
     showDesktopContextMenu(event.clientX, event.clientY, desktopContextActions(target))
@@ -49,12 +62,12 @@ function installExternalLinkHandling() {
   }, true)
 }
 
-function desktopContextActions(target: Element): ContextAction[] {
+function desktopContextActions(target: Element): DesktopContextAction[] {
   const editableActions = editableContextActions(target)
   if (editableActions.length > 0) return editableActions
 
   const selection = window.getSelection()?.toString().trim() ?? ''
-  const actions: ContextAction[] = []
+  const actions: DesktopContextAction[] = []
 
   if (selection) {
     actions.push({
@@ -84,7 +97,7 @@ function desktopContextActions(target: Element): ContextAction[] {
   return actions.length > 0 ? actions : [{ label: 'No actions available', disabled: true }]
 }
 
-function editableContextActions(target: Element): ContextAction[] {
+function editableContextActions(target: Element): DesktopContextAction[] {
   const editable = editableElement(target)
   if (!editable) return []
 
@@ -119,13 +132,7 @@ function editableContextActions(target: Element): ContextAction[] {
   ]
 }
 
-interface ContextAction {
-  label: string
-  run?: () => void
-  disabled?: boolean
-}
-
-function showDesktopContextMenu(x: number, y: number, actions: ContextAction[]) {
+function showDesktopContextMenu(x: number, y: number, actions: DesktopContextAction[]) {
   hideDesktopContextMenu()
   const menu = document.createElement('div')
   menu.className = 'desktop-context-menu'

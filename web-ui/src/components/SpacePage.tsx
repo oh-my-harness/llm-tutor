@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent } from 'react'
 import {
   AlertTriangle,
   BookMarked,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react'
 import type { QuizQuestion, QuizSession } from '../quizTypes'
 import { useI18n, type TranslationKey } from '../i18n'
+import { openDesktopContextMenu } from '../desktop'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
@@ -1197,6 +1199,50 @@ function NotebookFileTree({
     return () => resizeObserver.disconnect()
   }, [])
 
+  const openFolderContextMenu = useCallback((event: MouseEvent, node: Extract<NotebookTreeNode, { type: 'folder' }>) => {
+    const opened = openDesktopContextMenu(event.clientX, event.clientY, [
+      {
+        label: expandedFolders.has(node.path) ? 'Collapse Folder' : 'Expand Folder',
+        run: () => onToggleFolder(node.path),
+      },
+      {
+        label: 'New Note Here',
+        run: () => onCreateEntry(node.path),
+      },
+      {
+        label: 'New Folder Here',
+        run: () => onCreateFolder(node.path),
+      },
+      {
+        label: 'Copy Folder Path',
+        run: () => {
+          void navigator.clipboard?.writeText(node.path)
+        },
+      },
+    ])
+    if (opened) event.preventDefault()
+  }, [expandedFolders, onCreateEntry, onCreateFolder, onToggleFolder])
+
+  const openEntryContextMenu = useCallback((event: MouseEvent, entry: NotebookEntry) => {
+    const opened = openDesktopContextMenu(event.clientX, event.clientY, [
+      {
+        label: 'Open Note',
+        run: () => onSelectEntry(entry.id),
+      },
+      {
+        label: 'Copy Note Path',
+        run: () => {
+          void navigator.clipboard?.writeText(entry.path ?? entry.title)
+        },
+      },
+      {
+        label: 'Delete Note',
+        run: () => onDeleteEntry(entry),
+      },
+    ])
+    if (opened) event.preventDefault()
+  }, [onDeleteEntry, onSelectEntry])
+
   return (
     <div
       ref={containerRef}
@@ -1214,8 +1260,10 @@ function NotebookFileTree({
               return (
                 <div
                   key={`folder:${node.path}`}
+                  data-surface-context-menu="true"
                   className="group flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm text-gray-700 hover:bg-white"
                   style={{ paddingLeft: `${8 + depth * 14}px` }}
+                  onContextMenu={(event) => openFolderContextMenu(event, node)}
                 >
                   <button className="flex min-w-0 flex-1 items-center gap-1.5 text-left" type="button" onClick={() => onToggleFolder(node.path)}>
                     <ChevronDown
@@ -1254,12 +1302,14 @@ function NotebookFileTree({
             return (
               <button
                 key={entry.id}
+                data-surface-context-menu="true"
                 className={`group flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-sm ${
                   active ? 'bg-white shadow-sm ring-1 ring-blue-100' : 'hover:bg-white'
                 }`}
                 style={{ paddingLeft: `${28 + depth * 14}px` }}
                 type="button"
                 title={entry.path ?? entry.title}
+                onContextMenu={(event) => openEntryContextMenu(event, entry)}
                 onClick={() => onSelectEntry(entry.id)}
               >
                 <FileText size={16} className="shrink-0 text-blue-600" />

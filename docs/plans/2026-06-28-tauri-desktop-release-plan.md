@@ -463,11 +463,12 @@ Tasks:
       Knowledge lists, Research reports, Trace, Settings, and other work areas.
 - [x] Add an app-owned context menu framework that can replace the browser
       context menu in desktop mode.
-- [ ] Define high-level context menu capability areas for Notebook, Chat,
+- [x] Define high-level context menu capability areas for Notebook, Chat,
       Knowledge, Research, Books, Settings, and source references without
       finalizing individual menu items yet.
 - [x] Implement the first context menu slice with generic Copy/Open Link/Copy
-      Link actions plus editable-field Cut/Copy/Paste/Select All actions.
+      Link actions, editable-field Cut/Copy/Paste/Select All actions, and
+      Notebook file-tree Open/New/Copy Path/Delete actions.
 - [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.
