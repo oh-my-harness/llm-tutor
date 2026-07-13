@@ -14,7 +14,7 @@ use tutor_tools::{
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
-use crate::event_sink::{emit_content, emit_trace};
+use crate::event_sink::{emit_content, emit_progress_content, emit_trace};
 use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 
 /// Run a single Chat turn: question → [rag_search + web_search] → answer.
@@ -352,11 +352,15 @@ async fn run_chat_inner(
 
         match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
-                if should_emit_text_delta(capability) {
-                    emit_content(&router.event_sink, text.clone(), true).await;
-                } else {
-                    fallback_text.push_str(text);
+                match text_delta_route_for_capability(capability) {
+                    TextDeltaRoute::FinalAnswer => {
+                        emit_content(&router.event_sink, text.clone(), true).await;
+                    }
+                    TextDeltaRoute::Progress => {
+                        emit_progress_content(&router.event_sink, text.clone(), true).await;
+                    }
                 }
+                fallback_text.push_str(text);
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
                 tool_use_id,
@@ -483,8 +487,18 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
     FinalAnswerMode::tool_with_text_fallback()
 }
 
-fn should_emit_text_delta(capability: &str) -> bool {
-    capability != "research"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextDeltaRoute {
+    FinalAnswer,
+    Progress,
+}
+
+fn text_delta_route_for_capability(capability: &str) -> TextDeltaRoute {
+    if capability == "research" {
+        TextDeltaRoute::Progress
+    } else {
+        TextDeltaRoute::FinalAnswer
+    }
 }
 
 fn looks_like_research_report(text: &str) -> bool {
@@ -805,8 +819,9 @@ fn quiz_system_prompt() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_system_prompt, final_answer_mode_for_capability, looks_like_research_report,
-        organize_system_prompt, quiz_system_prompt, research_system_prompt, should_emit_text_delta,
+        TextDeltaRoute, chat_system_prompt, final_answer_mode_for_capability,
+        looks_like_research_report, organize_system_prompt, quiz_system_prompt,
+        research_system_prompt, text_delta_route_for_capability,
     };
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
@@ -866,9 +881,15 @@ mod tests {
     }
 
     #[test]
-    fn research_does_not_stream_progress_text_as_answer_body() {
-        assert!(!should_emit_text_delta("research"));
-        assert!(should_emit_text_delta("chat"));
+    fn research_routes_text_delta_to_progress_channel() {
+        assert_eq!(
+            text_delta_route_for_capability("research"),
+            TextDeltaRoute::Progress
+        );
+        assert_eq!(
+            text_delta_route_for_capability("chat"),
+            TextDeltaRoute::FinalAnswer
+        );
     }
 
     #[test]

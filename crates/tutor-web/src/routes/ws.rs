@@ -72,6 +72,13 @@ impl EventSink for PersistedEventSink {
             stream.content(&text, chunk).await;
         })
     }
+
+    fn progress_content(&self, text: String, chunk: bool) -> BoxFuture<'static, ()> {
+        let stream = self.stream.clone();
+        Box::pin(async move {
+            stream.progress_content(&text, chunk).await;
+        })
+    }
 }
 
 #[derive(Deserialize)]

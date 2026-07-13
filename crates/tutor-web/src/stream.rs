@@ -7,8 +7,11 @@ use tutor_agent::event_sink::EventSink;
 #[serde(tag = "type", content = "payload")]
 #[serde(rename_all = "snake_case")]
 pub enum StreamEvent {
-    /// LLM text chunk or final message.
+    /// Final-answer text chunk or final message.
     Content { text: String, chunk: bool },
+    /// Transient model narration/progress that must not be persisted as the
+    /// final assistant answer.
+    ProgressContent { text: String, chunk: bool },
     /// Internal event for the TracePanel.
     Trace {
         kind: String,
@@ -41,6 +44,13 @@ impl TutorStream {
 
     pub async fn content(&self, text: &str, chunk: bool) {
         let _ = self.tx.send(StreamEvent::Content {
+            text: text.to_string(),
+            chunk,
+        });
+    }
+
+    pub async fn progress_content(&self, text: &str, chunk: bool) {
+        let _ = self.tx.send(StreamEvent::ProgressContent {
             text: text.to_string(),
             chunk,
         });
@@ -79,6 +89,17 @@ impl EventSink for TutorStream {
             stream.content(&text, chunk).await;
         })
     }
+
+    fn progress_content(
+        &self,
+        text: String,
+        chunk: bool,
+    ) -> futures::future::BoxFuture<'static, ()> {
+        let stream = self.clone();
+        Box::pin(async move {
+            stream.progress_content(&text, chunk).await;
+        })
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +130,18 @@ mod tests {
         assert_eq!(json["payload"]["phase"], "plan");
     }
 
+    #[test]
+    fn progress_content_event_serializes_to_json() {
+        let event = StreamEvent::ProgressContent {
+            text: "working".into(),
+            chunk: true,
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "progress_content");
+        assert_eq!(json["payload"]["text"], "working");
+        assert_eq!(json["payload"]["chunk"], true);
+    }
+
     #[tokio::test]
     async fn tutor_stream_sends_content() {
         let stream = TutorStream::new(16);
@@ -121,6 +154,21 @@ mod tests {
                 assert!(chunk);
             }
             _ => panic!("expected Content"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tutor_stream_sends_progress_content() {
+        let stream = TutorStream::new(16);
+        let mut rx = stream.subscribe();
+        stream.progress_content("working", true).await;
+        let event = rx.recv().await.unwrap();
+        match event {
+            StreamEvent::ProgressContent { text, chunk } => {
+                assert_eq!(text, "working");
+                assert!(chunk);
+            }
+            _ => panic!("expected ProgressContent"),
         }
     }
 }

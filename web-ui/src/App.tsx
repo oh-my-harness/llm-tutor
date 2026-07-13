@@ -146,6 +146,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
   const streamingRef = useRef('')
+  const progressStreamingRef = useRef('')
   const pendingSessionSendRef = useRef<{ sessionId: string; content: string; mentions: SpaceMention[] } | null>(null)
   const [traceEntries, setTraceEntries] = useState<TraceEntry[]>([])
   const pendingCitationsRef = useRef<Citation[]>([])
@@ -202,6 +203,14 @@ export default function App() {
     })
   }, [])
 
+  const pushProgressContent = useCallback((text: string) => {
+    if (!text.trim()) return
+    setMessages((prev) => [
+      ...dropTrailingTransientStatus(prev),
+      { role: 'status', text, kind: 'thinking', transient: true },
+    ])
+  }, [])
+
   const { send } = useWebSocket(sessionId, {
     onEvent: (event) => {
       if (event.type === 'content') {
@@ -240,6 +249,7 @@ export default function App() {
           pendingQuizPlanRef.current = undefined
           pendingResearchPlanRef.current = undefined
           streamingRef.current = ''
+          progressStreamingRef.current = ''
           setStreamingText('')
           setRunning(false)
           if (sessionId && citations.length > 0) {
@@ -249,6 +259,13 @@ export default function App() {
           }
           void refreshSessions()
         }
+      } else if (event.type === 'progress_content') {
+        if (event.payload.chunk) {
+          progressStreamingRef.current += event.payload.text
+        } else {
+          progressStreamingRef.current = event.payload.text
+        }
+        pushProgressContent(progressStreamingRef.current)
       } else if (event.type === 'trace') {
         const runtimeUsage = tokenUsageFromRuntimeTrace(event.payload as Record<string, unknown>)
         if (runtimeUsage) {
@@ -308,6 +325,7 @@ export default function App() {
             })
           }
         } else if (kind === 'stopped') {
+          progressStreamingRef.current = ''
           pushStatus({
             kind: 'done',
             label: 'Stopped',
@@ -332,6 +350,7 @@ export default function App() {
             requestId: payload.request_id as string,
           })
         } else if (kind === 'error') {
+          progressStreamingRef.current = ''
           const message = typeof payload.message === 'string' ? payload.message : 'WebSocket error'
           pushStatus({ kind: 'error', label: 'Error', detail: message })
           setRunning(false)
@@ -513,6 +532,7 @@ export default function App() {
           setLatestUsage(null)
           setStreamingText('')
           streamingRef.current = ''
+          progressStreamingRef.current = ''
           pendingCitationsRef.current = []
           pendingDeepSolveRef.current = []
           pendingNotebookEditProposalRef.current = undefined
@@ -548,6 +568,7 @@ export default function App() {
       setLatestUsage(null)
       setStreamingText('')
       streamingRef.current = ''
+      progressStreamingRef.current = ''
       pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
       pendingNotebookEditProposalRef.current = undefined
@@ -764,6 +785,7 @@ export default function App() {
     setMessages([])
     setStreamingText('')
     streamingRef.current = ''
+    progressStreamingRef.current = ''
     setTraceEntries([])
     pendingCitationsRef.current = []
     pendingDeepSolveRef.current = []
@@ -892,6 +914,7 @@ export default function App() {
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
+      progressStreamingRef.current = ''
       setTraceEntries([])
       pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
@@ -976,6 +999,7 @@ export default function App() {
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
+      progressStreamingRef.current = ''
       setTraceEntries([])
       pendingDeepSolveRef.current = []
       setLatestUsage(null)

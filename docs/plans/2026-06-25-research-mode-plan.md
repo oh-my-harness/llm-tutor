@@ -21,7 +21,8 @@ Research is different from normal chat:
 - chat is optimized for fast answers,
 - research is optimized for evidence gathering and durable output,
 - research should use search/read tools when current information or external facts are needed,
-- intermediate progress should not become normal assistant bubbles,
+- intermediate progress can be visible as its own transient progress surface,
+  but must not be merged into the durable final assistant answer,
 - the final report is the main user-visible answer.
 
 ## 2. First Version Scope
@@ -116,8 +117,33 @@ research_chat
 `research_chat`, `clarifying`, and `plan_proposed` should behave like normal
 chat: text can stream, and the assistant may ask questions or refine the plan.
 `workflow_running` should behave like a structured task: progress is shown as
-compact status/trace events, intermediate drafts should not become assistant
-bubbles, and only the completed report should become the durable final answer.
+compact progress/trace events, intermediate drafts should not be merged into the
+final assistant bubble, and only the completed report should become the durable
+final answer.
+
+### Streaming and Message Contract
+
+Research mode needs an explicit split between what the model is saying while it
+works and what the product records as the answer.
+
+- `content` is the final-answer channel. Chunks on this channel are assembled
+  into one durable assistant message. When a non-chunk `content` event arrives,
+  the UI commits that assembled text into the conversation history.
+- `progress_content` is the transient conversational/progress channel. TextDelta
+  that is useful to show before a final answer should be sent here in Research
+  mode. The UI renders it in a separate transient progress bubble or status
+  surface, clears it when the final answer is committed, and does not persist it
+  as the answer body.
+- `trace` and `status` are structured operational events for tool calls,
+  workflow stages, sources, errors, and metadata. They should stay structured
+  and should not be flattened into the final assistant text.
+
+This means Research can still feel conversational while the workflow is running:
+model narration is allowed to appear, but it is not treated as the same message
+as the final report. If a Research turn only produces ordinary chat text and no
+workflow/final-answer tool result, the runtime may promote that text to the
+final-answer channel at turn completion so greetings and clarifying questions are
+stored like normal conversation.
 
 ## 4. Layering
 
@@ -386,8 +412,9 @@ The report remains a Notebook research entry even after saving. A future book ch
   Notebook/Knowledge Base usage, and estimated workflow steps.
 - [x] Add UI affordance for confirming or revising the proposed research plan.
 - [x] Keep Research clarification and plan proposal conversational, while
-  preventing intermediate progress text from being committed as the assistant
-  answer body; durable assistant bubbles should come from final answers.
+  routing intermediate progress text through `progress_content` instead of
+  merging it into the final assistant answer; durable assistant bubbles should
+  come from the final-answer channel.
 - [x] Add tests where ambiguous Research requests produce a clarification
   question instead of calling `web_search`.
 - [x] Add tests where an explicit "start research" or confirmed plan enters the
@@ -438,8 +465,9 @@ V1 is complete when:
   research workflow,
 - a detailed research workflow triggers web search for external information,
 - the final answer is a report with a visible source list,
-- search/read progress during the detailed workflow is visible but not shown as
-  normal assistant bubbles,
+- search/read/model progress during the detailed workflow is visible as
+  transient progress or structured trace, but is not merged into the durable
+  final assistant bubble,
 - the report can be saved as a book chapter,
 - reloading the session preserves the report and sources,
 - report generation can fail with a clear reason when search or fetch fails.
