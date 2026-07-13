@@ -17,7 +17,8 @@ function Update-TextFile {
         [scriptblock]$Updater
     )
 
-    $text = Get-Content -Raw -LiteralPath $Path
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    $text = [System.IO.File]::ReadAllText($Path, $utf8)
     $next = & $Updater $text
     if ($null -eq $next) {
         throw "No version change was made in $Path."
@@ -26,7 +27,7 @@ function Update-TextFile {
         Write-Host "No change needed $Path"
         return
     }
-    Set-Content -LiteralPath $Path -Value $next -NoNewline
+    [System.IO.File]::WriteAllText($Path, $next, $utf8)
     Write-Host "Updated $Path"
 }
 
@@ -69,6 +70,10 @@ Update-TextFile -Path (Join-Path $root "Cargo.toml") -Updater {
 Update-JsonVersion -Path (Join-Path $root "src-tauri\tauri.conf.json")
 Update-JsonVersion -Path (Join-Path $root "web-ui\package.json")
 Update-PackageLockVersion -Path (Join-Path $root "web-ui\package-lock.json")
+Update-TextFile -Path (Join-Path $root "web-ui\src\components\Sidebar.tsx") -Updater {
+    param($text)
+    Replace-First $text '(>v)\d+\.\d+\.\d+(</div>)' "`${1}$Version`${2}"
+}
 
 Write-Host ""
 Write-Host "Version updated to $Version." -ForegroundColor Green
