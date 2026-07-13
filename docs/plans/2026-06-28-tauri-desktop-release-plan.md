@@ -451,6 +451,25 @@ slice.
 
 Status: in progress.
 
+Chat message presentation target:
+
+- Ordinary assistant answers should read like content in the conversation lane,
+  using a transparent background rather than a conventional chat bubble.
+- Ordinary user messages should remain right-aligned light-gray bubbles with a
+  bounded width so the two roles remain easy to scan.
+- Assistant content may use the full constrained Chat content lane; tables,
+  code blocks, and long-form answers should not inherit a narrow bubble width.
+- Research reports, Quiz cards, approvals, Notebook proposals, workflow status,
+  and other structured product results remain purpose-built components.
+- Ordinary message commands belong in a compact per-message action toolbar.
+  The toolbar appears on hover or keyboard focus without overlapping content or
+  changing message height. Assistant actions include Copy, Quote, Save to
+  Notebook, and Regenerate where available. User actions include Copy, Quote,
+  and Edit.
+- `Quote` inserts a clear message reference into the composer. `Sources N`
+  expands or focuses the separate citation/source surface; source details are
+  not compressed into the icon toolbar itself.
+
 Tasks:
 
 - [ ] Audit browser-default behaviors that are visible in the desktop app,
@@ -483,6 +502,19 @@ Tasks:
 - [x] Mark the currently open Chat session in the recent-session list with a
       restrained selected state that remains distinct from hover, pinned, and
       running indicators without changing list order.
+- [ ] Replace always-visible ordinary-message commands with a role-aware hover
+      and keyboard-focus action toolbar using icon buttons and tooltips.
+- [ ] Move ordinary assistant Copy, Quote, Save to Notebook, Regenerate, and
+      Sources actions into the message toolbar where each action is supported.
+- [ ] Move ordinary user Copy, Quote, and Edit actions into the same toolbar
+      pattern without exposing assistant-only commands.
+- [ ] Render ordinary assistant answers with transparent full-lane presentation
+      and ordinary user messages as bounded right-aligned light-gray bubbles.
+- [ ] Preserve dedicated rendering for Research reports, Quiz cards, approvals,
+      Notebook proposals, progress/status surfaces, citations, tables, and code.
+- [ ] Verify toolbar discovery by pointer and keyboard, no message overlap or
+      layout shift, readable line length, and responsive behavior at common
+      desktop widths.
 - [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.
@@ -516,6 +548,11 @@ Acceptance:
   file operation.
 - Each major surface has a documented context menu capability area, even if not
   every concrete menu item is implemented in the first polish slice.
+- Ordinary Chat messages have role-appropriate actions without persistent
+  button clutter, and every action remains reachable by keyboard focus.
+- Assistant answers use the full constrained Chat content lane with transparent
+  presentation, while user messages remain bounded light-gray bubbles.
+- Structured product results retain their dedicated cards and source surfaces.
 
 ### Phase 7: Background Session Resilience
 

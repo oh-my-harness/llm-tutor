@@ -72,6 +72,23 @@
 - REQ-084: Mentioned Space artifact IDs shall be persisted with the user message and restored with the session. Status: implemented.
 - REQ-085: Agents shall access mentioned Space artifacts through product tools such as `read_space_item` where possible, instead of blindly injecting long artifact content into every prompt. Status: implemented for Chat and Research.
 - REQ-086: When an agent uses mentioned Space artifact content in an answer, the response shall identify the relevant artifact or cite it through the product reference system. Status: planned.
+- REQ-087: Ordinary Chat messages shall expose role-appropriate actions through
+  a compact message action toolbar that appears on pointer hover or keyboard
+  focus without covering message content or shifting conversation layout.
+  Assistant actions shall include Copy, Quote, Save to Notebook, and Regenerate
+  where supported; user actions shall include Copy, Quote, and Edit. Quoting a
+  message shall add a structured or clearly delimited reference to the composer.
+  Status: planned.
+- REQ-088: Ordinary assistant text shall use a transparent, document-like
+  presentation that blends into the Chat background and may use the full Chat
+  content lane. Ordinary user messages shall remain visually distinct as
+  right-aligned light-gray bubbles with a bounded maximum width. Status: planned.
+- REQ-089: Structured product results such as Research reports, Quiz cards,
+  approval requests, Notebook edit proposals, and workflow status surfaces
+  shall retain purpose-built card or status presentation instead of inheriting
+  ordinary message bubble styling. Citation sources shall remain a separate,
+  expandable surface reached through a compact `Sources N` message action when
+  appropriate. Status: planned.
 
 ## 6. Attachments
 
