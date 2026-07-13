@@ -30,6 +30,14 @@ import type { QuizSession } from './quizTypes'
 import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
 import { openExternalUrl } from './api'
+import {
+  normalizeNotebookEntryPath,
+  normalizeNotebookFolderPath,
+  notebookFileNameFromTitle,
+  resolveGeneratedNotebookEntryType,
+  titleFromMarkdown,
+} from './notebookSave'
+import type { NotebookVaultInfo, SaveToNotebookResult } from './notebookSave'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
@@ -185,6 +193,8 @@ export default function App() {
   const [pinnedSessionIds, setPinnedSessionIds] = useState<Set<string>>(() => loadPinnedSessionIds())
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
   const [notebookFolders, setNotebookFolders] = useState<string[]>([])
+  const [notebookEntryPaths, setNotebookEntryPaths] = useState<string[]>([])
+  const [notebookVault, setNotebookVault] = useState<NotebookVaultInfo | null>(null)
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
   const [selectedNotebookEnabled, setSelectedNotebookEnabled] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -456,6 +466,10 @@ export default function App() {
     }
     const data = await safeJson(res)
     setNotebookFolders(((data.folders ?? []) as string[]).filter(Boolean))
+    setNotebookEntryPaths(((data.entries ?? []) as Array<{ path?: string | null }>)
+      .map((entry) => entry.path ?? '')
+      .filter(Boolean))
+    setNotebookVault((data.vault ?? null) as NotebookVaultInfo | null)
   }, [])
 
   useEffect(() => {
@@ -677,9 +691,10 @@ export default function App() {
     updateQuizInMessages(data.quiz as QuizSession)
   }, [updateQuizInMessages])
 
-  const handleSaveToNotebook = useCallback(async (markdown: string, options: SaveToNotebookOptions = {}) => {
+  const handleSaveToNotebook = useCallback(async (markdown: string, options: SaveToNotebookOptions = {}): Promise<SaveToNotebookResult> => {
     try {
       const title = titleFromMarkdown(markdown)
+      const entryType = resolveGeneratedNotebookEntryType(capability, options.entryType)
       let folderPath = options.newFolderPath?.trim() || options.folderPath?.trim() || ''
       if (folderPath) {
         folderPath = normalizeNotebookFolderPath(folderPath)
@@ -696,19 +711,24 @@ export default function App() {
         }
         setNotebookFolders(((folderData.folders ?? []) as string[]).filter(Boolean))
       }
-      const path = folderPath ? `${folderPath}/${notebookFileNameFromTitle(title)}` : undefined
+      const path = options.filePath
+        ? normalizeNotebookEntryPath(options.filePath)
+        : folderPath
+          ? `${folderPath}/${notebookFileNameFromTitle(title)}`
+          : notebookFileNameFromTitle(title)
+      if (!path) throw new Error('Notebook path is invalid')
       const res = await fetch('/api/notebook/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           space_id: 'default',
-          entry_type: 'research_report',
+          entry_type: entryType,
           title,
           path,
           markdown,
           metadata: {
-            generatedBy: 'research',
-            reportVersion: 1,
+            generatedBy: entryType === 'research_report' ? 'research' : 'chat',
+            ...(entryType === 'research_report' ? { reportVersion: 1 } : {}),
             generatedAt: new Date().toISOString(),
             sourceSessionId: sessionId,
           },
@@ -722,13 +742,17 @@ export default function App() {
       if (!options.newFolderPath?.trim()) {
         void refreshNotebookFolders()
       }
-      pushStatus({ kind: 'done', label: 'Saved', detail: folderPath ? `Notebook: ${folderPath}/${title}` : `Notebook: ${title}` })
+      const entry = data.entry as { id: string; title: string; path?: string | null }
+      const savedPath = entry.path ?? path
+      setNotebookEntryPaths((current) => current.includes(savedPath) ? current : [...current, savedPath])
+      pushStatus({ kind: 'done', label: 'Saved', detail: `Notebook: ${savedPath}` })
+      return { entryId: entry.id, title: entry.title, path: savedPath }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Save failed', detail: message })
       throw err
     }
-  }, [pushStatus, refreshNotebookFolders, sessionId])
+  }, [capability, pushStatus, refreshNotebookFolders, sessionId])
 
   const handleApplyNotebookEdit = useCallback(async (proposal: NotebookEditProposal) => {
     try {
@@ -1224,7 +1248,13 @@ export default function App() {
                   onNotebookEnabledChange={handleNotebookEnabledChange}
                   onLlmConfigChange={handleLlmConfigChange}
                   notebookFolders={notebookFolders}
+                  notebookEntryPaths={notebookEntryPaths}
+                  notebookVault={notebookVault}
                   onSaveToNotebook={handleSaveToNotebook}
+                  onOpenNotebookEntry={(entryId) => {
+                    setSpaceFocusTarget({ type: 'notebook', entryId })
+                    setView('notebook')
+                  }}
                   onRegenerateResearch={handleRegenerateResearch}
                   onIngestResearchSources={handleIngestResearchSources}
                   onApplyNotebookEdit={handleApplyNotebookEdit}
@@ -1879,36 +1909,6 @@ function attachmentSourceText(attachments: ChatAttachment[]) {
   ].join('\n\n')
 }
 
-function titleFromMarkdown(markdown: string) {
-  const heading = markdown
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('# '))
-  if (heading) return heading.replace(/^#\s+/, '').trim().slice(0, 80) || 'Research Report'
-  const first = markdown.trim().split('\n').find((line) => line.trim())
-  return first?.trim().slice(0, 80) || 'Research Report'
-}
-
-function normalizeNotebookFolderPath(path: string) {
-  return path
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((part) => sanitizeNotebookPathPart(part))
-    .filter(Boolean)
-    .join('/')
-}
-
-function notebookFileNameFromTitle(title: string) {
-  return `${sanitizeNotebookPathPart(title) || 'Research Report'}.md`
-}
-
-function sanitizeNotebookPathPart(value: string) {
-  return value
-    .trim()
-    .replace(/[<>:"|?*\x00-\x1F]/g, '')
-    .replace(/[./\\]+$/g, '')
-    .slice(0, 80)
-}
 
 function researchSourceIngestText(source: SourceReference, markdown: string) {
   const url = source.target?.type === 'web' ? source.target.url : source.metadata?.url

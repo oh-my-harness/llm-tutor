@@ -1,4 +1,4 @@
-﻿import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import {
   AlertCircle,
@@ -12,7 +12,6 @@ import {
   Edit3,
   FileText,
   FileQuestion,
-  Folder,
   SearchCheck,
   MessageSquare,
   Paperclip,
@@ -21,6 +20,19 @@ import {
   Square,
   X,
 } from 'lucide-react'
+import { chooseDesktopSavePath, isDesktopApp } from '../api'
+import {
+  desktopDefaultSavePath,
+  folderFromNotebookPath,
+  loadLastNotebookSaveFolder,
+  notebookFileNameFromTitle,
+  notebookPath,
+  notebookPathExists,
+  relativeNotebookPath,
+  saveLastNotebookSaveFolder,
+  titleFromMarkdown,
+} from '../notebookSave'
+import type { NotebookVaultInfo, SaveToNotebookResult } from '../notebookSave'
 import type { LlmModelConfig } from '../settings'
 import type { QuizSession } from '../quizTypes'
 import { useI18n, type TranslationKey } from '../i18n'
@@ -28,6 +40,7 @@ import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 import { ResearchReportMessage, looksLikeResearchReport } from './ResearchReportMessage'
+import { SaveNotebookDialog, SaveNotebookOutcomeDialog } from './SaveNotebookDialog'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 type OpenMenu = 'mode' | 'knowledge' | 'space' | 'model' | null
@@ -36,6 +49,8 @@ type SpaceMentionFilter = 'all' | SpaceMention['type']
 export interface SaveToNotebookOptions {
   folderPath?: string
   newFolderPath?: string
+  filePath?: string
+  entryType?: 'research_report' | 'chat_excerpt'
 }
 
 interface Message {
@@ -153,7 +168,10 @@ interface Props {
   onNotebookEnabledChange: (enabled: boolean) => void
   onLlmConfigChange: (id: string) => void
   notebookFolders?: string[]
-  onSaveToNotebook?: (markdown: string, options?: SaveToNotebookOptions) => Promise<void>
+  notebookEntryPaths?: string[]
+  notebookVault?: NotebookVaultInfo | null
+  onSaveToNotebook?: (markdown: string, options?: SaveToNotebookOptions) => Promise<SaveToNotebookResult>
+  onOpenNotebookEntry?: (entryId: string) => void
   onRegenerateResearch?: (markdown: string) => void
   onIngestResearchSources?: (sources: SourceReference[], markdown: string) => Promise<void>
   onApplyNotebookEdit?: (proposal: NotebookEditProposal) => Promise<void>
@@ -235,7 +253,10 @@ export function ChatBox({
   onNotebookEnabledChange,
   onLlmConfigChange,
   notebookFolders = [],
+  notebookEntryPaths = [],
+  notebookVault,
   onSaveToNotebook,
+  onOpenNotebookEntry,
   onRegenerateResearch,
   onIngestResearchSources,
   onApplyNotebookEdit,
@@ -254,7 +275,12 @@ export function ChatBox({
   const [saveNotebookMarkdown, setSaveNotebookMarkdown] = useState<string | null>(null)
   const [saveNotebookFolder, setSaveNotebookFolder] = useState('')
   const [saveNotebookNewFolder, setSaveNotebookNewFolder] = useState('')
+  const [saveNotebookFileName, setSaveNotebookFileName] = useState('')
   const [saveNotebookBusy, setSaveNotebookBusy] = useState(false)
+  const [saveNotebookNative, setSaveNotebookNative] = useState(false)
+  const [saveNotebookEntryType, setSaveNotebookEntryType] = useState<'research_report' | 'chat_excerpt'>('chat_excerpt')
+  const [saveNotebookResult, setSaveNotebookResult] = useState<SaveToNotebookResult | null>(null)
+  const [saveNotebookError, setSaveNotebookError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
@@ -301,10 +327,56 @@ export function ChatBox({
     setMentions((current) => current.filter((mention) => mention.id !== id))
   }
 
-  const openSaveNotebookDialog = (markdown: string) => {
-    setSaveNotebookMarkdown(markdown)
-    setSaveNotebookFolder('')
+  const openSaveNotebookDialog = async (markdown: string, entryType: 'research_report' | 'chat_excerpt' = 'chat_excerpt') => {
+    const fileName = notebookFileNameFromTitle(titleFromMarkdown(markdown))
+    const lastFolder = loadLastNotebookSaveFolder(notebookFolders)
+    setSaveNotebookResult(null)
+    setSaveNotebookError('')
+    setSaveNotebookFileName(fileName)
+    setSaveNotebookEntryType(entryType)
+    setSaveNotebookFolder(lastFolder)
     setSaveNotebookNewFolder('')
+    if (notebookVault?.external && await isDesktopApp().catch(() => false)) {
+      setSaveNotebookNative(true)
+      await saveToExternalVault(markdown, fileName, lastFolder, entryType)
+      return
+    }
+    setSaveNotebookNative(false)
+    setSaveNotebookMarkdown(markdown)
+  }
+
+  const saveToExternalVault = async (
+    markdown: string,
+    fileName: string,
+    folderPath: string,
+    entryType: 'research_report' | 'chat_excerpt',
+  ) => {
+    if (!onSaveToNotebook || !notebookVault) return
+    setSaveNotebookMarkdown(markdown)
+    try {
+      const selectedPath = await chooseDesktopSavePath(
+        '保存到 Notebook Vault',
+        desktopDefaultSavePath(notebookVault.root, folderPath, fileName),
+      )
+      if (!selectedPath) {
+        closeSaveNotebookDialog()
+        return
+      }
+      const relativePath = relativeNotebookPath(notebookVault.root, selectedPath)
+      setSaveNotebookFolder(folderFromNotebookPath(relativePath))
+      setSaveNotebookFileName(relativePath.split('/').pop() ?? fileName)
+      if (notebookPathExists(relativePath, notebookEntryPaths)) {
+        throw new Error('该位置已经存在同名 Notebook 笔记，请选择其他文件名。')
+      }
+      setSaveNotebookBusy(true)
+      const result = await onSaveToNotebook(markdown, { filePath: relativePath, entryType })
+      saveLastNotebookSaveFolder(folderFromNotebookPath(result.path))
+      setSaveNotebookResult(result)
+    } catch (error) {
+      setSaveNotebookError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSaveNotebookBusy(false)
+    }
   }
 
   const closeSaveNotebookDialog = () => {
@@ -312,19 +384,28 @@ export function ChatBox({
     setSaveNotebookMarkdown(null)
     setSaveNotebookFolder('')
     setSaveNotebookNewFolder('')
+    setSaveNotebookFileName('')
+    setSaveNotebookNative(false)
+    setSaveNotebookEntryType('chat_excerpt')
+    setSaveNotebookResult(null)
+    setSaveNotebookError('')
   }
 
   const submitSaveNotebook = async () => {
     if (!onSaveToNotebook || !saveNotebookMarkdown || saveNotebookBusy) return
     setSaveNotebookBusy(true)
     try {
-      await onSaveToNotebook(saveNotebookMarkdown, {
+      const result = await onSaveToNotebook(saveNotebookMarkdown, {
         folderPath: saveNotebookFolder || undefined,
         newFolderPath: saveNotebookNewFolder.trim() || undefined,
+        filePath: notebookPath(saveNotebookNewFolder || saveNotebookFolder, saveNotebookFileName),
+        entryType: saveNotebookEntryType,
       })
-      setSaveNotebookMarkdown(null)
-      setSaveNotebookFolder('')
-      setSaveNotebookNewFolder('')
+      saveLastNotebookSaveFolder(folderFromNotebookPath(result.path))
+      setSaveNotebookResult(result)
+      setSaveNotebookError('')
+    } catch (error) {
+      setSaveNotebookError(error instanceof Error ? error.message : String(error))
     } finally {
       setSaveNotebookBusy(false)
     }
@@ -348,16 +429,37 @@ export function ChatBox({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {saveNotebookMarkdown && (
-        <SaveNotebookDialog
-          folders={notebookFolders}
-          selectedFolder={saveNotebookFolder}
-          newFolder={saveNotebookNewFolder}
-          busy={saveNotebookBusy}
-          onSelectedFolderChange={setSaveNotebookFolder}
-          onNewFolderChange={setSaveNotebookNewFolder}
-          onCancel={closeSaveNotebookDialog}
-          onSave={() => void submitSaveNotebook()}
-        />
+        saveNotebookResult || saveNotebookNative ? (
+          <SaveNotebookOutcomeDialog
+            result={saveNotebookResult}
+            error={saveNotebookError}
+            busy={saveNotebookBusy}
+            onClose={closeSaveNotebookDialog}
+            onOpen={() => {
+              if (saveNotebookResult) onOpenNotebookEntry?.(saveNotebookResult.entryId)
+              closeSaveNotebookDialog()
+            }}
+            onRetry={() => void saveToExternalVault(saveNotebookMarkdown, saveNotebookFileName, saveNotebookFolder, saveNotebookEntryType)}
+          />
+        ) : (
+          <SaveNotebookDialog
+            folders={notebookFolders}
+            entryPaths={notebookEntryPaths}
+            selectedFolder={saveNotebookFolder}
+            newFolder={saveNotebookNewFolder}
+            fileName={saveNotebookFileName}
+            busy={saveNotebookBusy}
+            error={saveNotebookError}
+            onSelectedFolderChange={(folder) => {
+              setSaveNotebookFolder(folder)
+              setSaveNotebookNewFolder('')
+            }}
+            onNewFolderChange={setSaveNotebookNewFolder}
+            onFileNameChange={setSaveNotebookFileName}
+            onCancel={closeSaveNotebookDialog}
+            onSave={() => void submitSaveNotebook()}
+          />
+        )
       )}
       {empty ? (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
@@ -436,7 +538,7 @@ export function ChatBox({
                     <ResearchReportMessage
                       text={msg.text}
                       sources={(msg.citations ?? []).map(citationToResearchSourceReference)}
-                      onSaveToNotebook={openSaveNotebookDialog}
+                      onSaveToNotebook={(markdown) => void openSaveNotebookDialog(markdown, 'research_report')}
                       onRegenerate={onRegenerateResearch}
                       onIngestSources={onIngestResearchSources}
                       onSourceNavigate={onSourceNavigate}
@@ -444,13 +546,13 @@ export function ChatBox({
                   ) : (
                     <>
                       <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
-                      {capability === 'research' && msg.text.trim() && onSaveToNotebook && (
+                      {(capability === 'research' || capability === 'chat') && msg.text.trim() && onSaveToNotebook && (
                         <div className="mt-3 flex justify-end">
                           <button
                             className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
                             type="button"
                             onClick={() => {
-                              openSaveNotebookDialog(msg.text)
+                              void openSaveNotebookDialog(msg.text)
                             }}
                           >
                             <FileText size={16} />
@@ -1689,87 +1791,6 @@ function MentionSummary({
           )}
         </div>
       ))}
-    </div>
-  )
-}
-
-function SaveNotebookDialog({
-  folders,
-  selectedFolder,
-  newFolder,
-  busy,
-  onSelectedFolderChange,
-  onNewFolderChange,
-  onCancel,
-  onSave,
-}: {
-  folders: string[]
-  selectedFolder: string
-  newFolder: string
-  busy: boolean
-  onSelectedFolderChange: (value: string) => void
-  onNewFolderChange: (value: string) => void
-  onCancel: () => void
-  onSave: () => void
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/25 px-4">
-      <div className="w-full max-w-md rounded-lg border border-blue-100 bg-white shadow-2xl shadow-blue-950/15">
-        <div className="flex items-start gap-3 border-b border-gray-100 px-5 py-4">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-            <Folder size={18} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-gray-950">保存到笔记本</h3>
-            <p className="mt-1 text-xs text-gray-500">选择保存目录，或输入一个新的文件夹路径。</p>
-          </div>
-        </div>
-        <div className="space-y-4 px-5 py-4">
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">文件夹</span>
-            <select
-              className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-              value={selectedFolder}
-              disabled={busy || Boolean(newFolder.trim())}
-              onChange={(event) => onSelectedFolderChange(event.target.value)}
-            >
-              <option value="">根目录</option>
-              {folders.map((folder) => (
-                <option key={folder} value={folder}>{folder}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">新建文件夹</span>
-            <input
-              className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-              value={newFolder}
-              disabled={busy}
-              placeholder="例如 research/2026"
-              onChange={(event) => onNewFolderChange(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
-          <button
-            className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-            type="button"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            取消
-          </button>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-300"
-            type="button"
-            disabled={busy}
-            onClick={onSave}
-          >
-            <FileText size={16} />
-            保存
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

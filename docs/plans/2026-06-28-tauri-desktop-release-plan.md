@@ -485,17 +485,17 @@ Tasks:
       local files where product flows already need those actions.
 - [x] Add a shared desktop directory picker helper and route Notebook Vault
       folder binding through it.
-- [ ] Add a desktop native Save dialog for generated Notebook saves when an
+- [x] Add a desktop native Save dialog for generated Notebook saves when an
       external Notebook Vault is bound, converting the selected path into a
       Notebook-relative Markdown path before saving. Restrict the dialog to
       Markdown destinations inside the bound Vault.
-- [ ] Replace the generated-content save folder dropdown and free-form path
+- [x] Replace the generated-content save folder dropdown and free-form path
       field with an app-owned Notebook folder tree when Notebook uses app-local
       storage or the UI is running in web/dev mode.
-- [ ] In the Notebook tree save flow, support root/existing-folder selection,
+- [x] In the Notebook tree save flow, support root/existing-folder selection,
       inline folder creation, last-folder restoration, final logical-path
       preview, conflict validation, and opening the saved entry.
-- [ ] Keep "Save to Notebook" separate from "Export Markdown": only export may
+- [x] Keep "Save to Notebook" separate from "Export Markdown": only export may
       use a native file dialog to write outside Notebook ownership.
 - [ ] Add or plan app-level shortcuts and command palette behavior for common
       desktop workflows.

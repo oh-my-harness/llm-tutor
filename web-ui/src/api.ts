@@ -65,6 +65,21 @@ export async function chooseDesktopDirectory(title: string): Promise<string | nu
   return null
 }
 
+export async function isDesktopApp(): Promise<boolean> {
+  const { isTauri } = await import('@tauri-apps/api/core')
+  return isTauri()
+}
+
+export async function chooseDesktopSavePath(title: string, defaultPath: string): Promise<string | null> {
+  if (!await isDesktopApp()) return null
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  return save({
+    title,
+    defaultPath,
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  })
+}
+
 export async function readClipboardText(): Promise<string | null> {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return null

@@ -740,15 +740,15 @@ retrieval.
 - [x] Add batch Notebook entry creation so import persists once per operation.
 - [x] Add desktop native folder import for Obsidian Vault directories.
 - [x] Report unsupported Obsidian attachments/assets during import.
-- [ ] Add desktop native Save dialog for saving generated notes/research
+- [x] Add desktop native Save dialog for saving generated notes/research
   reports into a bound external Notebook Vault, restricted to Markdown paths
   inside that Vault.
-- [ ] Replace the save-to-Notebook folder dropdown with a Notebook tree picker
+- [x] Replace the save-to-Notebook folder dropdown with a Notebook tree picker
   for non-native or app-local Vault saves.
-- [ ] Add root/existing-folder selection, in-place folder creation,
+- [x] Add root/existing-folder selection, in-place folder creation,
   expand/collapse state, last-folder restoration, and final-path preview to the
   Notebook tree save flow.
-- [ ] Validate destination conflicts and provide an open-saved-entry action
+- [x] Validate destination conflicts and provide an open-saved-entry action
   after a successful generated-content save.
 - [ ] Keep native local export commands separate from Save to Notebook in UI
   labels, behavior, and tests.
