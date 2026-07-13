@@ -475,9 +475,9 @@ Tasks:
       Link actions, editable-field Cut/Copy/Paste/Select All actions, and
       Notebook file-tree Open/New/Copy Path/Delete actions, using native
       desktop clipboard commands instead of browser clipboard permission prompts.
-- [ ] Add a product-owned right-click context menu for recent session items,
+- [x] Add a product-owned right-click context menu for recent session items,
       including Pin/Unpin, Rename, and Delete.
-- [ ] Change recent-session ordering so selecting a session does not move it;
+- [x] Change recent-session ordering so selecting a session does not move it;
       only sending a new message or receiving new conversation activity should
       promote an unpinned session.
 - [x] Route external web links through the system browser in desktop mode.

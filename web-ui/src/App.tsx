@@ -96,6 +96,7 @@ interface RecentSession {
   id: string
   title: string
   activeRun?: SessionRunSummary | null
+  pinned?: boolean
 }
 
 interface SessionRunSummary {
@@ -181,6 +182,7 @@ export default function App() {
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
   const [running, setRunning] = useState(false)
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
+  const [pinnedSessionIds, setPinnedSessionIds] = useState<Set<string>>(() => loadPinnedSessionIds())
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseOption[]>([])
   const [notebookFolders, setNotebookFolders] = useState<string[]>([])
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<string>('')
@@ -425,12 +427,13 @@ export default function App() {
       throw new Error(`failed to load sessions: HTTP ${res.status}`)
     }
     const data = await res.json() as SessionListResponse
-    setRecentSessions((data.sessions ?? []).map((session) => ({
+    setRecentSessions(sortRecentSessions((data.sessions ?? []).map((session) => ({
       id: session.id,
       title: session.title || session.name || 'New session',
       activeRun: session.active_run ?? null,
-    })))
-  }, [])
+      pinned: pinnedSessionIds.has(session.id),
+    }))))
+  }, [pinnedSessionIds])
 
   const refreshKnowledgeBases = useCallback(async () => {
     const res = await fetch('/api/knowledge-bases')
@@ -460,8 +463,7 @@ export default function App() {
     if (!pending || pending.sessionId !== sessionId) return
     pendingSessionSendRef.current = null
     send({ type: 'message', content: pending.content, mentions: pending.mentions })
-    void refreshSessions()
-  }, [sessionId, send, refreshSessions])
+  }, [sessionId, send])
 
   const persistSettings = useCallback((nextSettings: typeof llmSettings) => {
     saveLlmSettings(nextSettings)
@@ -534,14 +536,15 @@ export default function App() {
         const createdSessionId = data.id as string
         sid = createdSessionId
         setSessionId(createdSessionId)
-        upsertRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
+        promoteRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
+      } else {
+        promoteRecentSession(setRecentSessions, sid, sessionTitleFromMessage(displayText))
       }
 
       setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments, mentions }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       send({ type: 'message', content, mentions })
-      void refreshSessions()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Error', detail: message })
@@ -592,7 +595,7 @@ export default function App() {
           setRunning(true)
           pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
           send({ type: 'message', content: nextText, mentions: [] })
-          void refreshSessions()
+          promoteRecentSession(setRecentSessions, sessionId, sessionTitleFromMessage(nextText))
           return
         }
       }
@@ -615,7 +618,7 @@ export default function App() {
       const nextSessionId = data.id as string
 
       setSessionId(nextSessionId)
-      upsertRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
+      promoteRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
       setMessages([{ role: 'user', text: nextText }])
       setTraceEntries([])
       setLatestUsage(null)
@@ -1021,7 +1024,7 @@ export default function App() {
         setSelectedNotebookEnabled(Boolean(data.notebook_enabled))
         const title = data.metadata?.name || restored.find((message) => message.role === 'user')?.text
         if (title) {
-          upsertRecentSession(setRecentSessions, id, sessionTitleFromMessage(title))
+          updateRecentSessionTitle(setRecentSessions, id, sessionTitleFromMessage(title))
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -1054,6 +1057,24 @@ export default function App() {
     }
   }
 
+  const handleTogglePinSession = useCallback((id: string) => {
+    setPinnedSessionIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      savePinnedSessionIds(next)
+      setRecentSessions((sessions) =>
+        sortRecentSessions(sessions.map((session) =>
+          session.id === id ? { ...session, pinned: next.has(id) } : session,
+        )),
+      )
+      return next
+    })
+  }, [])
+
   const handleDeleteSession = async (id: string) => {
     const session = recentSessions.find((item) => item.id === id)
     if (!window.confirm(`Delete "${session?.title ?? 'this session'}"?`)) return
@@ -1082,6 +1103,13 @@ export default function App() {
       if (!res.ok) {
         throw new Error(`failed to delete session: HTTP ${res.status}`)
       }
+      setPinnedSessionIds((current) => {
+        if (!current.has(id)) return current
+        const next = new Set(current)
+        next.delete(id)
+        savePinnedSessionIds(next)
+        return next
+      })
       void refreshSessions()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -1159,6 +1187,7 @@ export default function App() {
         onSelectSession={handleSelectSession}
         onRenameSession={handleRenameSession}
         onDeleteSession={handleDeleteSession}
+        onTogglePinSession={handleTogglePinSession}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
 
@@ -1727,15 +1756,61 @@ function sessionTitleFromMessage(text: string) {
   return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized
 }
 
-function upsertRecentSession(
+function promoteRecentSession(
   setRecentSessions: Dispatch<SetStateAction<RecentSession[]>>,
   id: string,
   title: string,
 ) {
-  setRecentSessions((prev) => [
-    { id, title, activeRun: prev.find((session) => session.id === id)?.activeRun ?? null },
-    ...prev.filter((session) => session.id !== id),
-  ])
+  setRecentSessions((prev) => {
+    const existing = prev.find((session) => session.id === id)
+    const nextSession = {
+      id,
+      title,
+      activeRun: existing?.activeRun ?? null,
+      pinned: existing?.pinned ?? false,
+    }
+    const rest = prev.filter((session) => session.id !== id)
+    return nextSession.pinned
+      ? sortRecentSessions([nextSession, ...rest])
+      : [
+        ...rest.filter((session) => session.pinned),
+        nextSession,
+        ...rest.filter((session) => !session.pinned),
+      ]
+  })
+}
+
+function updateRecentSessionTitle(
+  setRecentSessions: Dispatch<SetStateAction<RecentSession[]>>,
+  id: string,
+  title: string,
+) {
+  setRecentSessions((prev) =>
+    prev.map((session) => (session.id === id ? { ...session, title } : session)),
+  )
+}
+
+function sortRecentSessions(sessions: RecentSession[]) {
+  return [
+    ...sessions.filter((session) => session.pinned),
+    ...sessions.filter((session) => !session.pinned),
+  ]
+}
+
+const pinnedSessionsStorageKey = 'llm-tutor:pinned-sessions'
+
+function loadPinnedSessionIds() {
+  try {
+    const raw = window.localStorage.getItem(pinnedSessionsStorageKey)
+    const parsed = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function savePinnedSessionIds(ids: Set<string>) {
+  window.localStorage.setItem(pinnedSessionsStorageKey, JSON.stringify([...ids]))
 }
 
 function updateRecentSessionRun(

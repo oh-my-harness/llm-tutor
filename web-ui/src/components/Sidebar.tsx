@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import {
   BookOpen,
   Bot,
@@ -11,12 +11,14 @@ import {
   NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
   Settings,
   Sparkles,
   Trash2,
   X,
 } from 'lucide-react'
 import { useI18n } from '../i18n'
+import { openDesktopContextMenu } from '../desktop'
 
 export type AppView =
   | 'chat'
@@ -34,6 +36,7 @@ interface RecentSession {
     capability?: string
     status?: string
   } | null
+  pinned?: boolean
 }
 
 interface Props {
@@ -44,6 +47,7 @@ interface Props {
   onSelectSession: (id: string) => void
   onRenameSession: (id: string, title: string) => void
   onDeleteSession: (id: string) => void
+  onTogglePinSession: (id: string) => void
   onToggleCollapsed: () => void
 }
 
@@ -74,6 +78,7 @@ export function Sidebar({
   onSelectSession,
   onRenameSession,
   onDeleteSession,
+  onTogglePinSession,
   onToggleCollapsed,
 }: Props) {
   const { t } = useI18n()
@@ -98,6 +103,28 @@ export function Sidebar({
   const cancelEditing = () => {
     setEditingSessionId(null)
     setEditingTitle('')
+  }
+
+  const openSessionContextMenu = (event: MouseEvent, session: RecentSession) => {
+    if (editingSessionId === session.id) return
+    const opened = openDesktopContextMenu(event.clientX, event.clientY, [
+      {
+        label: session.pinned ? 'Unpin Session' : 'Pin Session',
+        run: () => onTogglePinSession(session.id),
+      },
+      {
+        label: 'Rename Session',
+        run: () => startEditing(session),
+      },
+      {
+        label: 'Delete Session',
+        run: () => onDeleteSession(session.id),
+      },
+    ])
+    if (opened) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
   }
 
   return (
@@ -184,6 +211,8 @@ export function Sidebar({
               return (
                 <div
                   key={session.id}
+                  data-surface-context-menu="true"
+                  onContextMenu={(event) => openSessionContextMenu(event, session)}
                   className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 ${
                     running ? 'bg-blue-50/70' : ''
                   }`}
@@ -224,9 +253,12 @@ export function Sidebar({
                         type="button"
                         className="min-w-0 flex-1 text-left"
                         onClick={() => onSelectSession(session.id)}
-                        title={running ? `${session.title} · Running` : session.title}
+                        title={[session.title, session.pinned ? 'Pinned' : '', running ? 'Running' : ''].filter(Boolean).join(' · ')}
                       >
-                        <span className="block truncate">{session.title}</span>
+                        <span className="flex min-w-0 items-center gap-1">
+                          {session.pinned && <Pin size={12} className="shrink-0 text-gray-500" />}
+                          <span className="block min-w-0 truncate">{session.title}</span>
+                        </span>
                         {running && (
                           <span className="mt-0.5 block truncate text-[11px] font-medium text-blue-600">
                             Running{session.activeRun?.capability ? ` · ${capabilityLabel(session.activeRun.capability)}` : ''}
