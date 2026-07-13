@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react'
 import type { QuizQuestion, QuizSession } from '../quizTypes'
+import { quizSourceFilters, quizSourceLabel, quizSourceType, type QuizSourceFilter } from '../quizSource'
 import { useI18n, type TranslationKey } from '../i18n'
 import { openDesktopContextMenu } from '../desktop'
 import { writeClipboardText } from '../api'
@@ -36,7 +37,6 @@ import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './Markdo
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 type SpaceTab = 'notebook' | 'quiz_bank' | 'student_profile'
-type QuizSourceFilter = 'all' | 'knowledge_base' | 'conversation' | 'space' | 'notebook'
 
 interface NotebookEntry {
   id: string
@@ -114,14 +114,6 @@ const spaceTabs: Array<{ key: SpaceTab; labelKey: TranslationKey; icon: typeof N
 const allTabs = [notebookTab, ...spaceTabs]
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
-
-const quizSourceFilters: Array<{ key: QuizSourceFilter; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'knowledge_base', label: 'Knowledge' },
-  { key: 'conversation', label: 'Conversation' },
-  { key: 'space', label: 'Space refs' },
-  { key: 'notebook', label: 'Notebook' },
-]
 
 type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }>
 
@@ -1697,22 +1689,6 @@ function quizCitationRawTarget(citation: QuizQuestion['citations'][number]) {
     return ['kb', citation.kb, citation.document_id, citation.chunk_id].filter(Boolean).join(':')
   }
   return citation.source
-}
-
-function quizSourceType(quiz: QuizSession): Exclude<QuizSourceFilter, 'all'> {
-  if (quiz.kb_id?.trim()) return 'knowledge_base'
-  const sources = quiz.questions.flatMap((question) => question.citations.map((citation) => citation.source.toLowerCase()))
-  const sourceText = [quiz.title, quiz.config.topic ?? '', ...sources].join(' ').toLowerCase()
-  if (sourceText.includes('space reference') || sourceText.includes('mentioned_space_items')) return 'space'
-  if (sourceText.includes('notebook:') || sourceText.includes('notebook')) return 'notebook'
-  return 'conversation'
-}
-
-function quizSourceLabel(source: Exclude<QuizSourceFilter, 'all'>) {
-  if (source === 'knowledge_base') return 'Knowledge'
-  if (source === 'space') return 'Space'
-  if (source === 'notebook') return 'Notebook'
-  return 'Conversation'
 }
 
 function StudentProfileTab({
