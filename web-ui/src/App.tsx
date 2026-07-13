@@ -155,6 +155,7 @@ export default function App() {
   const pendingQuizRef = useRef<QuizSession | undefined>(undefined)
   const pendingQuizPlanRef = useRef<QuizPlan | undefined>(undefined)
   const pendingResearchPlanRef = useRef<ResearchPlan | undefined>(undefined)
+  const pendingResearchReportRef = useRef<string | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -225,12 +226,14 @@ export default function App() {
           const quiz = pendingQuizRef.current
           const quizPlan = pendingQuizPlanRef.current
           const researchPlan = pendingResearchPlanRef.current
-          if (finalText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan || researchPlan) {
+          const researchReport = pendingResearchReportRef.current
+          const messageText = researchReport || finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : '')
+          if (messageText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan || researchPlan) {
             setMessages((prev) => [
               ...dropTrailingTransientStatus(prev),
               {
                 role: 'assistant',
-                text: finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : ''),
+                text: messageText,
                 citations,
                 deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
                 notebookEditProposal,
@@ -248,6 +251,7 @@ export default function App() {
           pendingQuizRef.current = undefined
           pendingQuizPlanRef.current = undefined
           pendingResearchPlanRef.current = undefined
+          pendingResearchReportRef.current = undefined
           streamingRef.current = ''
           progressStreamingRef.current = ''
           setStreamingText('')
@@ -297,6 +301,10 @@ export default function App() {
         const researchPlan = researchPlanFromTrace(event.payload as Record<string, unknown>)
         if (researchPlan) {
           pendingResearchPlanRef.current = researchPlan
+        }
+        const researchReport = researchReportFromTrace(event.payload as Record<string, unknown>)
+        if (researchReport) {
+          pendingResearchReportRef.current = researchReport
         }
         pushStatus(statusFromTrace(event.payload as Record<string, unknown>))
         setTraceEntries((prev) => [
@@ -536,6 +544,10 @@ export default function App() {
           pendingCitationsRef.current = []
           pendingDeepSolveRef.current = []
           pendingNotebookEditProposalRef.current = undefined
+          pendingQuizRef.current = undefined
+          pendingQuizPlanRef.current = undefined
+          pendingResearchPlanRef.current = undefined
+          pendingResearchReportRef.current = undefined
           setRunning(true)
           pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
           send({ type: 'message', content: nextText, mentions: [] })
@@ -575,6 +587,7 @@ export default function App() {
       pendingQuizRef.current = undefined
       pendingQuizPlanRef.current = undefined
       pendingResearchPlanRef.current = undefined
+      pendingResearchReportRef.current = undefined
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
       pendingSessionSendRef.current = { sessionId: nextSessionId, content: nextText, mentions: [] }
@@ -793,6 +806,7 @@ export default function App() {
     pendingQuizRef.current = undefined
     pendingQuizPlanRef.current = undefined
     pendingResearchPlanRef.current = undefined
+    pendingResearchReportRef.current = undefined
     setLatestUsage(null)
     setBudgetWarning(false)
     setRunning(false)
@@ -922,6 +936,7 @@ export default function App() {
       pendingQuizRef.current = undefined
       pendingQuizPlanRef.current = undefined
       pendingResearchPlanRef.current = undefined
+      pendingResearchReportRef.current = undefined
       setLatestUsage(null)
       setSessionId(id)
       try {
@@ -1001,7 +1016,13 @@ export default function App() {
       streamingRef.current = ''
       progressStreamingRef.current = ''
       setTraceEntries([])
+      pendingCitationsRef.current = []
       pendingDeepSolveRef.current = []
+      pendingNotebookEditProposalRef.current = undefined
+      pendingQuizRef.current = undefined
+      pendingQuizPlanRef.current = undefined
+      pendingResearchPlanRef.current = undefined
+      pendingResearchReportRef.current = undefined
       setLatestUsage(null)
     }
 
@@ -1294,9 +1315,10 @@ function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
   const isRagToolResult = payload.kind === 'tool_result' && payload.tool === 'rag_search'
   const isWebToolResult =
     payload.kind === 'tool_result' && (payload.tool === 'web_search' || payload.tool === 'web_fetch')
+  const isResearchToolResult = payload.kind === 'tool_result' && payload.tool === 'create_research_report'
   const isRagCitationEvent = payload.kind === 'rag_citations'
   const isResearchReportDone = payload.kind === 'research_report_done'
-  if (!isRagToolResult && !isWebToolResult && !isRagCitationEvent && !isResearchReportDone) return []
+  if (!isRagToolResult && !isWebToolResult && !isResearchToolResult && !isRagCitationEvent && !isResearchReportDone) return []
   const details = isResearchReportDone ? payload : payload.details
   if (!details || typeof details !== 'object') return []
   const sources = (details as { sources?: unknown }).sources
@@ -1432,6 +1454,14 @@ function researchPlanFromTrace(payload: Record<string, unknown>): ResearchPlan |
     steps: stringListFromUnknown(item.steps),
     questions: stringListFromUnknown(item.questions),
   }
+}
+
+function researchReportFromTrace(payload: Record<string, unknown>): string | undefined {
+  if (payload.kind !== 'tool_result' || payload.tool !== 'create_research_report' || payload.ok === false) return undefined
+  const details = payload.details
+  if (!details || typeof details !== 'object') return undefined
+  const markdown = (details as Record<string, unknown>).markdown
+  return typeof markdown === 'string' && markdown.trim() ? markdown : undefined
 }
 
 function stringListFromUnknown(value: unknown): string[] {

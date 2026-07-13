@@ -1,11 +1,24 @@
 use futures::future::BoxFuture;
 use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
+use tutor_agent::CapabilityRouter;
 
+static CREATE_RESEARCH_REPORT_SCHEMA: std::sync::OnceLock<serde_json::Value> =
+    std::sync::OnceLock::new();
 static PROPOSE_RESEARCH_PLAN_SCHEMA: std::sync::OnceLock<serde_json::Value> =
     std::sync::OnceLock::new();
 
 pub(crate) struct ProposeResearchPlanTool;
+
+pub(crate) struct CreateResearchReportTool {
+    router: CapabilityRouter,
+}
+
+impl CreateResearchReportTool {
+    pub(crate) fn new(router: CapabilityRouter) -> Self {
+        Self { router }
+    }
+}
 
 impl Tool for ProposeResearchPlanTool {
     fn name(&self) -> &str {
@@ -75,6 +88,74 @@ impl Tool for ProposeResearchPlanTool {
                     "use_knowledge_base": use_knowledge_base,
                     "steps": steps,
                     "questions": questions,
+                }),
+                terminate: false,
+            })
+        })
+    }
+}
+
+impl Tool for CreateResearchReportTool {
+    fn name(&self) -> &str {
+        "create_research_report"
+    }
+
+    fn description(&self) -> &str {
+        "Run the detailed Research workflow after the user explicitly asks to produce the report or confirms a research plan. This tool searches/reads sources, verifies citation readiness, writes the Markdown report, and returns report metadata. Do not call it for ordinary clarification chat."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        CREATE_RESEARCH_REPORT_SCHEMA.get_or_init(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "string",
+                        "description": "Confirmed research request, including topic, scope, output format, source preferences, freshness requirements, and any relevant conversation context."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional short report title for UI metadata."
+                    }
+                },
+                "required": ["request"]
+            })
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let request = optional_string(&args, "request").ok_or_else(|| {
+                ToolError::InvalidArguments("create_research_report requires request".into())
+            })?;
+            let title = optional_string(&args, "title").unwrap_or_else(|| "Research report".into());
+            let run = tutor_agent::research::run_research_workflow_with_runtime(
+                &self.router,
+                tutor_agent::research::ResearchWorkflowInput {
+                    request: request.clone(),
+                },
+                None,
+                Some(ctx.abort.clone()),
+            )
+            .await
+            .map_err(|err| ToolError::Execution(err.to_string()))?;
+
+            Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Research report \"{title}\" is ready with {} source(s). The product UI will render the report from tool metadata.",
+                        run.sources.len()
+                    ),
+                }],
+                details: json!({
+                    "title": title,
+                    "request": request,
+                    "markdown": run.markdown,
+                    "sources": run.sources,
                 }),
                 terminate: false,
             })
@@ -166,5 +247,21 @@ mod tests {
         assert_eq!(result.details["source_preferences"][0], "official docs");
         assert_eq!(result.details["use_notebook"], true);
         assert_eq!(result.terminate, false);
+    }
+
+    #[test]
+    fn create_research_report_declares_tool_boundary() {
+        let router = tutor_agent::CapabilityRouter::new(
+            Arc::new(OsEnv::new(std::env::temp_dir())),
+            tutor_agent::LlmConfig::anthropic("test-model", "test-key"),
+            tutor_agent::governance::GovernanceConfig::new(1.0, None, false),
+        );
+        let tool = CreateResearchReportTool::new(router);
+        let schema = tool.parameters_schema();
+
+        assert_eq!(tool.name(), "create_research_report");
+        assert!(tool.description().contains("detailed Research workflow"));
+        assert_eq!(schema["required"][0], "request");
+        assert_eq!(schema["properties"]["request"]["type"], "string");
     }
 }

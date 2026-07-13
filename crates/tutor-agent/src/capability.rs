@@ -48,6 +48,7 @@ impl FromStr for Capability {
 }
 
 /// Entry point for all capabilities.
+#[derive(Clone)]
 pub struct CapabilityRouter {
     pub env: Arc<dyn ExecutionEnv>,
     pub llm: LlmConfig,

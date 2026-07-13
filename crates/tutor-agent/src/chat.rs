@@ -14,7 +14,7 @@ use tutor_tools::{
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
-use crate::event_sink::{emit_content, emit_progress_content, emit_trace};
+use crate::event_sink::{emit_content, emit_trace};
 use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 
 /// Run a single Chat turn: question → [rag_search + web_search] → answer.
@@ -67,16 +67,6 @@ pub async fn run_research_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    if let Some(request) = research_workflow_request_from_messages(&messages) {
-        let run = crate::research::run_research_workflow_with_runtime(
-            router,
-            crate::research::ResearchWorkflowInput { request },
-            None,
-            None,
-        )
-        .await?;
-        return Ok(run.markdown);
-    }
     run_chat_inner(
         router,
         "research",
@@ -102,23 +92,6 @@ pub async fn run_research_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    let existing = session
-        .build_context()
-        .await
-        .map_err(|err| TutorError::Internal(err.to_string()))?
-        .messages;
-    let mut messages = existing.clone();
-    messages.push(user_message(question));
-    if let Some(request) = research_workflow_request_from_messages(&messages) {
-        let run = crate::research::run_research_workflow_with_runtime(
-            router,
-            crate::research::ResearchWorkflowInput { request },
-            Some(session),
-            abort_token,
-        )
-        .await?;
-        return Ok(run.markdown);
-    }
     run_chat_inner(
         router,
         "research",
@@ -352,14 +325,8 @@ async fn run_chat_inner(
 
         match event.as_ref() {
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
-                match text_delta_route_for_capability(capability) {
-                    TextDeltaRoute::FinalAnswer => {
-                        emit_content(&router.event_sink, text.clone(), true).await;
-                    }
-                    TextDeltaRoute::Progress => {
-                        emit_progress_content(&router.event_sink, text.clone(), true).await;
-                    }
-                }
+                let TextDeltaRoute::FinalAnswer = text_delta_route_for_capability(capability);
+                emit_content(&router.event_sink, text.clone(), true).await;
                 fallback_text.push_str(text);
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -490,15 +457,11 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextDeltaRoute {
     FinalAnswer,
-    Progress,
 }
 
 fn text_delta_route_for_capability(capability: &str) -> TextDeltaRoute {
-    if capability == "research" {
-        TextDeltaRoute::Progress
-    } else {
-        TextDeltaRoute::FinalAnswer
-    }
+    let _ = capability;
+    TextDeltaRoute::FinalAnswer
 }
 
 fn looks_like_research_report(text: &str) -> bool {
@@ -506,103 +469,6 @@ fn looks_like_research_report(text: &str) -> bool {
     normalized.contains("## summary")
         && normalized.contains("## sources")
         && (normalized.contains("## key findings") || normalized.contains("## analysis"))
-}
-
-fn should_start_research_workflow(text: &str) -> bool {
-    let normalized = text.to_ascii_lowercase();
-    normalized.contains("start the detailed research workflow")
-        || normalized.contains("begin the detailed research workflow")
-        || normalized.contains("run the detailed research workflow")
-        || normalized.contains("start research")
-        || normalized.contains("begin research")
-        || normalized.contains("produce the report")
-        || normalized.contains("write the report")
-        || text.contains("开始调研")
-        || text.contains("开始研究")
-        || text.contains("启动调研")
-        || text.contains("启动研究")
-        || text.contains("详细研究工作流程")
-        || text.contains("生成报告")
-        || text.contains("写报告")
-        || text.contains("调研报告")
-        || normalized.contains("confirmed plan")
-            && normalized.contains("detailed research workflow")
-            && (normalized.contains("search") || normalized.contains("report"))
-}
-
-fn research_workflow_request_from_messages(messages: &[AgentMessage]) -> Option<String> {
-    let request = last_user_text(messages)?;
-    if should_start_research_workflow(&request) {
-        return Some(research_request_with_context(messages, &request));
-    }
-
-    if is_research_confirmation(&request)
-        && previous_assistant_requested_research_confirmation(messages)
-    {
-        return Some(research_request_with_context(messages, &request));
-    }
-
-    None
-}
-
-fn research_request_with_context(messages: &[AgentMessage], request: &str) -> String {
-    if messages.len() <= 1 {
-        return request.to_string();
-    }
-
-    let context = messages
-        .iter()
-        .take(messages.len().saturating_sub(1))
-        .filter_map(|message| match message {
-            AgentMessage::User(_) => {
-                agent_message_text(message).map(|text| format!("User: {text}"))
-            }
-            AgentMessage::Assistant(_) => {
-                agent_message_text(message).map(|text| format!("Assistant: {text}"))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    format!("Conversation context:\n{context}\n\nConfirmed research instruction:\n{request}")
-}
-
-fn is_research_confirmation(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 24 {
-        return false;
-    }
-    let normalized = trimmed.to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "ok" | "okay" | "yes" | "y" | "confirm" | "confirmed" | "go" | "start" | "begin"
-    ) || matches!(
-        trimmed,
-        "可以" | "好的" | "好" | "确认" | "没问题" | "开始" | "开始吧" | "启动" | "继续" | "行"
-    )
-}
-
-fn previous_assistant_requested_research_confirmation(messages: &[AgentMessage]) -> bool {
-    messages
-        .iter()
-        .rev()
-        .skip(1)
-        .find_map(|message| match message {
-            AgentMessage::Assistant(_) => agent_message_text(message),
-            AgentMessage::User(_) => None,
-            _ => None,
-        })
-        .is_some_and(|text| {
-            let lower = text.to_ascii_lowercase();
-            lower.contains("detailed research workflow")
-                || lower.contains("start research")
-                || lower.contains("confirm")
-                || text.contains("详细研究工作流程")
-                || text.contains("开始调研")
-                || text.contains("调研计划")
-                || text.contains("确认")
-        })
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -701,46 +567,6 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
     })
 }
 
-fn last_user_text(messages: &[AgentMessage]) -> Option<String> {
-    messages.iter().rev().find_map(|message| {
-        let AgentMessage::User(message) = message else {
-            return None;
-        };
-        let text = message
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        (!text.trim().is_empty()).then_some(text)
-    })
-}
-
-fn agent_message_text(message: &AgentMessage) -> Option<String> {
-    match message {
-        AgentMessage::User(message) => {
-            let text = message
-                .content
-                .iter()
-                .filter_map(|block| match block {
-                    ContentBlock::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            (!text.trim().is_empty()).then_some(text)
-        }
-        AgentMessage::Assistant(message) => {
-            let text = message.text_content();
-            (!text.trim().is_empty()).then_some(text)
-        }
-        _ => None,
-    }
-}
-
 fn chat_system_prompt() -> String {
     "You are a knowledgeable tutor. Use read_memory when personalization is relevant, \
      such as prior weaknesses, learning preferences, recent study state, follow-up teaching, \
@@ -776,14 +602,15 @@ fn research_system_prompt() -> String {
      In Research Chat, discuss the topic, ask focused clarification questions, and help define goal, scope, source preferences, output format, depth, time range, and whether Notebook or Knowledge Base context should be used. \
      Do not call web_search, web_fetch, or produce a full report when the user's request is ambiguous or they are only discussing scope. \
      When the research need is mostly clear but not confirmed, call propose_research_plan with the proposed topic, scope, output format, depth, time range, sources, and workflow steps, then ask the user to confirm or revise it. \
-     Start the Detailed Research Workflow only when the user explicitly asks to begin, confirms a proposed plan, or gives an unambiguous instruction to produce the report now. \
+     Call create_research_report only when the user explicitly asks to begin, confirms a proposed plan, or gives an unambiguous instruction to produce the report now. \
+     Do not start the Detailed Research Workflow through free-form chat text; create_research_report is the workflow boundary. \
      For the Detailed Research Workflow: (1) identify the confirmed research question and scope, \
      (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
      (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call search_notebook when Notebook is associated, (7) optionally call rag_search when a knowledge base is associated, \
      (8) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
-     When the Detailed Research Workflow completes, the report must be Markdown with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
+     When create_research_report completes, briefly tell the user the report is ready; the product UI renders the full report from tool metadata. The report must be Markdown with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
      Keep workflow progress brief; the final report is the main deliverable."
         .into()
@@ -848,6 +675,8 @@ mod tests {
         assert!(prompt.contains("Research Chat and Detailed Research Workflow"));
         assert!(prompt.contains("Do not call web_search"));
         assert!(prompt.contains("propose_research_plan"));
+        assert!(prompt.contains("create_research_report"));
+        assert!(prompt.contains("workflow boundary"));
         assert!(prompt.contains("explicitly asks to begin"));
         assert!(prompt.contains("call web_search"));
         assert!(prompt.contains("call web_fetch"));
@@ -881,10 +710,10 @@ mod tests {
     }
 
     #[test]
-    fn research_routes_text_delta_to_progress_channel() {
+    fn research_chat_routes_text_delta_to_final_answer_channel() {
         assert_eq!(
             text_delta_route_for_capability("research"),
-            TextDeltaRoute::Progress
+            TextDeltaRoute::FinalAnswer
         );
         assert_eq!(
             text_delta_route_for_capability("chat"),

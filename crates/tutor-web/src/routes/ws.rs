@@ -25,7 +25,7 @@ use crate::memory_store::{MemoryEventCategory, MemoryStore};
 use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::quiz_tool::{CreateQuizTool, ProposeQuizPlanTool};
-use crate::research_tool::ProposeResearchPlanTool;
+use crate::research_tool::{CreateResearchReportTool, ProposeResearchPlanTool};
 use crate::routes::quiz::CreateLlmConfig;
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
@@ -343,9 +343,6 @@ async fn run_tutor_message(
                     create_quiz_llm_config_for_session(entry.llm.clone()),
                 )));
         }
-        if entry.capability == "research" {
-            router = router.with_product_tool(Arc::new(ProposeResearchPlanTool));
-        }
         if entry.notebook_enabled {
             router = router
                 .with_product_tool(Arc::new(ListNotebookTreeTool::new(notebook.clone())))
@@ -364,6 +361,12 @@ async fn run_tutor_message(
         }
         if let Some(kb) = entry.kb.clone() {
             router = router.with_associated_kb(kb);
+        }
+        if entry.capability == "research" {
+            let workflow_router = router.clone();
+            router = router
+                .with_product_tool(Arc::new(ProposeResearchPlanTool))
+                .with_product_tool(Arc::new(CreateResearchReportTool::new(workflow_router)));
         }
         let resolved_content =
             resolve_message_content_with_space_mentions(&notebook, &quizzes, &content, &mentions);

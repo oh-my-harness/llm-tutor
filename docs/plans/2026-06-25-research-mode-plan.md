@@ -470,9 +470,9 @@ The report remains a Notebook research entry even after saving. A future book ch
   detailed workflow path.
 - [x] Move detailed workflow execution from the prompt-driven harness path into
   the runtime `WorkflowEngine`.
-- [ ] Replace capability-level keyword/confirmation pre-routing with a
+- [x] Replace capability-level keyword/confirmation pre-routing with a
   Quiz-aligned `create_research_report` product tool boundary.
-- [ ] Keep ordinary Research Chat TextDelta streaming identical to Chat until
+- [x] Keep ordinary Research Chat TextDelta streaming identical to Chat until
   the `create_research_report` tool call starts.
 
 ### Phase 7: Detailed Research Workflow
@@ -493,10 +493,10 @@ The report remains a Notebook research entry even after saving. A future book ch
   research_report)` when saved.
 - [x] Add non-real-LLM workflow tests for search/fetch/report metadata and
   citation verification.
-- [ ] Return completed report metadata through `create_research_report`
+- [x] Return completed report metadata through `create_research_report`
   `tool_result` so the UI can attach a structured Research report card using the
   same pattern as Quiz cards.
-- [ ] Bridge workflow step progress from `create_research_report` to
+- [x] Bridge workflow step progress from `create_research_report` to
   trace/status/progress events without converting intermediate drafts into
   assistant answer bubbles.
 
