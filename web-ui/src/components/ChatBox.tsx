@@ -1304,7 +1304,7 @@ function Composer({
           <MentionSummary mentions={mentions} removable onRemove={onRemoveMention} />
         </div>
       )}
-      <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
+      <div className="relative flex flex-wrap items-center gap-1.5 border-t border-blue-50 px-3 py-1.5">
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'mode'}
@@ -1313,7 +1313,7 @@ function Composer({
             onClick={() => toggleMenu('mode')}
           />
           {openMenu === 'mode' && (
-            <DropdownPanel widthClassName="w-[33rem]">
+            <DropdownPanel widthClassName="w-[22rem]">
               {visibleModeOptions.map((mode) => (
                 <DropdownOption
                   key={mode.value}
@@ -1332,12 +1332,12 @@ function Composer({
         </div>
 
         <button
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
+          className="inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-xs text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
           type="button"
           disabled={disabled || running || readingAttachments}
           onClick={() => fileInputRef.current?.click()}
         >
-          <Paperclip size={18} />
+          <Paperclip size={14} />
           {t('chat.attachments')}
         </button>
         <input
@@ -1351,12 +1351,12 @@ function Composer({
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'knowledge'}
-            icon={<Database size={18} />}
+            icon={<Database size={14} />}
             label={activeKnowledge?.name ?? t('chat.knowledge.none')}
             onClick={() => toggleMenu('knowledge')}
           />
           {openMenu === 'knowledge' && (
-            <DropdownPanel widthClassName="w-[28rem]">
+            <DropdownPanel widthClassName="w-[19rem]">
               {sourceOptions.map((item) => (
                 <DropdownOption
                   key={item.id || 'none'}
@@ -1387,21 +1387,21 @@ function Composer({
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'space'}
-            icon={<AtSign size={18} />}
+            icon={<AtSign size={14} />}
             label={mentions.length > 0 ? `${t('nav.space')} ${mentions.length}` : t('nav.space')}
             onClick={() => toggleMenu('space')}
           />
           {openMenu === 'space' && (
             <DropdownPanel
-              widthClassName="w-[30rem] max-w-[calc(100vw-2rem)]"
-              className="flex max-h-[min(28rem,calc(100vh-10rem))] flex-col"
+              widthClassName="w-[20rem] max-w-[calc(100vw-1.5rem)]"
+              className="flex max-h-[min(19rem,calc(100vh-7rem))] flex-col"
             >
-              <div className="shrink-0 space-y-2 border-b border-blue-50 bg-white px-4 pb-2 pt-1">
-                <div className="flex rounded-xl bg-gray-50 p-1">
+              <div className="shrink-0 space-y-1.5 border-b border-blue-50 bg-white px-3 pb-1.5 pt-1">
+                <div className="flex rounded-lg bg-gray-50 p-0.5">
                   {spaceMentionFilterOptions.map((option) => (
                     <button
                       key={option.value}
-                      className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition ${
+                      className={`flex h-6 flex-1 items-center justify-center gap-1 rounded-md text-[11px] font-medium transition ${
                         spaceMentionFilter === option.value
                           ? 'bg-white text-blue-700 shadow-sm'
                           : 'text-gray-500 hover:text-gray-900'
@@ -1415,19 +1415,19 @@ function Composer({
                   ))}
                 </div>
                 <input
-                  className="h-9 w-full rounded-xl border border-blue-100 px-3 text-sm outline-none focus:border-blue-300"
+                  className="h-6 w-full rounded-lg border border-blue-100 px-2 text-xs outline-none focus:border-blue-300"
                   value={spaceQuery}
                   onChange={(event) => setSpaceQuery(event.target.value)}
                   placeholder={t('chat.space.searchPlaceholder')}
                   autoFocus
                 />
                 {loadingSpaceMentions && (
-                  <div className="px-1 text-xs text-blue-500">{t('chat.space.updating')}</div>
+                  <div className="px-1 text-[11px] text-blue-500">{t('chat.space.updating')}</div>
                 )}
               </div>
-              <div className="min-h-0 overflow-y-auto py-2">
+              <div className="min-h-0 overflow-y-auto py-1">
                 {visibleSpaceMentions.length === 0 ? (
-                  <div className="px-5 py-4 text-sm text-gray-500">
+                  <div className="px-3 py-2 text-xs text-gray-500">
                     {t('chat.space.noMatching')}
                   </div>
                 ) : (
@@ -1453,16 +1453,16 @@ function Composer({
         <div className="relative ml-auto">
           <ToolbarButton
             active={openMenu === 'model'}
-            icon={<Brain size={16} />}
+            icon={<Brain size={13} />}
             label={activeModel?.model ?? t('chat.model.select')}
             onClick={() => toggleMenu('model')}
           />
           {openMenu === 'model' && (
-            <DropdownPanel widthClassName="right-0 left-auto w-[30rem]">
+            <DropdownPanel widthClassName="right-0 left-auto w-[20rem]">
               {llmConfigs.length === 0 ? (
                 <DropdownOption
                   selected
-                  icon={<Brain size={21} />}
+                  icon={<Brain size={14} />}
                   title={t('chat.model.none')}
                   description={t('chat.model.configureFirst')}
                   onClick={() => setOpenMenu(null)}
@@ -1472,7 +1472,7 @@ function Composer({
                   <DropdownOption
                     key={config.id}
                     selected={config.id === activeModel?.id}
-                    icon={<Brain size={21} />}
+                    icon={<Brain size={14} />}
                     title={config.name || config.model}
                     description={`${llmApiModeLabel(config.provider)} / ${config.model}`}
                     onClick={() => {
@@ -1487,7 +1487,7 @@ function Composer({
         </div>
 
         <button
-          className={`flex h-9 w-9 items-center justify-center rounded-full text-white disabled:bg-gray-200 disabled:text-gray-400 ${
+          className={`flex h-6 w-6 items-center justify-center rounded-full text-white disabled:bg-gray-200 disabled:text-gray-400 ${
             running ? 'bg-gray-900 hover:bg-gray-800' : 'bg-blue-600 hover:bg-blue-700'
           }`}
           onClick={running ? onStop : onSend}
@@ -1495,7 +1495,7 @@ function Composer({
           type="button"
           title={running ? t('chat.stop') : t('chat.send')}
         >
-          {running ? <Square size={15} /> : <ArrowUp size={20} />}
+          {running ? <Square size={11} /> : <ArrowUp size={14} />}
         </button>
       </div>
     </div>
@@ -1818,7 +1818,7 @@ function ToolbarButton({
 }) {
   return (
     <button
-      className={`inline-flex h-9 max-w-56 items-center gap-2 rounded-full border px-3 text-sm transition ${
+      className={`inline-flex h-6 max-w-40 items-center gap-1.5 rounded-full border px-2 text-xs transition ${
         active
           ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
           : 'border-transparent text-gray-700 hover:bg-blue-50'
@@ -1828,7 +1828,7 @@ function ToolbarButton({
     >
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
-      <ChevronDown size={16} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
+      <ChevronDown size={11} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
     </button>
   )
 }
@@ -1844,7 +1844,7 @@ function DropdownPanel({
 }) {
   return (
     <div
-      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-2'}`}
+      className={`absolute bottom-9 left-0 z-30 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-1'}`}
     >
       {children}
     </div>
@@ -1866,7 +1866,7 @@ function DropdownOption({
 }) {
   return (
     <button
-      className={`flex w-full items-center gap-4 px-5 py-4 text-left transition ${
+      className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition ${
         selected ? 'bg-blue-50' : 'hover:bg-gray-50'
       }`}
       type="button"
@@ -1874,13 +1874,13 @@ function DropdownOption({
     >
       <span className={`${selected ? 'text-blue-700' : 'text-gray-500'}`}>{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-base font-semibold text-gray-950">{title}</span>
-        <span className="mt-0.5 block truncate text-sm text-gray-500">{description}</span>
+        <span className="block truncate text-sm font-semibold text-gray-950">{title}</span>
+        <span className="mt-0.5 block truncate text-xs text-gray-500">{description}</span>
       </span>
       {selected ? (
-        <CheckCircle2 size={18} className="shrink-0 text-blue-600" />
+        <CheckCircle2 size={13} className="shrink-0 text-blue-600" />
       ) : (
-        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-transparent" />
+        <span className="h-2 w-2 shrink-0 rounded-full bg-transparent" />
       )}
     </button>
   )
