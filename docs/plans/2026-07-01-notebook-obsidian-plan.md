@@ -680,6 +680,16 @@ Save-to-Notebook UX:
   the app-local Vault is an internal data directory, not a user-facing file
   system location.
 - Web/dev fallback: use the app-owned Notebook tree picker.
+- The Notebook tree picker supports selecting root or an existing folder,
+  expanding/collapsing folders, and creating a folder in place.
+- The save flow remembers the last selected Notebook folder when it still
+  exists, previews the final Notebook-relative folder, file name, and logical
+  path, and validates invalid or conflicting destinations before confirmation.
+- After saving, show the destination and provide a direct action to open the
+  created Notebook entry.
+- "Save to Notebook" remains a Notebook-owned database/Vault operation.
+  "Export Markdown" is a separate command and may use the system file dialog to
+  write a portable file or archive to any user-selected local destination.
 - The current folder dropdown plus free-form "new folder" field is a temporary
   fallback and should be replaced by the tree picker/native Save flow.
 
@@ -731,9 +741,17 @@ retrieval.
 - [x] Add desktop native folder import for Obsidian Vault directories.
 - [x] Report unsupported Obsidian attachments/assets during import.
 - [ ] Add desktop native Save dialog for saving generated notes/research
-  reports into a bound external Notebook Vault.
+  reports into a bound external Notebook Vault, restricted to Markdown paths
+  inside that Vault.
 - [ ] Replace the save-to-Notebook folder dropdown with a Notebook tree picker
   for non-native or app-local Vault saves.
+- [ ] Add root/existing-folder selection, in-place folder creation,
+  expand/collapse state, last-folder restoration, and final-path preview to the
+  Notebook tree save flow.
+- [ ] Validate destination conflicts and provide an open-saved-entry action
+  after a successful generated-content save.
+- [ ] Keep native local export commands separate from Save to Notebook in UI
+  labels, behavior, and tests.
 
 ### Phase 3: Export
 

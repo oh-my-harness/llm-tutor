@@ -487,7 +487,16 @@ Tasks:
       folder binding through it.
 - [ ] Add a desktop native Save dialog for generated Notebook saves when an
       external Notebook Vault is bound, converting the selected path into a
-      Notebook-relative Markdown path before saving.
+      Notebook-relative Markdown path before saving. Restrict the dialog to
+      Markdown destinations inside the bound Vault.
+- [ ] Replace the generated-content save folder dropdown and free-form path
+      field with an app-owned Notebook folder tree when Notebook uses app-local
+      storage or the UI is running in web/dev mode.
+- [ ] In the Notebook tree save flow, support root/existing-folder selection,
+      inline folder creation, last-folder restoration, final logical-path
+      preview, conflict validation, and opening the saved entry.
+- [ ] Keep "Save to Notebook" separate from "Export Markdown": only export may
+      use a native file dialog to write outside Notebook ownership.
 - [ ] Add or plan app-level shortcuts and command palette behavior for common
       desktop workflows.
 - [ ] Add desktop QA checks for browser-default interaction regressions, pane
@@ -499,6 +508,9 @@ Acceptance:
   workflows.
 - The top-level window stays fixed while the active work pane owns scrolling.
 - External links and local file/folder actions use desktop-appropriate behavior.
+- Generated content uses a Notebook tree for app-owned storage and a native
+  Save dialog only for a bound external Vault; export remains a separate local
+  file operation.
 - Each major surface has a documented context menu capability area, even if not
   every concrete menu item is implemented in the first polish slice.
 
