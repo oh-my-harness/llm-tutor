@@ -41,6 +41,7 @@ interface RecentSession {
 
 interface Props {
   activeView: AppView
+  activeSessionId: string | null
   collapsed: boolean
   recentSessions: RecentSession[]
   onNavigate: (view: AppView) => void
@@ -72,6 +73,7 @@ const navItems: Array<{
 
 export function Sidebar({
   activeView,
+  activeSessionId,
   collapsed,
   recentSessions,
   onNavigate,
@@ -208,13 +210,18 @@ export function Sidebar({
             recentSessions.map((session) => {
               const editing = editingSessionId === session.id
               const running = Boolean(session.activeRun)
+              const selected = activeSessionId === session.id
               return (
                 <div
                   key={session.id}
                   data-surface-context-menu="true"
                   onContextMenu={(event) => openSessionContextMenu(event, session)}
-                  className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 ${
-                    running ? 'bg-blue-50/70' : ''
+                  className={`group flex w-full items-center gap-2 rounded-lg border-l-2 px-3 py-2 text-sm ${
+                    selected
+                      ? 'border-blue-600 bg-gray-100 text-gray-900'
+                      : running
+                        ? 'border-transparent bg-blue-50/70 text-gray-700 hover:bg-blue-50'
+                        : 'border-transparent text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   <div className="relative shrink-0">
@@ -253,7 +260,8 @@ export function Sidebar({
                         type="button"
                         className="min-w-0 flex-1 text-left"
                         onClick={() => onSelectSession(session.id)}
-                        title={[session.title, session.pinned ? 'Pinned' : '', running ? 'Running' : ''].filter(Boolean).join(' · ')}
+                        aria-current={selected ? 'page' : undefined}
+                        title={[session.title, selected ? 'Current session' : '', session.pinned ? 'Pinned' : '', running ? 'Running' : ''].filter(Boolean).join(' · ')}
                       >
                         <span className="flex min-w-0 items-center gap-1">
                           {session.pinned && <Pin size={12} className="shrink-0 text-gray-500" />}

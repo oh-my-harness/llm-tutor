@@ -480,6 +480,9 @@ Tasks:
 - [x] Change recent-session ordering so selecting a session does not move it;
       only sending a new message or receiving new conversation activity should
       promote an unpinned session.
+- [x] Mark the currently open Chat session in the recent-session list with a
+      restrained selected state that remains distinct from hover, pinned, and
+      running indicators without changing list order.
 - [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.

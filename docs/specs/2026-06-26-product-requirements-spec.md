@@ -559,6 +559,11 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-452C: Recent session pin/unpin shall be available from a product-owned
   right-click context menu on the session item, alongside existing session
   actions such as rename and delete.
+- REQ-452D: When a recent session is currently open in the Chat workspace, its
+  sidebar item shall show a restrained but unambiguous selected state that is
+  visually distinct from hover and running indicators. Selection styling shall
+  not reorder the session list and shall remain compatible with pinned and
+  running states. Status: implemented.
 - REQ-453: Clicking Chat shall open a new conversation by default.
 - REQ-454: The new conversation view shall center the composer.
 - REQ-455: The chat scroll behavior shall match common chat apps.

@@ -1228,6 +1228,7 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar
         activeView={view}
+        activeSessionId={view === 'chat' ? sessionId : null}
         collapsed={sidebarCollapsed}
         recentSessions={recentSessions}
         onNavigate={handleNavigate}
