@@ -147,6 +147,7 @@ async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResp
                         .and_then(|messages| title_from_messages(&messages))
                         .unwrap_or_else(|| "New session".into()),
                 };
+                let active_run = pool.active_run(&session.id);
                 items.push(serde_json::json!({
                     "id": session.id,
                     "title": title,
@@ -154,6 +155,14 @@ async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResp
                     "created_at": session.created_at,
                     "updated_at": session.updated_at,
                     "model": session.model,
+                    "active_run": active_run.map(|run| serde_json::json!({
+                        "run_id": run.run_id,
+                        "session_id": run.session_id,
+                        "capability": run.capability,
+                        "status": run.status,
+                        "started_at": run.started_at,
+                        "updated_at": run.updated_at,
+                    })),
                 }));
             }
             (

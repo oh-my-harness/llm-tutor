@@ -663,8 +663,25 @@ Frontend responsibilities:
 Desktop responsibilities:
 
 - native folder picker for Obsidian Vault import,
+- native Save dialog for saving generated notes/research reports when an
+  external Notebook Vault is bound. The chosen path must be inside the bound
+  Vault and should be converted to a Notebook-relative Markdown path before
+  writing through Notebook APIs.
 - recursive Markdown discovery under the selected folder,
 - preserve relative source paths from the selected vault root.
+
+Save-to-Notebook UX:
+
+- Desktop + external Vault: use the system Save dialog with a `.md` default
+  file name and the bound Vault as the default location. Reject or warn when the
+  selected path is outside the Vault instead of writing arbitrary files outside
+  Notebook ownership.
+- Desktop without external Vault: use an app-owned Notebook tree picker because
+  the app-local Vault is an internal data directory, not a user-facing file
+  system location.
+- Web/dev fallback: use the app-owned Notebook tree picker.
+- The current folder dropdown plus free-form "new folder" field is a temporary
+  fallback and should be replaced by the tree picker/native Save flow.
 
 Safety rules:
 
@@ -713,6 +730,10 @@ retrieval.
 - [x] Add batch Notebook entry creation so import persists once per operation.
 - [x] Add desktop native folder import for Obsidian Vault directories.
 - [x] Report unsupported Obsidian attachments/assets during import.
+- [ ] Add desktop native Save dialog for saving generated notes/research
+  reports into a bound external Notebook Vault.
+- [ ] Replace the save-to-Notebook folder dropdown with a Notebook tree picker
+  for non-native or app-local Vault saves.
 
 ### Phase 3: Export
 

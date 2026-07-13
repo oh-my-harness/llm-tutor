@@ -30,6 +30,10 @@ export type AppView =
 interface RecentSession {
   id: string
   title: string
+  activeRun?: {
+    capability?: string
+    status?: string
+  } | null
 }
 
 interface Props {
@@ -176,12 +180,25 @@ export function Sidebar({
           ) : (
             recentSessions.map((session) => {
               const editing = editingSessionId === session.id
+              const running = Boolean(session.activeRun)
               return (
                 <div
                   key={session.id}
-                  className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 ${
+                    running ? 'bg-blue-50/70' : ''
+                  }`}
                 >
-                  <FileText size={16} className="shrink-0 text-gray-500" />
+                  <div className="relative shrink-0">
+                    <FileText size={16} className={running ? 'text-blue-600' : 'text-gray-500'} />
+                    {running && (
+                      <span
+                        className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white"
+                        title="Agent running"
+                      >
+                        <span className="absolute inset-0 animate-ping rounded-full bg-blue-400" />
+                      </span>
+                    )}
+                  </div>
                   {editing ? (
                     <>
                       <input
@@ -205,10 +222,16 @@ export function Sidebar({
                     <>
                       <button
                         type="button"
-                        className="min-w-0 flex-1 truncate text-left"
+                        className="min-w-0 flex-1 text-left"
                         onClick={() => onSelectSession(session.id)}
+                        title={running ? `${session.title} · Running` : session.title}
                       >
-                        {session.title}
+                        <span className="block truncate">{session.title}</span>
+                        {running && (
+                          <span className="mt-0.5 block truncate text-[11px] font-medium text-blue-600">
+                            Running{session.activeRun?.capability ? ` · ${capabilityLabel(session.activeRun.capability)}` : ''}
+                          </span>
+                        )}
                       </button>
                       <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                         <IconButton label="Rename session" onClick={() => startEditing(session)}>
@@ -264,4 +287,13 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
       {children}
     </button>
   )
+}
+
+function capabilityLabel(value: string) {
+  if (value === 'deep_solve') return 'Deep Solve'
+  if (value === 'code_exec') return 'Code Exec'
+  if (value === 'quiz') return 'Quiz'
+  if (value === 'research') return 'Research'
+  if (value === 'organize') return 'Organize'
+  return 'Chat'
 }

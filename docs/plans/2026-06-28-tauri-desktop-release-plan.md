@@ -480,6 +480,9 @@ Tasks:
       local files where product flows already need those actions.
 - [x] Add a shared desktop directory picker helper and route Notebook Vault
       folder binding through it.
+- [ ] Add a desktop native Save dialog for generated Notebook saves when an
+      external Notebook Vault is bound, converting the selected path into a
+      Notebook-relative Markdown path before saving.
 - [ ] Add or plan app-level shortcuts and command palette behavior for common
       desktop workflows.
 - [ ] Add desktop QA checks for browser-default interaction regressions, pane

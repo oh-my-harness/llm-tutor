@@ -95,6 +95,16 @@ interface Citation {
 interface RecentSession {
   id: string
   title: string
+  activeRun?: SessionRunSummary | null
+}
+
+interface SessionRunSummary {
+  run_id?: string
+  session_id?: string
+  capability?: Capability
+  status?: string
+  started_at?: string
+  updated_at?: string
 }
 
 interface KnowledgeBaseOption {
@@ -107,6 +117,7 @@ interface SessionListResponse {
     id: string
     title?: string
     name?: string | null
+    active_run?: SessionRunSummary | null
   }>
 }
 
@@ -131,14 +142,7 @@ interface SessionDetailResponse {
     timestamp?: string
     message_count?: number
   } | null
-  active_run?: {
-    run_id?: string
-    session_id?: string
-    capability?: Capability
-    status?: string
-    started_at?: string
-    updated_at?: string
-  } | null
+  active_run?: SessionRunSummary | null
   latest_usage?: TokenUsagePayload | null
   metadata?: {
     name?: string | null
@@ -336,6 +340,9 @@ export default function App() {
           setBudgetSpent((payload.spent_usd as number) ?? 0)
         } else if (kind === 'running') {
           setRunning(true)
+          if (sessionId) {
+            updateRecentSessionRun(setRecentSessions, sessionId, runSummaryFromStatusPayload(payload))
+          }
           pushStatus({
             kind: 'thinking',
             label: 'Working',
@@ -345,6 +352,7 @@ export default function App() {
           })
         } else if (kind === 'done') {
           setRunning(false)
+          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
           setLatestUsage((prev) => isTokenUsagePayload(payload.usage) ? payload.usage : prev)
           if (!streamingRef.current) {
             pushStatus({
@@ -361,7 +369,11 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
           setRunning(false)
+          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
         } else if (kind === 'stopping') {
+          if (sessionId) {
+            updateRecentSessionRun(setRecentSessions, sessionId, runSummaryFromStatusPayload({ ...payload, status: 'cancelling' }))
+          }
           pushStatus({
             kind: 'thinking',
             label: 'Stopping',
@@ -389,6 +401,7 @@ export default function App() {
           const message = typeof payload.message === 'string' ? payload.message : 'WebSocket error'
           pushStatus({ kind: 'error', label: 'Error', detail: message })
           setRunning(false)
+          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
         }
       }
     },
@@ -415,6 +428,7 @@ export default function App() {
     setRecentSessions((data.sessions ?? []).map((session) => ({
       id: session.id,
       title: session.title || session.name || 'New session',
+      activeRun: session.active_run ?? null,
     })))
   }, [])
 
@@ -1719,9 +1733,32 @@ function upsertRecentSession(
   title: string,
 ) {
   setRecentSessions((prev) => [
-    { id, title },
+    { id, title, activeRun: prev.find((session) => session.id === id)?.activeRun ?? null },
     ...prev.filter((session) => session.id !== id),
   ])
+}
+
+function updateRecentSessionRun(
+  setRecentSessions: Dispatch<SetStateAction<RecentSession[]>>,
+  id: string,
+  activeRun: SessionRunSummary | null,
+) {
+  setRecentSessions((prev) =>
+    prev.map((session) => (session.id === id ? { ...session, activeRun } : session)),
+  )
+}
+
+function runSummaryFromStatusPayload(payload: Record<string, unknown>): SessionRunSummary {
+  const capability = typeof payload.capability === 'string' && isCapability(payload.capability)
+    ? payload.capability
+    : undefined
+  return {
+    run_id: typeof payload.run_id === 'string' ? payload.run_id : undefined,
+    capability,
+    status: typeof payload.status === 'string' ? payload.status : 'running',
+    started_at: typeof payload.started_at === 'string' ? payload.started_at : undefined,
+    updated_at: typeof payload.updated_at === 'string' ? payload.updated_at : undefined,
+  }
 }
 
 function estimateContextTokens(messages: Message[], streamingText: string) {
