@@ -51,6 +51,7 @@ export interface SaveToNotebookOptions {
   newFolderPath?: string
   filePath?: string
   entryType?: 'research_report' | 'chat_excerpt'
+  title?: string
 }
 
 interface Message {
@@ -62,6 +63,8 @@ interface Message {
   quiz?: QuizSession
   quizPlan?: QuizPlan
   researchPlan?: ResearchPlan
+  researchTitle?: string
+  researchUnavailable?: boolean
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
@@ -327,8 +330,13 @@ export function ChatBox({
     setMentions((current) => current.filter((mention) => mention.id !== id))
   }
 
-  const openSaveNotebookDialog = async (markdown: string, entryType: 'research_report' | 'chat_excerpt' = 'chat_excerpt') => {
-    const fileName = notebookFileNameFromTitle(titleFromMarkdown(markdown))
+  const openSaveNotebookDialog = async (
+    markdown: string,
+    entryType: 'research_report' | 'chat_excerpt' = 'chat_excerpt',
+    structuredTitle?: string,
+  ) => {
+    const title = structuredTitle?.trim() || titleFromMarkdown(markdown)
+    const fileName = notebookFileNameFromTitle(title)
     const lastFolder = loadLastNotebookSaveFolder(notebookFolders)
     setSaveNotebookResult(null)
     setSaveNotebookError('')
@@ -338,7 +346,7 @@ export function ChatBox({
     setSaveNotebookNewFolder('')
     if (notebookVault?.external && await isDesktopApp().catch(() => false)) {
       setSaveNotebookNative(true)
-      await saveToExternalVault(markdown, fileName, lastFolder, entryType)
+      await saveToExternalVault(markdown, fileName, lastFolder, entryType, title)
       return
     }
     setSaveNotebookNative(false)
@@ -350,6 +358,7 @@ export function ChatBox({
     fileName: string,
     folderPath: string,
     entryType: 'research_report' | 'chat_excerpt',
+    title: string,
   ) => {
     if (!onSaveToNotebook || !notebookVault) return
     setSaveNotebookMarkdown(markdown)
@@ -363,13 +372,14 @@ export function ChatBox({
         return
       }
       const relativePath = relativeNotebookPath(notebookVault.root, selectedPath)
+      const selectedTitle = relativePath.split('/').pop()?.replace(/\.md$/i, '').trim() || title
       setSaveNotebookFolder(folderFromNotebookPath(relativePath))
       setSaveNotebookFileName(relativePath.split('/').pop() ?? fileName)
       if (notebookPathExists(relativePath, notebookEntryPaths)) {
         throw new Error('该位置已经存在同名 Notebook 笔记，请选择其他文件名。')
       }
       setSaveNotebookBusy(true)
-      const result = await onSaveToNotebook(markdown, { filePath: relativePath, entryType })
+      const result = await onSaveToNotebook(markdown, { filePath: relativePath, entryType, title: selectedTitle })
       saveLastNotebookSaveFolder(folderFromNotebookPath(result.path))
       setSaveNotebookResult(result)
     } catch (error) {
@@ -400,6 +410,7 @@ export function ChatBox({
         newFolderPath: saveNotebookNewFolder.trim() || undefined,
         filePath: notebookPath(saveNotebookNewFolder || saveNotebookFolder, saveNotebookFileName),
         entryType: saveNotebookEntryType,
+        title: saveNotebookFileName.replace(/\.md$/i, ''),
       })
       saveLastNotebookSaveFolder(folderFromNotebookPath(result.path))
       setSaveNotebookResult(result)
@@ -439,7 +450,13 @@ export function ChatBox({
               if (saveNotebookResult) onOpenNotebookEntry?.(saveNotebookResult.entryId)
               closeSaveNotebookDialog()
             }}
-            onRetry={() => void saveToExternalVault(saveNotebookMarkdown, saveNotebookFileName, saveNotebookFolder, saveNotebookEntryType)}
+            onRetry={() => void saveToExternalVault(
+              saveNotebookMarkdown,
+              saveNotebookFileName,
+              saveNotebookFolder,
+              saveNotebookEntryType,
+              saveNotebookFileName.replace(/\.md$/i, ''),
+            )}
           />
         ) : (
           <SaveNotebookDialog
@@ -534,11 +551,13 @@ export function ChatBox({
                       citationList={(citations) => <CitationList citations={citations} onSourceNavigate={onSourceNavigate} />}
                       onAskStep={onAskDeepSolveStep}
                     />
-                  ) : capability === 'research' && looksLikeResearchReport(msg.text) ? (
+                  ) : capability === 'research' && (looksLikeResearchReport(msg.text) || msg.researchUnavailable) ? (
                     <ResearchReportMessage
                       text={msg.text}
+                      reportTitle={msg.researchTitle}
+                      unavailable={msg.researchUnavailable}
                       sources={(msg.citations ?? []).map(citationToResearchSourceReference)}
-                      onSaveToNotebook={(markdown) => void openSaveNotebookDialog(markdown, 'research_report')}
+                      onSaveToNotebook={(markdown, title) => void openSaveNotebookDialog(markdown, 'research_report', title)}
                       onRegenerate={onRegenerateResearch}
                       onIngestSources={onIngestResearchSources}
                       onSourceNavigate={onSourceNavigate}

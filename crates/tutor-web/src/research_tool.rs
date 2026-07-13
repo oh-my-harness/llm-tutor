@@ -132,7 +132,7 @@ impl Tool for CreateResearchReportTool {
             let request = optional_string(&args, "request").ok_or_else(|| {
                 ToolError::InvalidArguments("create_research_report requires request".into())
             })?;
-            let title = optional_string(&args, "title").unwrap_or_else(|| "Research report".into());
+            let requested_title = optional_string(&args, "title");
             let run = tutor_agent::research::run_research_workflow_with_runtime(
                 &self.router,
                 tutor_agent::research::ResearchWorkflowInput {
@@ -143,6 +143,10 @@ impl Tool for CreateResearchReportTool {
             )
             .await
             .map_err(|err| ToolError::Execution(err.to_string()))?;
+            let title = requested_title.unwrap_or_else(|| {
+                report_title_from_markdown(&run.markdown)
+                    .unwrap_or_else(|| report_title_from_request(&request))
+            });
 
             Ok(ToolResult {
                 content: vec![ContentBlock::Text {
@@ -169,6 +173,37 @@ fn optional_string(args: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn report_title_from_markdown(markdown: &str) -> Option<String> {
+    markdown.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let heading = trimmed.trim_start_matches('#');
+        if heading.len() == trimmed.len()
+            || !heading.chars().next().is_some_and(char::is_whitespace)
+        {
+            return None;
+        }
+        let title = heading.trim();
+        (!title.is_empty()).then(|| title.chars().take(120).collect())
+    })
+}
+
+fn report_title_from_request(request: &str) -> String {
+    let title = request
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("Research Report")
+        .trim()
+        .trim_end_matches(['。', '.', '!', '！', '?', '？'])
+        .chars()
+        .take(120)
+        .collect::<String>();
+    if title.is_empty() {
+        "Research Report".into()
+    } else {
+        title
+    }
 }
 
 fn string_array(args: &serde_json::Value, key: &str) -> Vec<String> {
@@ -263,5 +298,24 @@ mod tests {
         assert!(tool.description().contains("detailed Research workflow"));
         assert_eq!(schema["required"][0], "request");
         assert_eq!(schema["properties"]["request"]["type"], "string");
+    }
+
+    #[test]
+    fn report_title_prefers_first_markdown_heading() {
+        assert_eq!(
+            report_title_from_markdown("Intro paragraph.\n\n## Transformer architecture\nBody"),
+            Some("Transformer architecture".into())
+        );
+        assert_eq!(report_title_from_markdown("#Missing space\nBody"), None);
+    }
+
+    #[test]
+    fn report_title_falls_back_to_trimmed_request() {
+        assert_eq!(
+            report_title_from_request("  调研 Transformer 架构。\n补充要求"),
+            "调研 Transformer 架构"
+        );
+        assert_eq!(report_title_from_request("\n\n"), "Research Report");
+        assert_eq!(report_title_from_request("。"), "Research Report");
     }
 }

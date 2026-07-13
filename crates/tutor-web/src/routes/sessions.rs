@@ -160,6 +160,7 @@ async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResp
                         "session_id": run.session_id,
                         "capability": run.capability,
                         "status": run.status,
+                        "current_stage": run.current_stage,
                         "started_at": run.started_at,
                         "updated_at": run.updated_at,
                     })),
@@ -236,6 +237,16 @@ async fn get_session(
         }
     };
     let active_run = pool.active_run(&id);
+    let run_state = match pool.recovered_run_state(&id).await {
+        Ok(run) => run,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
     let latest_usage = match pool.latest_usage(&id).await {
         Ok(usage) => usage,
         Err(err) => {
@@ -354,6 +365,16 @@ async fn get_session(
                 "session_id": run.session_id,
                 "capability": run.capability,
                 "status": run.status,
+                "current_stage": run.current_stage,
+                "started_at": run.started_at,
+                "updated_at": run.updated_at,
+            })),
+            "run_state": run_state.map(|run| serde_json::json!({
+                "run_id": run.run_id,
+                "session_id": run.session_id,
+                "capability": run.capability,
+                "status": run.status,
+                "current_stage": run.current_stage,
                 "started_at": run.started_at,
                 "updated_at": run.updated_at,
             })),

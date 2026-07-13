@@ -1,6 +1,6 @@
 # Research Mode Plan
 
-> Status: in progress | Date: 2026-06-25 | Last updated: 2026-07-09 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
+> Status: in progress | Date: 2026-06-25 | Last updated: 2026-07-13 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
 
 ## 1. Goal
 
@@ -518,16 +518,22 @@ The report remains a Notebook research entry even after saving. A future book ch
 
 ### Phase 10: Background Run and Rejoin Hardening
 
-- [ ] Persist a stable run identity for each `create_research_report` workflow
+- [x] Persist a stable run identity for each `create_research_report` workflow
   so the UI can leave and later rejoin the same run.
-- [ ] Restore current Research stage and completed report attachment when the
+- [x] Restore current Research stage and completed report attachment when the
   user returns to the originating session.
-- [ ] Ensure reconnecting to a session subscribes to the existing run instead
+- [x] Ensure reconnecting to a session subscribes to the existing in-process run instead
   of starting a duplicate Research workflow.
-- [ ] Preserve final report metadata and source list if the report completes
+- [x] Preserve final report metadata and source list if the report completes
   while the user is viewing another session.
 - [ ] Add QA that starts a long Research run, switches sessions, returns, and
   verifies progress or completion state.
+
+Runtime session custom entries persist run state and Research trace metadata.
+After a desktop process restart, an active run is surfaced as `interrupted`
+rather than silently disappearing. Resuming execution after process loss remains
+dependent on a runtime-managed durable run/replay primitive documented in
+`docs/framework-feedback.md`.
 
 ## 11. Acceptance Criteria
 

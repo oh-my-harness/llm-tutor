@@ -99,6 +99,8 @@ pub struct ActiveRunSummary {
     pub session_id: String,
     pub capability: String,
     pub status: String,
+    #[serde(default)]
+    pub current_stage: Option<String>,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -267,6 +269,7 @@ impl SessionPool {
                     session_id: session_id.to_string(),
                     capability: capability.to_string(),
                     status: "running".into(),
+                    current_stage: None,
                     started_at: now,
                     updated_at: now,
                 },
@@ -291,6 +294,97 @@ impl SessionPool {
         record.summary.status = "cancelling".into();
         record.summary.updated_at = chrono::Utc::now();
         Some(record.summary.clone())
+    }
+
+    pub fn update_active_run_stage(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        stage: &str,
+    ) -> Option<ActiveRunSummary> {
+        let stage = stage.trim();
+        if stage.is_empty() {
+            return None;
+        }
+        let mut active_runs = self.active_runs.lock().unwrap();
+        let record = active_runs.get_mut(session_id)?;
+        if record.summary.run_id != run_id || record.summary.current_stage.as_deref() == Some(stage)
+        {
+            return None;
+        }
+        record.summary.current_stage = Some(stage.to_string());
+        record.summary.updated_at = chrono::Utc::now();
+        Some(record.summary.clone())
+    }
+
+    pub fn terminal_active_run(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        status: &str,
+    ) -> Option<ActiveRunSummary> {
+        let mut active_runs = self.active_runs.lock().unwrap();
+        let record = active_runs.get_mut(session_id)?;
+        if record.summary.run_id != run_id {
+            return None;
+        }
+        record.summary.status = status.to_string();
+        record.summary.updated_at = chrono::Utc::now();
+        Some(record.summary.clone())
+    }
+
+    pub async fn append_run_state(
+        &self,
+        id: &str,
+        run: &ActiveRunSummary,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "run_state".into(),
+                data: serde_json::to_value(run).unwrap_or_default(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn latest_run_state(
+        &self,
+        id: &str,
+    ) -> Result<Option<ActiveRunSummary>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+        Ok(entries.into_iter().rev().find_map(|entry| {
+            let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                return None;
+            };
+            if custom_type != "run_state" {
+                return None;
+            }
+            serde_json::from_value(data).ok()
+        }))
+    }
+
+    pub async fn recovered_run_state(
+        &self,
+        id: &str,
+    ) -> Result<Option<ActiveRunSummary>, llm_harness_types::SessionError> {
+        if let Some(active) = self.active_run(id) {
+            return Ok(Some(active));
+        }
+        let mut latest = self.latest_run_state(id).await?;
+        if let Some(run) = latest.as_mut()
+            && matches!(
+                run.status.as_str(),
+                "queued" | "running" | "waiting" | "cancelling"
+            )
+        {
+            run.status = "interrupted".into();
+        }
+        Ok(latest)
     }
 
     pub fn finish_active_run(&self, session_id: &str, run_id: &str) {
@@ -1300,6 +1394,53 @@ mod tests {
         pool.finish_active_run(&id, &run_id);
         assert!(pool.active_run(&id).is_none());
         assert!(pool.try_start_active_run(&id, "research").is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn persisted_running_run_recovers_as_interrupted_after_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("research", None, false, None, None, None)
+            .await
+            .unwrap();
+        let (run_id, _) = pool.try_start_active_run(&id, "research").unwrap();
+        let running = pool
+            .update_active_run_stage(&id, &run_id, "read_sources")
+            .unwrap();
+        pool.append_run_state(&id, &running).await.unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let recovered = reopened.recovered_run_state(&id).await.unwrap().unwrap();
+
+        assert_eq!(recovered.run_id, run_id);
+        assert_eq!(recovered.status, "interrupted");
+        assert_eq!(recovered.current_stage.as_deref(), Some("read_sources"));
+        assert!(reopened.active_run(&id).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn persisted_terminal_run_remains_terminal_after_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("deep_solve", None, false, None, None, None)
+            .await
+            .unwrap();
+        let (run_id, _) = pool.try_start_active_run(&id, "deep_solve").unwrap();
+        let completed = pool.terminal_active_run(&id, &run_id, "completed").unwrap();
+        pool.append_run_state(&id, &completed).await.unwrap();
+        pool.finish_active_run(&id, &run_id);
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let recovered = reopened.recovered_run_state(&id).await.unwrap().unwrap();
+
+        assert_eq!(recovered.status, "completed");
+        assert_eq!(recovered.run_id, run_id);
         let _ = std::fs::remove_dir_all(root);
     }
 

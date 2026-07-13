@@ -1,11 +1,13 @@
-import { BookOpen, FileText, RefreshCw, SearchCheck } from 'lucide-react'
+import { AlertCircle, BookOpen, FileText, RefreshCw, SearchCheck } from 'lucide-react'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
 interface Props {
   text: string
+  reportTitle?: string
+  unavailable?: boolean
   sources?: SourceReference[]
-  onSaveToNotebook?: (markdown: string) => void
+  onSaveToNotebook?: (markdown: string, title: string) => void
   onRegenerate?: (markdown: string) => void
   onIngestSources?: (sources: SourceReference[], markdown: string) => Promise<void>
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
@@ -13,13 +15,15 @@ interface Props {
 
 export function ResearchReportMessage({
   text,
+  reportTitle,
+  unavailable = false,
   sources = [],
   onSaveToNotebook,
   onRegenerate,
   onIngestSources,
   onSourceNavigate,
 }: Props) {
-  const title = researchReportTitle(text)
+  const title = reportTitle?.trim() || researchReportTitle(text)
   const sourceReferences = sources.length > 0 ? sources : sourceReferencesFromMarkdown(text)
   const sourceStats = sourceSummary(sourceReferences)
 
@@ -55,7 +59,7 @@ export function ResearchReportMessage({
                 <button
                   className="inline-flex h-8 items-center gap-2 rounded-md border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
                   type="button"
-                  onClick={() => onSaveToNotebook(text)}
+                  onClick={() => onSaveToNotebook(text, title)}
                 >
                   <FileText size={15} />
                   保存到笔记本
@@ -78,6 +82,12 @@ export function ResearchReportMessage({
         </div>
       </header>
       <div className="space-y-4 px-4 py-4">
+        {unavailable && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <AlertCircle className="mt-0.5 shrink-0" size={16} />
+            报告附件记录仍在，但对应的持久化运行结果不可用。
+          </div>
+        )}
         <MarkdownMessage text={text} onSourceNavigate={onSourceNavigate} />
         <section className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-gray-500">

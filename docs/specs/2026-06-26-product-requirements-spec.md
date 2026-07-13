@@ -219,8 +219,8 @@
 - REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: implemented in prompt contract; needs provider-behavior QA.
 - REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: implemented for first slice through runtime workflow repair and final publish validation.
 - REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: implemented for first slice with a bounded runtime workflow repair loop.
-- REQ-299A: Interactive Quiz cards rendered inside Chat shall be durable message attachments linked to the saved Quiz session, not only transient WebSocket/UI state. Leaving and returning to the session shall restore the card and keep it answerable. Status: planned in `2026-07-13-background-session-resilience-plan.md`.
-- REQ-299B: If a Quiz is generated while the user switches to another session, the completed `create_quiz` tool result shall remain attached to the originating assistant message and be restored when the user returns. Status: planned.
+- REQ-299A: Interactive Quiz cards rendered inside Chat shall be durable message attachments linked to the saved Quiz session, not only transient WebSocket/UI state. Leaving and returning to the session shall restore the card and keep it answerable. Status: implemented.
+- REQ-299B: If a Quiz is generated while the user switches to another session, the completed `create_quiz` tool result shall remain attached to the originating assistant message and be restored when the user returns. Status: implemented.
 
 Current Quiz verification flow:
 
@@ -246,7 +246,7 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-303: Research mode shall call `web_fetch` for important sources.
 - REQ-304: Research mode shall optionally call `rag_search` when a knowledge base is selected.
 - REQ-305: Research mode shall produce a Markdown report.
-- REQ-306: Research reports shall include a title.
+- REQ-306: Research reports shall include a structured title. The explicit workflow title is authoritative; the first Markdown heading and then the research request are fallback sources. Status: implemented.
 - REQ-307: Research reports shall include a summary.
 - REQ-308: Research reports shall include key findings.
 - REQ-309: Research reports shall include analysis.
@@ -258,32 +258,36 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-315: Research mode shall clearly state when search or fetch failed.
 - REQ-316: Research mode shall not cite sources that were not actually searched or fetched.
 - REQ-317: Research reports shall be saved as `NotebookEntry` records with `type = research_report`. Status: implemented.
-- REQ-318: Research reports shall restore with structured metadata from Notebook entry data. Status: partially implemented; session reload restores report-like assistant messages and attached source metadata, while broader report/version restore hardening remains planned.
+- REQ-318: Research reports shall restore with structured metadata from Notebook entries after save and from durable runtime trace attachments before save. Status: implemented for report title, Markdown, source metadata, and unavailable-artifact fallback.
 - REQ-319: The UI shall provide a dedicated ResearchReport component. Status: implemented.
 - REQ-320: The UI shall show a dedicated source list under each Research report. Status: implemented.
 - REQ-321: Research reports shall support regeneration/versioning. Status: implemented for the first slice with a report Regenerate action and Notebook report metadata carrying version and generation details.
 - REQ-322: Research shall support longer-running multi-step/parallel deep research. Status: implemented for the first slice by allowing the runtime Research workflow search step to spawn independent subtopic agents through `sync_spawn_agent`.
 - REQ-323: Research mode shall preserve normal conversational interaction for clarifying research goals, scope, source preferences, output format, depth, time range, and optional Notebook or Knowledge Base context before starting detailed research. Ordinary Research Chat turns shall stream like normal Chat until a report-generation tool call starts. Status: implemented with Research TextDelta routed through the normal final-answer stream before the `create_research_report` tool boundary.
 - REQ-324: Research mode shall provide a detailed research workflow that can be explicitly started after the user's need is clear. The workflow shall cover search, source reading, source selection, synthesis, citation checking, and report generation; it shall not be forced for every Research message. The target architecture shall align with Quiz generation: the outer Research Chat agent calls a dedicated `create_research_report` product tool, and that tool runs the runtime `WorkflowEngine` and returns structured report metadata. Status: implemented for the first tool-boundary slice with the previous keyword/confirmation pre-router removed from the Research capability entrypoint.
-- REQ-325: Long-running Research runs shall have a durable run identity and status so users can switch sessions, return later, and see the current stage or final report without starting a duplicate workflow. Status: planned in `2026-07-13-background-session-resilience-plan.md`.
-- REQ-326: Research progress and final report attachments shall be restorable from runtime session state and product records after navigation, refresh, or desktop restart. Status: planned.
+- REQ-325: Long-running Research runs shall have a durable run identity and status so users can switch sessions, return later, and see the current stage or final report without starting a duplicate workflow. Status: implemented for in-process rejoin; after process restart an active run restores as interrupted pending runtime resume support.
+- REQ-326: Research progress and final report attachments shall be restorable from runtime session state and product records after navigation, refresh, or desktop restart. Status: implemented for current stage, terminal state, report metadata, and report attachment; full progress replay and execution resume remain pending on runtime support.
 
 ## 14A. Background Runs and Session Rejoin
 
 - REQ-330: Long-running agent turns shall continue when the user leaves the
   current session unless the user explicitly cancels them or the backend fails.
-  Status: planned.
+  Status: implemented for in-process runs; process loss restores an explicit
+  interrupted state because the runtime cannot yet resume execution.
 - REQ-331: The UI shall be able to rejoin an active run by stable run/session
   identifiers and show queued, running, waiting, failed, cancelled, or completed
-  state. Status: planned.
+  state. Status: implemented for in-process rejoin and persisted terminal or
+  interrupted state after restart.
 - REQ-332: Chat messages shall persist tool result attachments and stable
   references to product artifacts such as Quiz sessions and Notebook research
-  reports. Status: planned.
+  reports. Status: implemented for Quiz session references and Research runtime
+  trace references, with Notebook references after explicit save.
 - REQ-333: Reconnecting to a session shall not start a duplicate workflow for an
-  already-active run. Status: planned.
+  already-active run. Status: implemented for in-process runs.
 - REQ-334: The implementation shall prefer runtime session/run persistence from
   `llm-harness-runtime` / `llm-harness-agent`; missing framework primitives
-  shall be recorded in `docs/framework-feedback.md`. Status: planned.
+  shall be recorded in `docs/framework-feedback.md`. Status: implemented; the
+  durable resume/replay gap is recorded there.
 
 ## 15. Books and Learning Records
 
@@ -414,6 +418,7 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-847: When desktop Notebook is bound to a user-visible external Vault, saving generated content shall use the native system Save dialog rooted at that Vault, accept Markdown destinations only, reject destinations outside the bound Vault, and convert the selected path to a Notebook-relative path before writing through Notebook APIs. Status: implemented.
 - REQ-848: Saving to Notebook and exporting Markdown shall remain distinct commands: save creates or updates a Notebook-owned entry, while export writes a portable file or archive to an arbitrary user-selected local destination. Status: implemented for command and ownership separation; native desktop export destinations remain planned under REQ-849.
 - REQ-849: Desktop Markdown export shall use a native system file dialog, while web/dev export shall use the platform-supported download flow. Status: planned.
+- REQ-850: Saving generated Research content shall use the structured report title as the initial Notebook title and native Save-dialog file name; Markdown heading and request-derived titles are fallbacks, not the first prose sentence. Status: implemented.
 
 ## 18. Quiz Bank
 

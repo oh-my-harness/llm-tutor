@@ -1,6 +1,6 @@
 # Background Session Resilience Plan
 
-> Status: proposed | Date: 2026-07-13 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
+> Status: partially implemented | Date: 2026-07-13 | Last updated: 2026-07-13 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
 
 ## 1. Problem
 
@@ -69,7 +69,8 @@ Domain artifacts stay in their existing stores:
 
 ```text
 Quiz card attachment -> quiz_session:<quiz_id>
-Research report attachment -> notebook_entry:<entry_id>
+Research report attachment before save -> runtime_trace:<run_id>
+Research report attachment after save -> notebook_entry:<entry_id>
 Deep solve attachment -> deep_solve_run:<run_id> or message snapshot
 ```
 
@@ -89,43 +90,45 @@ When a user returns to a session:
 5. If the run already completed while the user was away, fetch final run output
    and attach completed artifacts without replaying the whole workflow.
 6. If the app restarted, recover active or terminal run state from runtime
-   session storage. Product code should not invent a separate scheduler unless
-   the runtime cannot provide the needed primitive.
+   session storage. A run that was active when the process stopped is restored
+   as `interrupted` until the runtime provides execution resume/replay support;
+   product code does not invent a separate scheduler.
 
 ## 5. Implementation Phases
 
 ### Phase 1: Audit Current Volatile UI State
 
-- [ ] Trace how Quiz cards are attached to Chat messages during live
+- [x] Trace how Quiz cards are attached to Chat messages during live
   `create_quiz` tool results.
-- [ ] Confirm whether restored Chat messages include stable quiz attachment
+- [x] Confirm whether restored Chat messages include stable quiz attachment
   references or only text.
-- [ ] Trace Research report restore behavior for completed reports and active
+- [x] Trace Research report restore behavior for completed reports and active
   report generation.
-- [ ] Identify every UI attachment type that currently depends on transient
+- [x] Identify every UI attachment type that currently depends on transient
   WebSocket-only state.
 
 ### Phase 2: Durable Message Attachments
 
-- [ ] Add or confirm a normalized assistant message attachment shape with
+- [x] Add or confirm a normalized assistant message attachment shape with
   `type`, `artifact_id`, `artifact_store`, and optional display snapshot.
 - [x] Persist Quiz card attachments as references to saved Quiz sessions.
-- [ ] Persist Research report attachments as references to Notebook research
-  entries.
-- [ ] Hydrate attachments on session load and show fallback UI when referenced
+- [x] Persist Research report attachments as references to durable runtime trace
+  entries before the user optionally saves them to Notebook.
+- [x] Hydrate attachments on session load and show fallback UI when referenced
   artifacts are missing.
 - [x] Add regression tests that create a Quiz through Chat, reload the session,
   and verify the interactive card is restored.
 
 ### Phase 3: Durable Run Envelopes
 
-First slice implemented: active runs are tracked in-process by session id and
-run id, exposed on session load, block duplicate starts, and are not cancelled
-by WebSocket disconnect. Full durable run recovery after app/sidecar restart is
-still pending.
+Active runs are tracked in-process by session id and run id, exposed on session
+load, block duplicate starts, and are not cancelled by WebSocket disconnect.
+Run status and current stage are also written to runtime session custom entries.
+After an app/sidecar restart, a previously active run is restored as
+`interrupted`; execution resume remains blocked on a runtime rejoin primitive.
 
-- [ ] Map runtime run/session identifiers into product session state.
-- [ ] Persist run status transitions and current stage for long-running turns.
+- [x] Map runtime run/session identifiers into product session state.
+- [x] Persist run status transitions and current stage for long-running turns.
 - [x] Expose an API for session load to return the active run.
 - [x] Ensure switching sessions does not cancel active runs unless the user
   explicitly cancels them.
@@ -135,7 +138,8 @@ still pending.
 
 - [x] Let the WebSocket bridge subscribe by `session_id` and active `run_id`.
 - [x] Avoid duplicate workflow starts when the UI reconnects.
-- [ ] Backfill missed progress from durable trace/session entries where
+- [x] Backfill completed Research report metadata from durable trace/session
+  entries and restore the latest persisted run stage where
   available.
 - [x] Show a compact "still running" state when progress cannot be replayed but
   the backend run is active.

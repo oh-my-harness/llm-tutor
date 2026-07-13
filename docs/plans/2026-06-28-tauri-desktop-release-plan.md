@@ -516,7 +516,8 @@ Acceptance:
 
 ### Phase 7: Background Session Resilience
 
-Status: planned.
+Status: partially implemented; cross-mode desktop QA and runtime-level restart
+resume remain pending.
 
 Desktop users should be able to start a long-running agent task, switch to
 another session, and return later without losing progress, interactive cards, or
@@ -525,13 +526,14 @@ completed artifacts. The detailed cross-mode plan lives in
 
 Tasks:
 
-- [ ] Restore interactive Chat attachments, especially Quiz cards, from durable
+- [x] Restore interactive Chat attachments, especially Quiz and Research report
+      cards, from durable
       message/artifact references after navigation, refresh, or restart.
-- [ ] Persist and expose active run state for long-running Research, Deep Solve,
+- [x] Persist and expose active run state for long-running Research, Deep Solve,
       and Quiz generation turns.
-- [ ] Rejoin active runs by stable run/session identifiers when the user returns
+- [x] Rejoin active in-process runs by stable run/session identifiers when the user returns
       to the originating session.
-- [ ] Avoid duplicate workflow starts during reconnect or session hydration.
+- [x] Avoid duplicate workflow starts during reconnect or session hydration.
 - [ ] Add desktop QA coverage for switching sessions during a long task and
       returning to see progress or final output.
 

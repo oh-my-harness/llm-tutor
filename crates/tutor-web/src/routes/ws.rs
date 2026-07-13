@@ -49,16 +49,26 @@ struct PersistedEventSink {
     session_id: String,
     stream: crate::stream::TutorStream,
     streamed_content: Arc<AtomicBool>,
+    run_id: String,
 }
 
 impl EventSink for PersistedEventSink {
-    fn trace(&self, kind: String, data: serde_json::Value) -> BoxFuture<'static, ()> {
+    fn trace(&self, kind: String, mut data: serde_json::Value) -> BoxFuture<'static, ()> {
         let pool = self.pool.clone();
         let session_id = self.session_id.clone();
         let stream = self.stream.clone();
+        let run_id = self.run_id.clone();
         Box::pin(async move {
+            if let Some(map) = data.as_object_mut() {
+                map.insert("run_id".into(), serde_json::Value::String(run_id.clone()));
+            }
+            if let Some(stage) = run_stage_from_trace(&kind, &data)
+                && let Some(run) = pool.update_active_run_stage(&session_id, &run_id, &stage)
+            {
+                let _ = pool.append_run_state(&session_id, &run).await;
+            }
             if kind == "tool_result"
-                && let Some(artifact) = quiz_artifact_from_tool_result(&data)
+                && let Some(artifact) = message_artifact_from_tool_result(&data, &run_id)
                 && let Ok(count) = pool.assistant_message_count(&session_id).await
             {
                 let _ = pool
@@ -89,6 +99,33 @@ impl EventSink for PersistedEventSink {
     }
 }
 
+fn run_stage_from_trace(kind: &str, data: &serde_json::Value) -> Option<String> {
+    if let Some(stage) = data.get("stage").and_then(|value| value.as_str()) {
+        return Some(stage.to_string());
+    }
+    match kind {
+        "research_search" => Some("search".into()),
+        "research_read" => Some("read_sources".into()),
+        "research_report_done" => Some("report_complete".into()),
+        "deep_solve_stage_start" => data
+            .get("stage_id")
+            .or_else(|| data.get("step_id"))
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
+fn message_artifact_from_tool_result(
+    data: &serde_json::Value,
+    run_id: &str,
+) -> Option<serde_json::Value> {
+    if let Some(artifact) = research_artifact_from_tool_result(data, run_id) {
+        return Some(artifact);
+    }
+    quiz_artifact_from_tool_result(data)
+}
+
 fn quiz_artifact_from_tool_result(data: &serde_json::Value) -> Option<serde_json::Value> {
     if data.get("tool")?.as_str()? != "create_quiz" {
         return None;
@@ -102,6 +139,30 @@ fn quiz_artifact_from_tool_result(data: &serde_json::Value) -> Option<serde_json
     Some(serde_json::json!({
         "type": "quiz_session",
         "quiz_id": quiz_id,
+    }))
+}
+
+fn research_artifact_from_tool_result(
+    data: &serde_json::Value,
+    run_id: &str,
+) -> Option<serde_json::Value> {
+    if data.get("tool")?.as_str()? != "create_research_report" {
+        return None;
+    }
+    if data.get("ok").and_then(|value| value.as_bool()) == Some(false) {
+        return None;
+    }
+    let details = data.get("details")?.as_object()?;
+    let title = details.get("title")?.as_str()?.trim();
+    let markdown = details.get("markdown")?.as_str()?.trim();
+    if title.is_empty() || markdown.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "type": "research_report",
+        "artifact_store": "runtime_trace",
+        "artifact_id": run_id,
+        "title": title,
     }))
 }
 
@@ -186,6 +247,9 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                                 .await;
                             continue;
                         };
+                        if let Some(run) = pool.active_run(&session_id) {
+                            let _ = pool.append_run_state(&session_id, &run).await;
+                        }
                         let active_entry = pool
                             .ensure_entry(&session_id)
                             .await
@@ -198,7 +262,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                         let quizzes = state.quizzes.clone();
                         let rag_root = state.rag_root.clone();
                         tokio::spawn(async move {
-                            run_tutor_message(
+                            let terminal_status = run_tutor_message(
                                 run_pool.clone(),
                                 knowledge,
                                 memory,
@@ -208,14 +272,23 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                                 active_entry,
                                 content,
                                 mentions.unwrap_or_default(),
+                                run_id.clone(),
                                 cancel,
                             )
                             .await;
+                            if let Some(run) = run_pool.terminal_active_run(
+                                &run_session_id,
+                                &run_id,
+                                terminal_status,
+                            ) {
+                                let _ = run_pool.append_run_state(&run_session_id, &run).await;
+                            }
                             run_pool.finish_active_run(&run_session_id, &run_id);
                         });
                     }
                     Ok(ClientMessage::Stop) => {
                         if let Some(run) = pool.cancel_active_run(&session_id) {
+                            let _ = pool.append_run_state(&session_id, &run).await;
                             let _ = entry
                                 .stream
                                 .status(
@@ -295,8 +368,9 @@ async fn run_tutor_message(
     entry: SessionEntry,
     content: String,
     mentions: Vec<SpaceMention>,
+    run_id: String,
     cancel: CancellationToken,
-) {
+) -> &'static str {
     let history_len = pool.history_len(&entry.id).await + 1;
     let user_message_index = next_user_message_index(&pool, &entry.id).await;
     if !mentions.is_empty() {
@@ -317,6 +391,7 @@ async fn run_tutor_message(
             "running",
             serde_json::json!({
                 "capability": entry.capability,
+                "run_id": run_id,
                 "history_len": history_len,
             }),
         )
@@ -366,6 +441,7 @@ async fn run_tutor_message(
             session_id: entry.id.clone(),
             stream: entry.stream.clone(),
             streamed_content: streamed_content.clone(),
+            run_id: run_id.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance)
             .with_event_sink(sink)
@@ -451,7 +527,7 @@ async fn run_tutor_message(
             )
             .await;
         let _ = entry.stream.content("", false).await;
-        return;
+        return "cancelled";
     }
 
     match result {
@@ -510,6 +586,7 @@ async fn run_tutor_message(
                     }),
                 )
                 .await;
+            "completed"
         }
         Err(err) => {
             let _ = entry
@@ -522,6 +599,7 @@ async fn run_tutor_message(
                 )
                 .await;
             let _ = entry.stream.content(&format!("Error: {err}"), false).await;
+            "failed"
         }
     }
 }
@@ -725,5 +803,26 @@ mod tests {
         assert!(resolved.content.contains("notebook_entry:"));
         assert!(!resolved.content.contains("Alignment marks"));
         assert!(resolved.content.contains("User message:\nsummarize this"));
+    }
+
+    #[test]
+    fn creates_durable_research_artifact_from_structured_tool_result() {
+        let artifact = message_artifact_from_tool_result(
+            &serde_json::json!({
+                "tool": "create_research_report",
+                "ok": true,
+                "details": {
+                    "title": "Transformer Architecture",
+                    "markdown": "# Report\n\n## Summary\nDetails."
+                }
+            }),
+            "run-123",
+        )
+        .unwrap();
+
+        assert_eq!(artifact["type"], "research_report");
+        assert_eq!(artifact["artifact_store"], "runtime_trace");
+        assert_eq!(artifact["artifact_id"], "run-123");
+        assert_eq!(artifact["title"], "Transformer Architecture");
     }
 }

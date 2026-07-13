@@ -28,6 +28,8 @@ import {
 } from './settings'
 import type { QuizSession } from './quizTypes'
 import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
+import { attachRestoredResearchReports, researchReportFromTracePayload } from './researchRestore'
+import type { ResearchReportTraceData } from './researchRestore'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
 import { openExternalUrl } from './api'
 import {
@@ -52,6 +54,8 @@ interface Message {
   artifacts?: MessageArtifact[]
   quizPlan?: QuizPlan
   researchPlan?: ResearchPlan
+  researchTitle?: string
+  researchUnavailable?: boolean
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
@@ -60,6 +64,9 @@ interface Message {
 interface MessageArtifact {
   type: 'quiz_session' | string
   quiz_id?: string
+  artifact_id?: string
+  artifact_store?: string
+  title?: string
 }
 
 interface QuizPlan {
@@ -112,6 +119,7 @@ interface SessionRunSummary {
   session_id?: string
   capability?: Capability
   status?: string
+  current_stage?: string | null
   started_at?: string
   updated_at?: string
 }
@@ -152,6 +160,7 @@ interface SessionDetailResponse {
     message_count?: number
   } | null
   active_run?: SessionRunSummary | null
+  run_state?: SessionRunSummary | null
   latest_usage?: TokenUsagePayload | null
   metadata?: {
     name?: string | null
@@ -184,7 +193,7 @@ export default function App() {
   const pendingQuizRef = useRef<QuizSession | undefined>(undefined)
   const pendingQuizPlanRef = useRef<QuizPlan | undefined>(undefined)
   const pendingResearchPlanRef = useRef<ResearchPlan | undefined>(undefined)
-  const pendingResearchReportRef = useRef<string | undefined>(undefined)
+  const pendingResearchReportRef = useRef<ResearchReportTraceData | undefined>(undefined)
   const [budgetSpent, setBudgetSpent] = useState(0)
   const [budgetWarning, setBudgetWarning] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<{ tool: string; args: Record<string, unknown>; requestId: string } | null>(null)
@@ -259,7 +268,7 @@ export default function App() {
           const quizPlan = pendingQuizPlanRef.current
           const researchPlan = pendingResearchPlanRef.current
           const researchReport = pendingResearchReportRef.current
-          const messageText = researchReport || finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : '')
+          const messageText = researchReport?.markdown || finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : '')
           if (messageText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan || researchPlan) {
             setMessages((prev) => [
               ...dropTrailingTransientStatus(prev),
@@ -273,6 +282,7 @@ export default function App() {
                 artifacts: quiz ? [{ type: 'quiz_session', quiz_id: quiz.id }] : undefined,
                 quizPlan,
                 researchPlan,
+                researchTitle: researchReport?.title,
               },
             ])
           } else {
@@ -693,7 +703,7 @@ export default function App() {
 
   const handleSaveToNotebook = useCallback(async (markdown: string, options: SaveToNotebookOptions = {}): Promise<SaveToNotebookResult> => {
     try {
-      const title = titleFromMarkdown(markdown)
+      const title = options.title?.trim() || titleFromMarkdown(markdown)
       const entryType = resolveGeneratedNotebookEntryType(capability, options.entryType)
       let folderPath = options.newFolderPath?.trim() || options.folderPath?.trim() || ''
       if (folderPath) {
@@ -1025,8 +1035,9 @@ export default function App() {
           })),
           restoredTrace,
         )
+        const restoredReports = attachRestoredResearchReports(withCitations, restoredTrace)
         const restored = attachRestoredResearchPlans(
-          attachRestoredQuizPlans(attachRestoredDeepSolve(withCitations, restoredTrace), restoredTrace),
+          attachRestoredQuizPlans(attachRestoredDeepSolve(restoredReports, restoredTrace), restoredTrace),
           restoredTrace,
         )
         setMessages(restored)
@@ -1038,7 +1049,19 @@ export default function App() {
           pushStatus({
             kind: 'thinking',
             label: 'Working',
-            detail: `Rejoining ${data.active_run.capability ? capabilityLabel(data.active_run.capability) : 'agent'} run`,
+            detail: [
+              `Rejoining ${data.active_run.capability ? capabilityLabel(data.active_run.capability) : 'agent'} run`,
+              data.active_run.current_stage ? `stage: ${data.active_run.current_stage}` : '',
+            ].filter(Boolean).join(' · '),
+          })
+        } else if (data.run_state && ['interrupted', 'failed', 'cancelled'].includes(data.run_state.status ?? '')) {
+          pushStatus({
+            kind: data.run_state.status === 'cancelled' ? 'done' : 'error',
+            label: data.run_state.status === 'interrupted' ? 'Run interrupted' : `Run ${data.run_state.status}`,
+            detail: [
+              data.run_state.capability ? capabilityLabel(data.run_state.capability) : 'Agent',
+              data.run_state.current_stage ? `stage: ${data.run_state.current_stage}` : '',
+            ].filter(Boolean).join(' · '),
           })
         }
         if (data.capability && isCapability(data.capability)) {
@@ -1553,12 +1576,8 @@ function researchPlanFromTrace(payload: Record<string, unknown>): ResearchPlan |
   }
 }
 
-function researchReportFromTrace(payload: Record<string, unknown>): string | undefined {
-  if (payload.kind !== 'tool_result' || payload.tool !== 'create_research_report' || payload.ok === false) return undefined
-  const details = payload.details
-  if (!details || typeof details !== 'object') return undefined
-  const markdown = (details as Record<string, unknown>).markdown
-  return typeof markdown === 'string' && markdown.trim() ? markdown : undefined
+function researchReportFromTrace(payload: Record<string, unknown>): ResearchReportTraceData | undefined {
+  return researchReportFromTracePayload(payload)
 }
 
 function stringListFromUnknown(value: unknown): string[] {
@@ -1861,6 +1880,7 @@ function runSummaryFromStatusPayload(payload: Record<string, unknown>): SessionR
     run_id: typeof payload.run_id === 'string' ? payload.run_id : undefined,
     capability,
     status: typeof payload.status === 'string' ? payload.status : 'running',
+    current_stage: typeof payload.current_stage === 'string' ? payload.current_stage : null,
     started_at: typeof payload.started_at === 'string' ? payload.started_at : undefined,
     updated_at: typeof payload.updated_at === 'string' ? payload.updated_at : undefined,
   }
