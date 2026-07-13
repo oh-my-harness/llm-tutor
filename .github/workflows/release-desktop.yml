@@ -26,23 +26,16 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: msi,nsis
             artifact_name: windows-x64
-            artifact_paths: |
-              target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-              target/x86_64-pc-windows-msvc/release/bundle/nsis/*setup.exe
           - label: macOS x64
             os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: dmg
             artifact_name: macos-x64
-            artifact_paths: |
-              target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           - label: macOS arm64
             os: macos-15
             target: aarch64-apple-darwin
             bundles: dmg
             artifact_name: macos-arm64
-            artifact_paths: |
-              target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
     steps:
       - name: Checkout
@@ -116,16 +109,37 @@ jobs:
           set -euo pipefail
           npx --yes @tauri-apps/cli@2.11.4 build --target "${TARGET}" --config src-tauri/tauri.release.conf.json --ci --bundles "${BUNDLES}"
 
+      - name: Prepare release assets
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.artifact_name }}
+        run: |
+          set -euo pipefail
+          version="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          output_dir="release-assets"
+          mkdir -p "${output_dir}"
+
+          if [[ "${PLATFORM}" == "windows-x64" ]]; then
+            msi=(target/${TARGET}/release/bundle/msi/*.msi)
+            exe=(target/${TARGET}/release/bundle/nsis/*setup.exe)
+            cp "${msi[0]}" "${output_dir}/Tutor-Agent-${version}-windows-x64.msi"
+            cp "${exe[0]}" "${output_dir}/Tutor-Agent-${version}-windows-x64-setup.exe"
+          else
+            dmg=(target/${TARGET}/release/bundle/dmg/*.dmg)
+            cp "${dmg[0]}" "${output_dir}/Tutor-Agent-${version}-${PLATFORM}.dmg"
+          fi
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: tutor-agent-${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_paths }}
+          path: release-assets/*
           if-no-files-found: error
 
       - name: Upload release assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact_paths }}
+          files: release-assets/*
           fail_on_unmatched_files: true
