@@ -536,6 +536,16 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-450: The sidebar shall show recent sessions.
 - REQ-451: The sidebar shall be collapsible.
 - REQ-452: Recent sessions shall support rename and delete.
+- REQ-452A: Selecting or merely activating a recent session shall not reorder
+  the sidebar session list. A session should move to the top only after the user
+  sends a new message in that session or the session otherwise receives new
+  conversation activity.
+- REQ-452B: Recent sessions shall support manual pinning and unpinning. Pinned
+  sessions shall remain above unpinned sessions and shall not be displaced by
+  ordinary activity sorting.
+- REQ-452C: Recent session pin/unpin shall be available from a product-owned
+  right-click context menu on the session item, alongside existing session
+  actions such as rename and delete.
 - REQ-453: Clicking Chat shall open a new conversation by default.
 - REQ-454: The new conversation view shall center the composer.
 - REQ-455: The chat scroll behavior shall match common chat apps.
