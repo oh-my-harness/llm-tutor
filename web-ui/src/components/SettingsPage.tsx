@@ -30,7 +30,7 @@ import type {
   SearchConfig,
   SearchProvider,
 } from '../settings'
-import { getDesktopDataDir, openDesktopDataDir } from '../api'
+import { chooseDesktopDirectory, getDesktopDataDir, openDesktopDataDir } from '../api'
 
 interface Props {
   settings: LlmSettings
@@ -243,16 +243,9 @@ export function SettingsPage({ settings, onChange }: Props) {
   const chooseNotebookFolder = async () => {
     setNotebookStatus('Opening folder picker...')
     try {
-      const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Bind Notebook Vault folder',
-      })
-      if (typeof selected === 'string') {
+      const selected = await chooseDesktopDirectory('Bind Notebook Vault folder')
+      if (selected) {
         await bindNotebookVault(selected)
-      } else if (Array.isArray(selected) && typeof selected[0] === 'string') {
-        await bindNotebookVault(selected[0])
       } else {
         setNotebookStatus('Folder selection cancelled')
       }

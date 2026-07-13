@@ -51,6 +51,20 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   return true
 }
 
+export async function chooseDesktopDirectory(title: string): Promise<string | null> {
+  const { isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return null
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title,
+  })
+  if (typeof selected === 'string') return selected
+  if (Array.isArray(selected) && typeof selected[0] === 'string') return selected[0]
+  return null
+}
+
 export async function readClipboardText(): Promise<string | null> {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return null

@@ -459,8 +459,13 @@ Tasks:
       they conflict with app behavior.
 - [x] Lock the top-level app shell so the window itself does not behave like a
       scrolling web page.
+- [x] Prevent desktop file drops from falling through to the WebView's default
+      file navigation behavior.
 - [ ] Make scrolling pane-local for Chat history, Notebook tree, editors,
       Knowledge lists, Research reports, Trace, Settings, and other work areas.
+- [x] Harden the main app shell, Chat history, empty Chat state, and Trace panel
+      so their scroll behavior is owned by panes rather than the top-level
+      window.
 - [x] Add an app-owned context menu framework that can replace the browser
       context menu in desktop mode.
 - [x] Define high-level context menu capability areas for Notebook, Chat,
@@ -473,6 +478,8 @@ Tasks:
 - [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.
+- [x] Add a shared desktop directory picker helper and route Notebook Vault
+      folder binding through it.
 - [ ] Add or plan app-level shortcuts and command palette behavior for common
       desktop workflows.
 - [ ] Add desktop QA checks for browser-default interaction regressions, pane

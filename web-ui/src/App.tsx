@@ -28,6 +28,7 @@ import {
 } from './settings'
 import type { QuizSession } from './quizTypes'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
+import { openExternalUrl } from './api'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
@@ -1005,7 +1006,13 @@ export default function App() {
     }
 
     if (target.type === 'web') {
-      window.open(target.url, '_blank', 'noopener,noreferrer')
+      void openExternalUrl(target.url)
+        .then((opened) => {
+          if (!opened) window.open(target.url, '_blank', 'noopener,noreferrer')
+        })
+        .catch(() => {
+          window.open(target.url, '_blank', 'noopener,noreferrer')
+        })
       return
     }
 
@@ -1047,7 +1054,7 @@ export default function App() {
 
   return (
     <I18nProvider language={llmSettings.language}>
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar
         activeView={view}
         collapsed={sidebarCollapsed}
@@ -1059,7 +1066,7 @@ export default function App() {
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {view === 'chat' && (
           <>
             <header className="flex items-center gap-4 bg-white px-6 py-3">
@@ -1071,8 +1078,8 @@ export default function App() {
                 <BudgetPanel spent={budgetSpent} limit={llmSettings.budgetLimitUsd} warning={budgetWarning} />
               </div>
             </header>
-            <div className="flex flex-1 min-h-0">
-              <main className="flex-1">
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 <ChatBox
                   messages={messages}
                   streamingText={streamingText}
@@ -1105,7 +1112,7 @@ export default function App() {
               </main>
               {!chatIsEmpty && (
                 <aside
-                  className={`shrink-0 bg-white transition-[width] duration-200 ${
+                  className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width] duration-200 ${
                     traceCollapsed ? 'w-12' : 'w-72'
                   }`}
                 >

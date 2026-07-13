@@ -25,6 +25,7 @@ export async function initializeDesktopBehavior() {
   document.documentElement.dataset.desktop = 'true'
   installDesktopContextMenu()
   installExternalLinkHandling()
+  installDesktopDragDropHandling()
 }
 
 function installDesktopContextMenu() {
@@ -60,6 +61,17 @@ function installExternalLinkHandling() {
       window.open(anchor.href, '_blank', 'noopener,noreferrer')
     })
   }, true)
+}
+
+function installDesktopDragDropHandling() {
+  const preventBrowserFileDrop = (event: DragEvent) => {
+    if (event.dataTransfer?.types.includes('Files')) {
+      event.preventDefault()
+    }
+  }
+
+  document.addEventListener('dragover', preventBrowserFileDrop, true)
+  document.addEventListener('drop', preventBrowserFileDrop, true)
 }
 
 function desktopContextActions(target: Element): DesktopContextAction[] {

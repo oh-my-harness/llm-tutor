@@ -571,22 +571,22 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 
 ## 29. Desktop Release
 
-- REQ-560: The product shall be packaged as a Tauri desktop application. Status: planned.
-- REQ-561: The desktop app shall bundle the React UI production build. Status: planned.
-- REQ-562: The desktop app shall start the local Rust backend automatically. Status: planned.
-- REQ-563: The desktop app shall not require users to run `npm run dev` or `cargo run` manually. Status: planned.
-- REQ-564: The desktop app shall use an OS-appropriate application data directory by default. Status: planned.
-- REQ-565: The desktop app shall keep API keys user-configured and shall not bundle provider credentials. Status: planned.
-- REQ-566: The first desktop release shall prioritize Windows packaging. Status: planned.
-- REQ-567: The release process shall support reproducible builds through scripts or CI. Status: planned.
-- REQ-568: The app shall preserve the local-first storage model in the desktop release. Status: planned.
-- REQ-569: Desktop packaging details shall be tracked in `docs/plans/2026-06-28-tauri-desktop-release-plan.md`. Status: planned.
-- REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: planned.
-- REQ-571: The desktop app shall hide or replace browser-default interactions that make the product feel like an embedded webpage, including visible browser context-menu behavior. Status: planned.
-- REQ-572: The desktop app shall use a fixed application shell where top-level window scrolling is avoided and scroll behavior is owned by specific panes or work areas. Status: planned.
-- REQ-573: The desktop app shall provide product-owned context menu capability areas for major surfaces such as Notebook, Chat, Knowledge, Research, and Books, with detailed menu items specified during implementation design. Status: planned.
-- REQ-574: The desktop app shall prefer native desktop affordances for file/folder selection, revealing local files, external link opening, and future app-level shortcuts where appropriate. Status: planned.
-- REQ-575: Desktop polish shall preserve the local-first sidecar architecture and shall not rewrite existing backend routes as Tauri commands unless a native capability requires it. Status: planned.
+- REQ-560: The product shall be packaged as a Tauri desktop application. Status: implemented; manual desktop QA pending.
+- REQ-561: The desktop app shall bundle the React UI production build. Status: implemented; release artifact QA pending.
+- REQ-562: The desktop app shall start the local Rust backend automatically. Status: implemented; manual desktop QA pending.
+- REQ-563: The desktop app shall not require users to run `npm run dev` or `cargo run` manually. Status: implemented for release builds; manual desktop QA pending.
+- REQ-564: The desktop app shall use an OS-appropriate application data directory by default. Status: implemented.
+- REQ-565: The desktop app shall keep API keys user-configured and shall not bundle provider credentials. Status: implemented.
+- REQ-566: The first desktop release shall prioritize Windows packaging. Status: implemented in build scripts; artifact QA pending.
+- REQ-567: The release process shall support reproducible builds through scripts or CI. Status: implemented; CI secret validation pending.
+- REQ-568: The app shall preserve the local-first storage model in the desktop release. Status: implemented.
+- REQ-569: Desktop packaging details shall be tracked in `docs/plans/2026-06-28-tauri-desktop-release-plan.md`. Status: implemented.
+- REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: planned; GitHub Actions path documented but not validated.
+- REQ-571: The desktop app shall hide or replace browser-default interactions that make the product feel like an embedded webpage, including visible browser context-menu behavior. Status: in progress; app-owned context menus, native clipboard use, external-link routing, and file-drop interception are implemented.
+- REQ-572: The desktop app shall use a fixed application shell where top-level window scrolling is avoided and scroll behavior is owned by specific panes or work areas. Status: in progress; top-level shell and Chat/Trace panes are hardened, full surface audit remains.
+- REQ-573: The desktop app shall provide product-owned context menu capability areas for major surfaces such as Notebook, Chat, Knowledge, Research, and Books, with detailed menu items specified during implementation design. Status: in progress; framework and first Notebook/generic action slice are implemented.
+- REQ-574: The desktop app shall prefer native desktop affordances for file/folder selection, revealing local files, external link opening, and future app-level shortcuts where appropriate. Status: in progress; shared directory picker helper, Notebook Vault folder binding, native clipboard, data directory reveal, and external-link opening are implemented.
+- REQ-575: Desktop polish shall preserve the local-first sidecar architecture and shall not rewrite existing backend routes as Tauri commands unless a native capability requires it. Status: implemented.
 
 ## 30. Acceptance Baseline
 

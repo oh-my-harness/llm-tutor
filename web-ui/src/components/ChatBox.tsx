@@ -346,7 +346,7 @@ export function ChatBox({
   }, [messages, streamingText])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {saveNotebookMarkdown && (
         <SaveNotebookDialog
           folders={notebookFolders}
@@ -360,7 +360,7 @@ export function ChatBox({
         />
       )}
       {empty ? (
-        <div className="flex flex-1 items-center justify-center px-6 pb-16">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
           <div className="w-full max-w-4xl">
             <div className="mb-10 flex items-center justify-center gap-4 text-center">
               <Sparkles size={42} className="text-gray-800" />
@@ -396,7 +396,7 @@ export function ChatBox({
       ) : (
         <>
           <ContextCapacity stats={contextStats} />
-          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 space-y-3 overflow-y-auto p-4">
+          <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((msg, i) => (
               <div key={i} className={messageClassName(msg)}>
                 {msg.role === 'status' ? (
