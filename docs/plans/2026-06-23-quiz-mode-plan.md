@@ -371,11 +371,11 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 - [x] Let Quiz capability keep normal chat behavior until the agent calls a tool.
 - [x] Save `create_quiz` output into Quiz Bank.
 - [x] Render generated quizzes as interactive Chat cards.
-- [ ] Persist Chat Quiz card attachments as stable references to saved Quiz
+- [x] Persist Chat Quiz card attachments as stable references to saved Quiz
   sessions and hydrate them when the user returns to the session.
-- [ ] Add a regression test that generates a Quiz in Chat, reloads or reopens
+- [x] Add a regression test that generates a Quiz in Chat, reloads or reopens
   the session, and verifies the interactive Quiz card is restored.
-- [ ] Preserve completed `create_quiz` tool results when the user switches
+- [x] Preserve completed `create_quiz` tool results when the user switches
   sessions before the outer agent produces its final short response.
 - [ ] Add stronger provider-behavior QA so agents consistently plan before
   generating when the request is ambiguous.

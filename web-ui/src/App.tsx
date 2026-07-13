@@ -27,6 +27,7 @@ import {
   settingsForSession,
 } from './settings'
 import type { QuizSession } from './quizTypes'
+import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
 import { openExternalUrl } from './api'
 
@@ -40,11 +41,17 @@ interface Message {
   citations?: Citation[]
   deepSolve?: DeepSolveTraceEntry[]
   quiz?: QuizSession
+  artifacts?: MessageArtifact[]
   quizPlan?: QuizPlan
   researchPlan?: ResearchPlan
   notebookEditProposal?: NotebookEditProposal
   attachments?: ChatAttachment[]
   mentions?: SpaceMention[]
+}
+
+interface MessageArtifact {
+  type: 'quiz_session' | string
+  quiz_id?: string
 }
 
 interface QuizPlan {
@@ -112,6 +119,7 @@ interface SessionDetailResponse {
     text: string
     mentions?: SpaceMention[]
     citations?: Citation[]
+    artifacts?: MessageArtifact[]
   }>
   trace?: Array<{
     kind: string
@@ -238,6 +246,7 @@ export default function App() {
                 deepSolve: deepSolve.length > 0 ? deepSolve : undefined,
                 notebookEditProposal,
                 quiz,
+                artifacts: quiz ? [{ type: 'quiz_session', quiz_id: quiz.id }] : undefined,
                 quizPlan,
                 researchPlan,
               },
@@ -952,6 +961,7 @@ export default function App() {
             text: message.text,
             mentions: message.mentions,
             citations: message.citations,
+            artifacts: message.artifacts,
           })),
           restoredTrace,
         )
@@ -1394,19 +1404,6 @@ function notebookEditProposalFromTrace(payload: Record<string, unknown>): Notebo
   }
 }
 
-function quizFromTrace(payload: Record<string, unknown>): QuizSession | undefined {
-  if (payload.kind !== 'tool_result' || payload.tool !== 'create_quiz' || payload.ok === false) return undefined
-  const details = payload.details
-  if (!details || typeof details !== 'object') return undefined
-  const quiz = (details as Record<string, unknown>).quiz
-  if (!quiz || typeof quiz !== 'object') return undefined
-  const id = (quiz as Record<string, unknown>).id
-  const title = (quiz as Record<string, unknown>).title
-  const questions = (quiz as Record<string, unknown>).questions
-  if (typeof id !== 'string' || typeof title !== 'string' || !Array.isArray(questions)) return undefined
-  return quiz as QuizSession
-}
-
 function quizPlanFromTrace(payload: Record<string, unknown>): QuizPlan | undefined {
   if (payload.kind !== 'tool_result' || payload.tool !== 'propose_quiz_plan' || payload.ok === false) return undefined
   const details = payload.details
@@ -1650,42 +1647,14 @@ function attachRestoredResearchPlans(messages: Message[], traceEntries: TraceEnt
 }
 
 async function attachRestoredQuizzes(messages: Message[], traceEntries: TraceEntry[]): Promise<Message[]> {
-  const restoredQuizzes = traceEntries
-    .map((entry) => quizFromTrace(entry.payload))
-    .filter((quiz): quiz is QuizSession => Boolean(quiz))
-  const quizIds = traceEntries
-    .filter((entry) => entry.kind === 'quiz_created')
-    .map((entry) => {
-      const payload = entry.payload as Record<string, unknown>
-      return typeof payload.quiz_id === 'string' ? payload.quiz_id : null
-    })
-    .filter((id): id is string => Boolean(id))
-
-  if (restoredQuizzes.length === 0 && quizIds.length === 0) return messages
-
-  const fetchedQuizzes = await Promise.all(
-    quizIds.map(async (id) => {
-      try {
-        const res = await fetch(`/api/quizzes/${encodeURIComponent(id)}`)
-        const data = await safeJson(res)
-        return res.ok ? data.quiz as QuizSession : null
-      } catch {
-        return null
-      }
-    }),
-  )
-
-  const quizzes = [
-    ...restoredQuizzes,
-    ...fetchedQuizzes.filter((quiz): quiz is QuizSession => Boolean(quiz)),
-  ]
-  let quizIndex = 0
-  return messages.map((message) => {
-    if (message.role !== 'assistant') return message
-    if (message.quiz) return message
-    const quiz = quizzes[quizIndex]
-    quizIndex += 1
-    return quiz ? { ...message, quiz } : message
+  return attachRestoredQuizzesToMessages(messages, traceEntries, async (id) => {
+    try {
+      const res = await fetch(`/api/quizzes/${encodeURIComponent(id)}`)
+      const data = await safeJson(res)
+      return res.ok ? data.quiz as QuizSession : null
+    } catch {
+      return null
+    }
   })
 }
 

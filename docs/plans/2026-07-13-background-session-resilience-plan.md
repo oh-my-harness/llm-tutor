@@ -109,12 +109,12 @@ When a user returns to a session:
 
 - [ ] Add or confirm a normalized assistant message attachment shape with
   `type`, `artifact_id`, `artifact_store`, and optional display snapshot.
-- [ ] Persist Quiz card attachments as references to saved Quiz sessions.
+- [x] Persist Quiz card attachments as references to saved Quiz sessions.
 - [ ] Persist Research report attachments as references to Notebook research
   entries.
 - [ ] Hydrate attachments on session load and show fallback UI when referenced
   artifacts are missing.
-- [ ] Add regression tests that create a Quiz through Chat, reload the session,
+- [x] Add regression tests that create a Quiz through Chat, reload the session,
   and verify the interactive card is restored.
 
 ### Phase 3: Durable Run Envelopes

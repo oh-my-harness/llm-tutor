@@ -85,6 +85,13 @@ pub struct PersistedMessageCitations {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedMessageArtifacts {
+    pub assistant_message_index: usize,
+    pub artifacts: Vec<serde_json::Value>,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 /// Thread-safe pool of active web session metadata plus runtime session repo.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
@@ -485,6 +492,58 @@ impl SessionPool {
                 Some(PersistedMessageCitations {
                     assistant_message_index,
                     citations,
+                    timestamp: entry.timestamp,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn append_message_artifacts(
+        &self,
+        id: &str,
+        assistant_message_index: usize,
+        artifacts: Vec<serde_json::Value>,
+    ) -> Result<(), llm_harness_types::SessionError> {
+        if artifacts.is_empty() {
+            return Ok(());
+        }
+        self.open_runtime_session(id)
+            .await?
+            .append(SessionEntryPayload::Custom {
+                custom_type: "message_artifacts".into(),
+                data: serde_json::json!({
+                    "assistant_message_index": assistant_message_index,
+                    "artifacts": artifacts,
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn message_artifacts(
+        &self,
+        id: &str,
+    ) -> Result<Vec<PersistedMessageArtifacts>, llm_harness_types::SessionError> {
+        let entries = self
+            .open_runtime_session(id)
+            .await?
+            .read_active_path()
+            .await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let SessionEntryPayload::Custom { custom_type, data } = entry.payload else {
+                    return None;
+                };
+                if custom_type != "message_artifacts" {
+                    return None;
+                }
+                let assistant_message_index =
+                    data.get("assistant_message_index")?.as_u64()? as usize;
+                let artifacts = data.get("artifacts")?.as_array()?.clone();
+                Some(PersistedMessageArtifacts {
+                    assistant_message_index,
+                    artifacts,
                     timestamp: entry.timestamp,
                 })
             })
@@ -1106,6 +1165,37 @@ mod tests {
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].assistant_message_index, 1);
         assert_eq!(citations[0].citations[0]["source"], "doc.pdf");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn message_artifacts_survive_pool_reopen() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("quiz", None, false, None, None, None)
+            .await
+            .unwrap();
+
+        pool.append_message_artifacts(
+            &id,
+            1,
+            vec![serde_json::json!({
+                "type": "quiz_session",
+                "quiz_id": "quiz-123",
+            })],
+        )
+        .await
+        .unwrap();
+
+        drop(pool);
+        let reopened = SessionPool::new_with_root(&root);
+        let artifacts = reopened.message_artifacts(&id).await.unwrap();
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].assistant_message_index, 1);
+        assert_eq!(artifacts[0].artifacts[0]["type"], "quiz_session");
+        assert_eq!(artifacts[0].artifacts[0]["quiz_id"], "quiz-123");
         let _ = std::fs::remove_dir_all(root);
     }
 

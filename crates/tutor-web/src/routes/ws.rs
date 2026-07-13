@@ -57,6 +57,14 @@ impl EventSink for PersistedEventSink {
         let session_id = self.session_id.clone();
         let stream = self.stream.clone();
         Box::pin(async move {
+            if kind == "tool_result"
+                && let Some(artifact) = quiz_artifact_from_tool_result(&data)
+                && let Ok(count) = pool.assistant_message_count(&session_id).await
+            {
+                let _ = pool
+                    .append_message_artifacts(&session_id, count + 1, vec![artifact])
+                    .await;
+            }
             let _ = pool.append_trace(&session_id, &kind, data.clone()).await;
             stream.trace(&kind, data).await;
         })
@@ -79,6 +87,22 @@ impl EventSink for PersistedEventSink {
             stream.progress_content(&text, chunk).await;
         })
     }
+}
+
+fn quiz_artifact_from_tool_result(data: &serde_json::Value) -> Option<serde_json::Value> {
+    if data.get("tool")?.as_str()? != "create_quiz" {
+        return None;
+    }
+    if data.get("ok").and_then(|value| value.as_bool()) == Some(false) {
+        return None;
+    }
+    let details = data.get("details")?.as_object()?;
+    let quiz = details.get("quiz")?.as_object()?;
+    let quiz_id = quiz.get("id")?.as_str()?;
+    Some(serde_json::json!({
+        "type": "quiz_session",
+        "quiz_id": quiz_id,
+    }))
 }
 
 #[derive(Deserialize)]

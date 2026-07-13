@@ -264,6 +264,20 @@ async fn get_session(
         .into_iter()
         .map(|item| (item.assistant_message_index, item.citations))
         .collect::<HashMap<_, _>>();
+    let message_artifacts = match pool.message_artifacts(&id).await {
+        Ok(items) => items,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let artifacts_by_assistant_index = message_artifacts
+        .into_iter()
+        .map(|item| (item.assistant_message_index, item.artifacts))
+        .collect::<HashMap<_, _>>();
     let mut user_message_index = 0usize;
     let mut assistant_message_index = 0usize;
 
@@ -299,6 +313,11 @@ async fn get_session(
                     if let Some(citations) = citations_by_assistant_index.get(&assistant_message_index) {
                         if let Some(map) = value.as_object_mut() {
                             map.insert("citations".into(), serde_json::Value::Array(citations.clone()));
+                        }
+                    }
+                    if let Some(artifacts) = artifacts_by_assistant_index.get(&assistant_message_index) {
+                        if let Some(map) = value.as_object_mut() {
+                            map.insert("artifacts".into(), serde_json::Value::Array(artifacts.clone()));
                         }
                     }
                 }
