@@ -51,6 +51,19 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   return true
 }
 
+export async function readClipboardText(): Promise<string | null> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return null
+  return invoke<string>('read_clipboard_text')
+}
+
+export async function writeClipboardText(text: string): Promise<boolean> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return false
+  await invoke('write_clipboard_text', { text })
+  return true
+}
+
 async function initialize() {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return

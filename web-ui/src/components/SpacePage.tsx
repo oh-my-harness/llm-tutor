@@ -31,6 +31,7 @@ import {
 import type { QuizQuestion, QuizSession } from '../quizTypes'
 import { useI18n, type TranslationKey } from '../i18n'
 import { openDesktopContextMenu } from '../desktop'
+import { writeClipboardText } from '../api'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 
@@ -1216,7 +1217,7 @@ function NotebookFileTree({
       {
         label: 'Copy Folder Path',
         run: () => {
-          void navigator.clipboard?.writeText(node.path)
+          void writeClipboardText(node.path)
         },
       },
     ])
@@ -1232,7 +1233,7 @@ function NotebookFileTree({
       {
         label: 'Copy Note Path',
         run: () => {
-          void navigator.clipboard?.writeText(entry.path ?? entry.title)
+          void writeClipboardText(entry.path ?? entry.title)
         },
       },
       {

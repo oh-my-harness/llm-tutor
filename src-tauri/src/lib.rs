@@ -87,6 +87,18 @@ fn open_external_url(url: String) -> Result<(), String> {
     open_url(&url).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn read_clipboard_text() -> Result<String, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    clipboard.get_text().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn write_clipboard_text(text: String) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    clipboard.set_text(text).map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -96,7 +108,9 @@ pub fn run() {
             get_backend_url,
             get_data_dir,
             open_data_dir,
-            open_external_url
+            open_external_url,
+            read_clipboard_text,
+            write_clipboard_text
         ])
         .setup(|app| {
             let port = find_free_port()?;

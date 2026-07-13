@@ -468,7 +468,8 @@ Tasks:
       finalizing individual menu items yet.
 - [x] Implement the first context menu slice with generic Copy/Open Link/Copy
       Link actions, editable-field Cut/Copy/Paste/Select All actions, and
-      Notebook file-tree Open/New/Copy Path/Delete actions.
+      Notebook file-tree Open/New/Copy Path/Delete actions, using native
+      desktop clipboard commands instead of browser clipboard permission prompts.
 - [x] Route external web links through the system browser in desktop mode.
 - [ ] Use native desktop affordances for file/folder selection and revealing
       local files where product flows already need those actions.

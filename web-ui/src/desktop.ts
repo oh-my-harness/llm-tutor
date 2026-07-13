@@ -1,4 +1,4 @@
-import { openExternalUrl } from './api'
+import { openExternalUrl, readClipboardText, writeClipboardText } from './api'
 
 let initialized = false
 let contextMenuElement: HTMLDivElement | null = null
@@ -73,7 +73,7 @@ function desktopContextActions(target: Element): DesktopContextAction[] {
     actions.push({
       label: 'Copy',
       run: () => {
-        void navigator.clipboard?.writeText(selection)
+        void writeClipboardText(selection)
       },
     })
   }
@@ -89,7 +89,7 @@ function desktopContextActions(target: Element): DesktopContextAction[] {
     actions.push({
       label: 'Copy Link',
       run: () => {
-        void navigator.clipboard?.writeText(link.href)
+        void writeClipboardText(link.href)
       },
     })
   }
@@ -107,7 +107,7 @@ function editableContextActions(target: Element): DesktopContextAction[] {
       label: 'Cut',
       disabled: !selectedText || isReadOnlyEditable(editable),
       run: () => {
-        void navigator.clipboard?.writeText(selectedText)
+        void writeClipboardText(selectedText)
         replaceEditableSelection(editable, '')
       },
     },
@@ -115,14 +115,16 @@ function editableContextActions(target: Element): DesktopContextAction[] {
       label: 'Copy',
       disabled: !selectedText,
       run: () => {
-        void navigator.clipboard?.writeText(selectedText)
+        void writeClipboardText(selectedText)
       },
     },
     {
       label: 'Paste',
       disabled: isReadOnlyEditable(editable),
       run: () => {
-        void navigator.clipboard?.readText()?.then((text) => replaceEditableSelection(editable, text))
+        void readClipboardText().then((text) => {
+          if (text) replaceEditableSelection(editable, text)
+        })
       },
     },
     {
