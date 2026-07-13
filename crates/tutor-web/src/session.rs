@@ -10,6 +10,7 @@ use llm_harness_types::{
     AgentMessage, AssistantMessageKind, ContentBlock, EntryId, SessionError, TokenUsage,
 };
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 use crate::stream::TutorStream;
 
@@ -92,9 +93,26 @@ pub struct PersistedMessageArtifacts {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActiveRunSummary {
+    pub run_id: String,
+    pub session_id: String,
+    pub capability: String,
+    pub status: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone)]
+struct ActiveRunRecord {
+    summary: ActiveRunSummary,
+    cancel: CancellationToken,
+}
+
 /// Thread-safe pool of active web session metadata plus runtime session repo.
 pub struct SessionPool {
     sessions: Mutex<HashMap<String, SessionEntry>>,
+    active_runs: Mutex<HashMap<String, ActiveRunRecord>>,
     product_metadata: Mutex<HashMap<String, ProductSessionMetadata>>,
     product_metadata_path: PathBuf,
     repo: Arc<JsonlSessionRepo>,
@@ -132,6 +150,7 @@ impl SessionPool {
         let product_metadata = read_product_metadata(&product_metadata_path).unwrap_or_default();
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
+            active_runs: Mutex::new(HashMap::new()),
             product_metadata: Mutex::new(product_metadata),
             product_metadata_path,
             repo: Arc::new(JsonlSessionRepo::new(root)),
@@ -225,6 +244,63 @@ impl SessionPool {
     ) -> Result<Session, llm_harness_types::SessionError> {
         let storage = self.repo.open(id).await?;
         Ok(Session::new(storage))
+    }
+
+    pub fn try_start_active_run(
+        &self,
+        session_id: &str,
+        capability: &str,
+    ) -> Option<(String, CancellationToken)> {
+        let mut active_runs = self.active_runs.lock().unwrap();
+        if active_runs.contains_key(session_id) {
+            return None;
+        }
+
+        let now = chrono::Utc::now();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let cancel = CancellationToken::new();
+        active_runs.insert(
+            session_id.to_string(),
+            ActiveRunRecord {
+                summary: ActiveRunSummary {
+                    run_id: run_id.clone(),
+                    session_id: session_id.to_string(),
+                    capability: capability.to_string(),
+                    status: "running".into(),
+                    started_at: now,
+                    updated_at: now,
+                },
+                cancel: cancel.clone(),
+            },
+        );
+        Some((run_id, cancel))
+    }
+
+    pub fn active_run(&self, session_id: &str) -> Option<ActiveRunSummary> {
+        self.active_runs
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|record| record.summary.clone())
+    }
+
+    pub fn cancel_active_run(&self, session_id: &str) -> Option<ActiveRunSummary> {
+        let mut active_runs = self.active_runs.lock().unwrap();
+        let record = active_runs.get_mut(session_id)?;
+        record.cancel.cancel();
+        record.summary.status = "cancelling".into();
+        record.summary.updated_at = chrono::Utc::now();
+        Some(record.summary.clone())
+    }
+
+    pub fn finish_active_run(&self, session_id: &str, run_id: &str) {
+        let mut active_runs = self.active_runs.lock().unwrap();
+        if active_runs
+            .get(session_id)
+            .is_some_and(|record| record.summary.run_id == run_id)
+        {
+            active_runs.remove(session_id);
+        }
     }
 
     pub async fn repair_incomplete_tool_call_context(
@@ -831,6 +907,7 @@ impl Default for SessionPool {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            active_runs: Mutex::new(HashMap::new()),
             product_metadata: Mutex::new(HashMap::new()),
             product_metadata_path: PathBuf::from(".llm-tutor/session-product-metadata.json"),
             repo: Arc::new(JsonlSessionRepo::new(".llm-tutor/sessions")),
@@ -1196,6 +1273,33 @@ mod tests {
         assert_eq!(artifacts[0].assistant_message_index, 1);
         assert_eq!(artifacts[0].artifacts[0]["type"], "quiz_session");
         assert_eq!(artifacts[0].artifacts[0]["quiz_id"], "quiz-123");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn active_run_blocks_duplicates_until_finished() {
+        let root = std::env::temp_dir().join(format!("llm-tutor-test-{}", uuid::Uuid::new_v4()));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("research", None, false, None, None, None)
+            .await
+            .unwrap();
+
+        let (run_id, cancel) = pool.try_start_active_run(&id, "research").unwrap();
+        assert!(pool.try_start_active_run(&id, "research").is_none());
+
+        let active = pool.active_run(&id).unwrap();
+        assert_eq!(active.run_id, run_id);
+        assert_eq!(active.status, "running");
+
+        let cancelling = pool.cancel_active_run(&id).unwrap();
+        assert_eq!(cancelling.status, "cancelling");
+        assert!(cancel.is_cancelled());
+        assert!(pool.try_start_active_run(&id, "research").is_none());
+
+        pool.finish_active_run(&id, &run_id);
+        assert!(pool.active_run(&id).is_none());
+        assert!(pool.try_start_active_run(&id, "research").is_some());
         let _ = std::fs::remove_dir_all(root);
     }
 

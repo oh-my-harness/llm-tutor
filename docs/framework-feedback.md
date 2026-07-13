@@ -118,6 +118,11 @@
   - Actual: runtime `EdgeConditionJudge` can route based on `StepResult.structured`, and `StepExecutionPolicy.max_attempts` can retry execution failures, but there is no declarative edge condition or step policy for "repair once, then fail" based on semantic verifier output and prior step visits. `llm-tutor` therefore keeps a thin `QuizWorkflowJudge` only to bound the `verify_questions -> generate_questions` repair loop.
   - Suggestion: let edge conditions inspect step visit counts / `step_history`, or add a workflow-level `max_visits_per_step` / `max_semantic_repairs` policy that can be attached to a transition.
 
+- **Durable background agent runs need a runtime rejoin primitive**
+  - Expected: long-running agent or workflow runs can survive UI/WebSocket disconnects, expose a stable run id/status, replay missed progress, and recover to a clear terminal state after process restart when possible.
+  - Actual: `llm-tutor` can keep active runs alive in-process and rejoin them by session id, but full run envelopes, missed-progress replay, restart recovery, and cancellation state are not first-class runtime session concepts yet.
+  - Suggestion: add runtime-managed run records with `run_id`, `session_id`, `assistant_message_id`, status transitions, cancellation, progress cursors, and rejoin/replay APIs so product UIs do not need their own scheduler or event journal.
+
 - **Model metadata discovery is still app-specific**
   - Expected: settings diagnostics and runtime context budgeting can ask the provider adapter for normalized model metadata such as context window, native embedding dimension, supported embedding dimensions, and detected source.
   - Actual: `llm-tutor` has to implement a thin `GET /models` probe, provider-specific auth headers, endpoint derivation, and recursive parsing of fields such as `context_window`, `max_context_tokens`, and `max_model_len`.

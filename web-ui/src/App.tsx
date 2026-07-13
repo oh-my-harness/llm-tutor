@@ -131,6 +131,14 @@ interface SessionDetailResponse {
     timestamp?: string
     message_count?: number
   } | null
+  active_run?: {
+    run_id?: string
+    session_id?: string
+    capability?: Capability
+    status?: string
+    started_at?: string
+    updated_at?: string
+  } | null
   latest_usage?: TokenUsagePayload | null
   metadata?: {
     name?: string | null
@@ -327,12 +335,16 @@ export default function App() {
           setBudgetWarning(true)
           setBudgetSpent((payload.spent_usd as number) ?? 0)
         } else if (kind === 'running') {
+          setRunning(true)
           pushStatus({
             kind: 'thinking',
             label: 'Working',
-            detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
+            detail: payload.rejoined === true
+              ? `Rejoined ${typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : 'agent'} run`
+              : typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
         } else if (kind === 'done') {
+          setRunning(false)
           setLatestUsage((prev) => isTokenUsagePayload(payload.usage) ? payload.usage : prev)
           if (!streamingRef.current) {
             pushStatus({
@@ -349,6 +361,12 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
           setRunning(false)
+        } else if (kind === 'stopping') {
+          pushStatus({
+            kind: 'thinking',
+            label: 'Stopping',
+            detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
+          })
         } else if (kind === 'context_repaired') {
           pushStatus({
             kind: 'tool',
@@ -947,6 +965,7 @@ export default function App() {
       pendingResearchPlanRef.current = undefined
       pendingResearchReportRef.current = undefined
       setLatestUsage(null)
+      setRunning(false)
       setSessionId(id)
       try {
         const res = await fetch(`/api/sessions/${id}`)
@@ -973,6 +992,14 @@ export default function App() {
         void attachRestoredQuizzes(restored, restoredTrace).then(setMessages)
         setTraceEntries(restoredTrace)
         setLatestUsage(data.latest_usage ?? null)
+        if (data.active_run) {
+          setRunning(true)
+          pushStatus({
+            kind: 'thinking',
+            label: 'Working',
+            detail: `Rejoining ${data.active_run.capability ? capabilityLabel(data.active_run.capability) : 'agent'} run`,
+          })
+        }
         if (data.capability && isCapability(data.capability)) {
           setCapability(data.capability)
         }

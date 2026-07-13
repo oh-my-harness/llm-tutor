@@ -136,6 +136,22 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
     let mut event_rx = entry.stream.subscribe();
 
     let (mut ws_sink, mut ws_stream) = socket.split();
+    if let Some(run) = pool.active_run(&session_id) {
+        let _ = entry
+            .stream
+            .status(
+                "running",
+                serde_json::json!({
+                    "capability": run.capability,
+                    "run_id": run.run_id,
+                    "status": run.status,
+                    "rejoined": true,
+                    "started_at": run.started_at,
+                    "updated_at": run.updated_at,
+                }),
+            )
+            .await;
+    }
 
     // Forward events from the agent harness to the WebSocket client
     let send_task = tokio::spawn(async move {
@@ -150,22 +166,15 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
         }
     });
 
-    let mut active_cancel: Option<CancellationToken> = None;
-    let mut active_task: Option<tokio::task::JoinHandle<()>> = None;
-
     while let Some(Ok(msg)) = ws_stream.next().await {
-        if active_task.as_ref().is_some_and(|task| task.is_finished()) {
-            if let Some(task) = active_task.take() {
-                let _ = task.await;
-            }
-            active_cancel = None;
-        }
         match msg {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 match parsed {
                     Ok(ClientMessage::Message { content, mentions }) => {
-                        if active_task.is_some() {
+                        let Some((run_id, cancel)) =
+                            pool.try_start_active_run(&session_id, &entry.capability)
+                        else {
                             let _ = entry
                                 .stream
                                 .status(
@@ -176,29 +185,47 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                                 )
                                 .await;
                             continue;
-                        }
+                        };
                         let active_entry = pool
                             .ensure_entry(&session_id)
                             .await
                             .unwrap_or_else(|| entry.clone());
-                        let cancel = CancellationToken::new();
-                        active_cancel = Some(cancel.clone());
-                        active_task = Some(tokio::spawn(run_tutor_message(
-                            pool.clone(),
-                            state.knowledge.clone(),
-                            state.memory.clone(),
-                            state.notebook.clone(),
-                            state.quizzes.clone(),
-                            state.rag_root.clone(),
-                            active_entry,
-                            content,
-                            mentions.unwrap_or_default(),
-                            cancel,
-                        )));
+                        let run_pool = pool.clone();
+                        let run_session_id = session_id.clone();
+                        let knowledge = state.knowledge.clone();
+                        let memory = state.memory.clone();
+                        let notebook = state.notebook.clone();
+                        let quizzes = state.quizzes.clone();
+                        let rag_root = state.rag_root.clone();
+                        tokio::spawn(async move {
+                            run_tutor_message(
+                                run_pool.clone(),
+                                knowledge,
+                                memory,
+                                notebook,
+                                quizzes,
+                                rag_root,
+                                active_entry,
+                                content,
+                                mentions.unwrap_or_default(),
+                                cancel,
+                            )
+                            .await;
+                            run_pool.finish_active_run(&run_session_id, &run_id);
+                        });
                     }
                     Ok(ClientMessage::Stop) => {
-                        if let Some(cancel) = active_cancel.take() {
-                            cancel.cancel();
+                        if let Some(run) = pool.cancel_active_run(&session_id) {
+                            let _ = entry
+                                .stream
+                                .status(
+                                    "stopping",
+                                    serde_json::json!({
+                                        "capability": run.capability,
+                                        "run_id": run.run_id,
+                                    }),
+                                )
+                                .await;
                         }
                     }
                     Ok(ClientMessage::ApprovalResponse {
@@ -234,12 +261,6 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
         }
     }
 
-    if let Some(cancel) = active_cancel {
-        cancel.cancel();
-    }
-    if let Some(task) = active_task {
-        task.abort();
-    }
     send_task.abort();
 }
 

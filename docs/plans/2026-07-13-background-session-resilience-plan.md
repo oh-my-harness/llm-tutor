@@ -119,20 +119,25 @@ When a user returns to a session:
 
 ### Phase 3: Durable Run Envelopes
 
+First slice implemented: active runs are tracked in-process by session id and
+run id, exposed on session load, block duplicate starts, and are not cancelled
+by WebSocket disconnect. Full durable run recovery after app/sidecar restart is
+still pending.
+
 - [ ] Map runtime run/session identifiers into product session state.
 - [ ] Persist run status transitions and current stage for long-running turns.
-- [ ] Expose an API for session load to return active and recent runs.
-- [ ] Ensure switching sessions does not cancel active runs unless the user
+- [x] Expose an API for session load to return the active run.
+- [x] Ensure switching sessions does not cancel active runs unless the user
   explicitly cancels them.
-- [ ] Add cancellation and failure surfaces that update the durable run state.
+- [x] Add cancellation and failure surfaces for active in-process runs.
 
 ### Phase 4: Progress Rejoin
 
-- [ ] Let the WebSocket bridge subscribe by `session_id` and active `run_id`.
-- [ ] Avoid duplicate workflow starts when the UI reconnects.
+- [x] Let the WebSocket bridge subscribe by `session_id` and active `run_id`.
+- [x] Avoid duplicate workflow starts when the UI reconnects.
 - [ ] Backfill missed progress from durable trace/session entries where
   available.
-- [ ] Show a compact "still running" state when progress cannot be replayed but
+- [x] Show a compact "still running" state when progress cannot be replayed but
   the backend run is active.
 
 ### Phase 5: Cross-Mode QA

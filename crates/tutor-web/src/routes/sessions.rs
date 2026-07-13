@@ -226,6 +226,7 @@ async fn get_session(
                 .into_response();
         }
     };
+    let active_run = pool.active_run(&id);
     let latest_usage = match pool.latest_usage(&id).await {
         Ok(usage) => usage,
         Err(err) => {
@@ -338,6 +339,14 @@ async fn get_session(
                 "summary": summary.summary,
                 "timestamp": summary.timestamp,
                 "message_count": summary.message_count,
+            })),
+            "active_run": active_run.map(|run| serde_json::json!({
+                "run_id": run.run_id,
+                "session_id": run.session_id,
+                "capability": run.capability,
+                "status": run.status,
+                "started_at": run.started_at,
+                "updated_at": run.updated_at,
             })),
             "latest_usage": latest_usage.map(|usage| serde_json::json!({
                 "input_tokens": usage.input_tokens,
