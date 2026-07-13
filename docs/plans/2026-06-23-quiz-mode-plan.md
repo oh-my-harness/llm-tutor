@@ -257,34 +257,66 @@ V1 UI should stay simple:
 ## 7. Current Verification Flow
 
 The current implementation has deterministic validation plus a strict structured
-LLM verifier. It does not yet execute the generation / verification / repair
-loop through runtime `WorkflowEngine`.
+LLM verifier. When a usable LLM config exists, generation and verification run
+through runtime `WorkflowEngine`; otherwise the backend uses a deterministic
+fallback generator.
 
 1. `create_quiz` builds source material from a selected KB, Notebook entry,
    explicit `source_text`, or Chat/Space material resolved before tool call.
-2. If a usable LLM config exists, `tutor_agent::quiz::generate_quiz_questions`
-   requests structured single-choice question JSON grounded in supplied source
-   chunks. Otherwise, the backend uses a deterministic fallback generator.
-3. Generated source indices are mapped to `QuizCitation` metadata. Citation text
+2. `tutor_agent::quiz::generate_quiz_questions_with_workflow` validates and
+   runs the runtime workflow:
+   `collect_sources -> generate_questions -> verify_questions -> publish_questions`.
+3. `collect_sources` is a product executor step that prepares source chunks and
+   generation instructions in workflow context.
+4. `generate_questions` is a runtime LLM step. It must call
+   `submit_step_result` with structured question JSON.
+5. `verify_questions` is a runtime LLM step. It must call `submit_step_result`
+   with `{"verdict":"pass","issues":[]}` or
+   `{"verdict":"fail","action":"repair","issues":[...]}`.
+6. The workflow judge routes a verifier repair back to `generate_questions`
+   once. A second verifier failure aborts the workflow instead of publishing weak
+   questions.
+7. `publish_questions` is a product executor step that validates and returns the
+   final structured questions.
+8. Generated source indices are mapped to `QuizCitation` metadata. Citation text
    is derived from the cited chunk and supporting quote when available.
-4. `validate_quiz_questions_for_storage` rejects questions with:
+9. `validate_quiz_questions_for_storage` rejects questions with:
    - empty stems,
    - fewer than two options,
    - a missing/nonexistent correct option,
    - empty explanations,
    - missing citations,
    - empty citation text.
-5. Generated questions are sent to a structured verifier prompt. The verifier
-   receives only source chunks, candidate question JSON, answer, explanation,
-   citations, and supporting quotes.
-6. The quiz is stored with a `QuizVerificationReport`. Today this report records
+10. The quiz is stored with a `QuizVerificationReport`. Today this report records
    the validation method and issues at the storage boundary; the detailed
    verifier issues are surfaced as generation errors when verification fails.
 
-The next hardening step is moving the controlled flow under runtime
-`WorkflowEngine` and adding a managed repair retry. The verifier should continue
-to judge only supplied sources and should not browse, introduce external facts,
-or behave like a free-form chat agent.
+The verifier should continue to judge only supplied sources and should not
+browse, introduce external facts, or behave like a free-form chat agent.
+
+### Intermediate Output Handling
+
+Quiz generation is triggered by the outer Quiz Chat agent calling the
+`create_quiz` product tool. The detailed generation workflow runs inside that
+tool call.
+
+- Ordinary Quiz mode conversation before `create_quiz` behaves like normal Chat:
+  model text deltas stream through the final-answer `content` channel.
+- `propose_quiz_plan` returns a structured tool result. The WebSocket bridge
+  persists and streams it as a `tool_result` trace; the UI attaches the parsed
+  plan to the next assistant message.
+- `create_quiz` runs the runtime workflow internally. Its workflow step outputs
+  (`collect_sources`, `generate_questions`, verifier repair/fail/pass, and
+  `publish_questions`) are not currently emitted as separate WebSocket
+  `progress_content` events or durable assistant bubbles.
+- When `create_quiz` completes, the outer agent receives one tool result whose
+  details include the saved `quiz`. The WebSocket bridge persists and streams
+  that as a `tool_result` trace; the UI parses it and attaches the interactive
+  Quiz card to the assistant message.
+- The outer agent may then produce a short final assistant response, which uses
+  the normal `content` channel. The intermediate generated drafts and verifier
+  outputs remain workflow-internal structured data unless the workflow fails and
+  surfaces an error.
 
 ## 8. Implementation Phases
 
@@ -351,8 +383,8 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
   `WorkflowEngine` executor steps.
 - [x] Move verifier repair routing from the transitional direct-call path into
   `WorkflowEngine` transitions.
-- [ ] Move generation and verifier LLM calls from workflow executor internals
-  into native runtime LLM steps or subagent reviewers using `submit_step_result`.
+- [x] Move generation and verifier LLM calls from workflow executor internals
+  into native runtime LLM steps using `submit_step_result`.
 
 ## 9. Acceptance Criteria
 

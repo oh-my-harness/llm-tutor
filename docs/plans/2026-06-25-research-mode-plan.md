@@ -115,7 +115,9 @@ research_chat
 ```
 
 `research_chat`, `clarifying`, and `plan_proposed` should behave like normal
-chat: text can stream, and the assistant may ask questions or refine the plan.
+chat: assistant text deltas stream through the final-answer `content` channel,
+the UI shows the response as an ordinary streaming assistant bubble, and the
+assistant may ask questions or refine the plan.
 `workflow_running` should behave like a structured task: progress is shown as
 compact progress/trace events, intermediate drafts should not be merged into the
 final assistant bubble, and only the completed report should become the durable
@@ -129,21 +131,24 @@ works and what the product records as the answer.
 - `content` is the final-answer channel. Chunks on this channel are assembled
   into one durable assistant message. When a non-chunk `content` event arrives,
   the UI commits that assembled text into the conversation history.
-- `progress_content` is the transient conversational/progress channel. TextDelta
-  that is useful to show before a final answer should be sent here in Research
-  mode. The UI renders it in a separate transient progress bubble or status
-  surface, clears it when the final answer is committed, and does not persist it
-  as the answer body.
+- `progress_content` is the transient workflow-progress channel. TextDelta that
+  is useful to show after the detailed Research workflow has started should be
+  sent here. Research Chat, clarification, and plan proposal turns must not use
+  this channel for ordinary assistant replies; they should keep the same
+  streaming behavior as normal Chat. The UI renders `progress_content` in a
+  separate transient progress bubble or status surface, clears it when the final
+  answer is committed, and does not persist it as the answer body.
 - `trace` and `status` are structured operational events for tool calls,
   workflow stages, sources, errors, and metadata. They should stay structured
   and should not be flattened into the final assistant text.
 
-This means Research can still feel conversational while the workflow is running:
-model narration is allowed to appear, but it is not treated as the same message
-as the final report. If a Research turn only produces ordinary chat text and no
-workflow/final-answer tool result, the runtime may promote that text to the
-final-answer channel at turn completion so greetings and clarifying questions are
-stored like normal conversation.
+This means Research has two streaming behaviors. Before the detailed workflow
+starts, Research behaves like Chat. While the detailed workflow is running, model
+narration is allowed to appear as progress, but it is not treated as the same
+message as the final report. If a Research turn only produces ordinary chat text
+and no workflow/final-answer tool result, that text belongs to the final-answer
+channel so greetings and clarifying questions stream and are stored like normal
+conversation.
 
 ## 4. Layering
 
