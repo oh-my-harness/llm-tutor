@@ -103,6 +103,12 @@ research workflow.
   plan and start the detailed workflow only after the user explicitly asks to
   begin, confirms the plan, or gives an unambiguous instruction to produce the
   report.
+- Starting the detailed workflow should use the same product-tool boundary as
+  Quiz generation. Research Chat should call a dedicated
+  `create_research_report` tool after confirmation; that tool owns the runtime
+  workflow execution and returns the report, sources, and report metadata.
+  Keyword-based pre-routing may exist only as a temporary migration bridge, not
+  as the target architecture.
 
 Target interaction states:
 
@@ -150,6 +156,39 @@ and no workflow/final-answer tool result, that text belongs to the final-answer
 channel so greetings and clarifying questions stream and are stored like normal
 conversation.
 
+### Product Tool Boundary
+
+Research should align with Quiz mode:
+
+```text
+Research Chat agent
+  -> ordinary streaming chat for clarification
+  -> propose_research_plan tool when a plan should be confirmed
+  -> create_research_report tool after explicit confirmation
+      -> runtime WorkflowEngine
+      -> report markdown + sources + metadata
+  -> assistant final response / Research report card
+```
+
+Target responsibilities:
+
+- `propose_research_plan` remains a lightweight planning tool. It does not
+  search, read sources, or create a report.
+- `create_research_report` is the only normal entry point for the detailed
+  Research workflow from Chat. The outer agent calls it after the user confirms
+  a plan or gives an unambiguous report-generation request.
+- `create_research_report` runs the runtime `WorkflowEngine`, bridges workflow
+  step events to trace/status/progress events, persists the completed report to
+  the runtime session as `AssistantMessageKind::FinalAnswer`, and returns
+  structured report metadata in its tool result.
+- The WebSocket/UI should treat the `create_research_report` tool call as the
+  boundary where the turn changes from ordinary Research Chat streaming to
+  workflow progress rendering.
+- The existing keyword/confirmation pre-router should be removed once the tool
+  path is in place. If a compatibility bridge remains temporarily, it must
+  delegate to the same product-tool/workflow path and must not change TextDelta
+  routing for ordinary Research Chat turns.
+
 ## 4. Layering
 
 ### Runtime / Agent Layer
@@ -175,17 +214,20 @@ Potential framework feedback:
 
 ### `tutor-agent` Layer
 
-Owns the research workflow prompt and capability behavior.
+Owns the research chat prompt, workflow definition, and report-generation
+behavior behind the product-tool boundary.
 
 Expected behavior:
 
 - create a short research plan,
-- decide search queries,
-- call `web_search`,
-- call `web_fetch` for promising sources,
-- optionally call `rag_search` when a knowledge base is associated,
-- synthesize a report grounded in collected sources,
-- emit structured research trace events.
+- keep ordinary Research Chat conversational until the user confirms the
+  workflow,
+- expose the runtime Research workflow through `create_research_report` rather
+  than through capability-level keyword pre-routing,
+- inside the workflow, decide search queries, call `web_search`, call
+  `web_fetch` for promising sources, optionally call `rag_search` when a
+  knowledge base is associated, synthesize a report grounded in collected
+  sources, and emit structured research trace events.
 
 Research mode should strongly prefer tools for external facts. If search fails, the final answer must say what failed and what is based on model prior knowledge.
 
@@ -203,6 +245,8 @@ Search provider configuration stays in product settings. Tool implementations sh
 
 Owns product APIs and persistence:
 
+- `propose_research_plan` product tool,
+- `create_research_report` product tool,
 - notebook entry store for research reports,
 - book store,
 - save report endpoint,
@@ -426,6 +470,10 @@ The report remains a Notebook research entry even after saving. A future book ch
   detailed workflow path.
 - [x] Move detailed workflow execution from the prompt-driven harness path into
   the runtime `WorkflowEngine`.
+- [ ] Replace capability-level keyword/confirmation pre-routing with a
+  Quiz-aligned `create_research_report` product tool boundary.
+- [ ] Keep ordinary Research Chat TextDelta streaming identical to Chat until
+  the `create_research_report` tool call starts.
 
 ### Phase 7: Detailed Research Workflow
 
@@ -445,6 +493,12 @@ The report remains a Notebook research entry even after saving. A future book ch
   research_report)` when saved.
 - [x] Add non-real-LLM workflow tests for search/fetch/report metadata and
   citation verification.
+- [ ] Return completed report metadata through `create_research_report`
+  `tool_result` so the UI can attach a structured Research report card using the
+  same pattern as Quiz cards.
+- [ ] Bridge workflow step progress from `create_research_report` to
+  trace/status/progress events without converting intermediate drafts into
+  assistant answer bubbles.
 
 ### Phase 8: Report Quality and Persistence Hardening
 
@@ -467,9 +521,11 @@ V1 is complete when:
 - an ambiguous research request can stay in normal chat and produce focused
   clarification questions instead of immediately starting web search,
 - a clear request or confirmed research plan can explicitly start the detailed
-  research workflow,
+  research workflow through the `create_research_report` product tool,
 - a detailed research workflow triggers web search for external information,
 - the final answer is a report with a visible source list,
+- ordinary Research Chat before the `create_research_report` tool call streams
+  like normal Chat,
 - search/read/model progress during the detailed workflow is visible as
   transient progress or structured trace, but is not merged into the durable
   final assistant bubble,
