@@ -1304,7 +1304,7 @@ function Composer({
           <MentionSummary mentions={mentions} removable onRemove={onRemoveMention} />
         </div>
       )}
-      <div className="relative flex flex-wrap items-center gap-1.5 border-t border-blue-50 px-3 py-1.5">
+      <div className="relative flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'mode'}
@@ -1332,12 +1332,12 @@ function Composer({
         </div>
 
         <button
-          className="inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-xs text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
+          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm text-gray-600 hover:bg-blue-50 disabled:text-gray-400"
           type="button"
           disabled={disabled || running || readingAttachments}
           onClick={() => fileInputRef.current?.click()}
         >
-          <Paperclip size={14} />
+          <Paperclip size={18} />
           {t('chat.attachments')}
         </button>
         <input
@@ -1351,7 +1351,7 @@ function Composer({
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'knowledge'}
-            icon={<Database size={14} />}
+            icon={<Database size={18} />}
             label={activeKnowledge?.name ?? t('chat.knowledge.none')}
             onClick={() => toggleMenu('knowledge')}
           />
@@ -1387,7 +1387,7 @@ function Composer({
         <div className="relative">
           <ToolbarButton
             active={openMenu === 'space'}
-            icon={<AtSign size={14} />}
+            icon={<AtSign size={18} />}
             label={mentions.length > 0 ? `${t('nav.space')} ${mentions.length}` : t('nav.space')}
             onClick={() => toggleMenu('space')}
           />
@@ -1453,7 +1453,7 @@ function Composer({
         <div className="relative ml-auto">
           <ToolbarButton
             active={openMenu === 'model'}
-            icon={<Brain size={13} />}
+            icon={<Brain size={16} />}
             label={activeModel?.model ?? t('chat.model.select')}
             onClick={() => toggleMenu('model')}
           />
@@ -1487,7 +1487,7 @@ function Composer({
         </div>
 
         <button
-          className={`flex h-6 w-6 items-center justify-center rounded-full text-white disabled:bg-gray-200 disabled:text-gray-400 ${
+          className={`flex h-9 w-9 items-center justify-center rounded-full text-white disabled:bg-gray-200 disabled:text-gray-400 ${
             running ? 'bg-gray-900 hover:bg-gray-800' : 'bg-blue-600 hover:bg-blue-700'
           }`}
           onClick={running ? onStop : onSend}
@@ -1495,7 +1495,7 @@ function Composer({
           type="button"
           title={running ? t('chat.stop') : t('chat.send')}
         >
-          {running ? <Square size={11} /> : <ArrowUp size={14} />}
+          {running ? <Square size={15} /> : <ArrowUp size={20} />}
         </button>
       </div>
     </div>
@@ -1818,7 +1818,7 @@ function ToolbarButton({
 }) {
   return (
     <button
-      className={`inline-flex h-6 max-w-40 items-center gap-1.5 rounded-full border px-2 text-xs transition ${
+      className={`inline-flex h-9 max-w-56 items-center gap-2 rounded-full border px-3 text-sm transition ${
         active
           ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
           : 'border-transparent text-gray-700 hover:bg-blue-50'
@@ -1828,7 +1828,7 @@ function ToolbarButton({
     >
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
-      <ChevronDown size={11} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
+      <ChevronDown size={16} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
     </button>
   )
 }
@@ -1844,7 +1844,7 @@ function DropdownPanel({
 }) {
   return (
     <div
-      className={`absolute bottom-9 left-0 z-30 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-1'}`}
+      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-1'}`}
     >
       {children}
     </div>
