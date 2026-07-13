@@ -385,7 +385,9 @@ The report remains a Notebook research entry even after saving. A future book ch
   captures topic, scope, source preferences, output format, depth, time range,
   Notebook/Knowledge Base usage, and estimated workflow steps.
 - [x] Add UI affordance for confirming or revising the proposed research plan.
-- [x] Keep normal streaming chat behavior during clarification and plan proposal.
+- [x] Keep Research clarification and plan proposal conversational, while
+  preventing intermediate progress text from being committed as the assistant
+  answer body; durable assistant bubbles should come from final answers.
 - [x] Add tests where ambiguous Research requests produce a clarification
   question instead of calling `web_search`.
 - [x] Add tests where an explicit "start research" or confirmed plan enters the

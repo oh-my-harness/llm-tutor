@@ -67,9 +67,7 @@ pub async fn run_research_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    if let Some(request) = last_user_text(&messages)
-        && should_start_research_workflow(&request)
-    {
+    if let Some(request) = research_workflow_request_from_messages(&messages) {
         let run = crate::research::run_research_workflow_with_runtime(
             router,
             crate::research::ResearchWorkflowInput { request },
@@ -104,12 +102,17 @@ pub async fn run_research_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    if should_start_research_workflow(question) {
+    let existing = session
+        .build_context()
+        .await
+        .map_err(|err| TutorError::Internal(err.to_string()))?
+        .messages;
+    let mut messages = existing.clone();
+    messages.push(user_message(question));
+    if let Some(request) = research_workflow_request_from_messages(&messages) {
         let run = crate::research::run_research_workflow_with_runtime(
             router,
-            crate::research::ResearchWorkflowInput {
-                request: question.to_string(),
-            },
+            crate::research::ResearchWorkflowInput { request },
             Some(session),
             abort_token,
         )
@@ -472,8 +475,7 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
 }
 
 fn should_emit_text_delta(capability: &str) -> bool {
-    let _ = capability;
-    true
+    capability != "research"
 }
 
 fn looks_like_research_report(text: &str) -> bool {
@@ -488,9 +490,96 @@ fn should_start_research_workflow(text: &str) -> bool {
     normalized.contains("start the detailed research workflow")
         || normalized.contains("begin the detailed research workflow")
         || normalized.contains("run the detailed research workflow")
+        || normalized.contains("start research")
+        || normalized.contains("begin research")
+        || normalized.contains("produce the report")
+        || normalized.contains("write the report")
+        || text.contains("开始调研")
+        || text.contains("开始研究")
+        || text.contains("启动调研")
+        || text.contains("启动研究")
+        || text.contains("详细研究工作流程")
+        || text.contains("生成报告")
+        || text.contains("写报告")
+        || text.contains("调研报告")
         || normalized.contains("confirmed plan")
             && normalized.contains("detailed research workflow")
             && (normalized.contains("search") || normalized.contains("report"))
+}
+
+fn research_workflow_request_from_messages(messages: &[AgentMessage]) -> Option<String> {
+    let request = last_user_text(messages)?;
+    if should_start_research_workflow(&request) {
+        return Some(research_request_with_context(messages, &request));
+    }
+
+    if is_research_confirmation(&request)
+        && previous_assistant_requested_research_confirmation(messages)
+    {
+        return Some(research_request_with_context(messages, &request));
+    }
+
+    None
+}
+
+fn research_request_with_context(messages: &[AgentMessage], request: &str) -> String {
+    if messages.len() <= 1 {
+        return request.to_string();
+    }
+
+    let context = messages
+        .iter()
+        .take(messages.len().saturating_sub(1))
+        .filter_map(|message| match message {
+            AgentMessage::User(_) => {
+                agent_message_text(message).map(|text| format!("User: {text}"))
+            }
+            AgentMessage::Assistant(_) => {
+                agent_message_text(message).map(|text| format!("Assistant: {text}"))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    format!("Conversation context:\n{context}\n\nConfirmed research instruction:\n{request}")
+}
+
+fn is_research_confirmation(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 24 {
+        return false;
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "ok" | "okay" | "yes" | "y" | "confirm" | "confirmed" | "go" | "start" | "begin"
+    ) || matches!(
+        trimmed,
+        "可以" | "好的" | "好" | "确认" | "没问题" | "开始" | "开始吧" | "启动" | "继续" | "行"
+    )
+}
+
+fn previous_assistant_requested_research_confirmation(messages: &[AgentMessage]) -> bool {
+    messages
+        .iter()
+        .rev()
+        .skip(1)
+        .find_map(|message| match message {
+            AgentMessage::Assistant(_) => agent_message_text(message),
+            AgentMessage::User(_) => None,
+            _ => None,
+        })
+        .is_some_and(|text| {
+            let lower = text.to_ascii_lowercase();
+            lower.contains("detailed research workflow")
+                || lower.contains("start research")
+                || lower.contains("confirm")
+                || text.contains("详细研究工作流程")
+                || text.contains("开始调研")
+                || text.contains("调研计划")
+                || text.contains("确认")
+        })
 }
 
 pub(crate) async fn emit_runtime_usage(
@@ -605,6 +694,28 @@ fn last_user_text(messages: &[AgentMessage]) -> Option<String> {
             .join("\n");
         (!text.trim().is_empty()).then_some(text)
     })
+}
+
+fn agent_message_text(message: &AgentMessage) -> Option<String> {
+    match message {
+        AgentMessage::User(message) => {
+            let text = message
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.trim().is_empty()).then_some(text)
+        }
+        AgentMessage::Assistant(message) => {
+            let text = message.text_content();
+            (!text.trim().is_empty()).then_some(text)
+        }
+        _ => None,
+    }
 }
 
 fn chat_system_prompt() -> String {
@@ -746,8 +857,8 @@ mod tests {
     }
 
     #[test]
-    fn research_chat_emits_text_deltas_before_workflow() {
-        assert!(should_emit_text_delta("research"));
+    fn research_does_not_stream_progress_text_as_answer_body() {
+        assert!(!should_emit_text_delta("research"));
         assert!(should_emit_text_delta("chat"));
     }
 

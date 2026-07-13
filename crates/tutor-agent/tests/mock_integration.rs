@@ -14,6 +14,7 @@ use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::{AgentMessage, AssistantMessageKind, ExecutionEnv};
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
+use tutor_agent::chat::{assistant_message, user_message};
 use tutor_agent::event_sink::EventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::{CapabilityRouter, LlmConfig};
@@ -525,6 +526,69 @@ async fn research_explicit_start_enters_search_path() {
             .iter()
             .any(|(kind, _)| { kind == "research_report_done" }),
         "explicit research start should emit report done: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn research_chinese_confirmation_after_plan_enters_workflow() {
+    let dir = TempDir::new().unwrap();
+    let repo = JsonlSessionRepo::new(dir.path().join("sessions"));
+    let storage = repo.create(CreateSessionOptions::default()).await.unwrap();
+    let session = Session::new(storage);
+    session
+        .append_message(user_message("帮我调研一下transformer架构，我想学习"))
+        .await
+        .unwrap();
+    session
+        .append_message(assistant_message(
+            "这是调研计划。确认后我就启动详细研究工作流程。",
+        ))
+        .await
+        .unwrap();
+
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![
+            MockResponse::tool_use(
+                "submit-search",
+                "submit_step_result",
+                r#"{"result":{"queries":["Transformer architecture"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-read",
+                "submit_step_result",
+                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"Transformer architecture"}],"failures":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-check",
+                "submit_step_result",
+                r#"{"result":{"verdict":"pass","issues":[]}}"#,
+            ),
+            MockResponse::tool_use(
+                "submit-report",
+                "submit_step_result",
+                r##"{"result":{"markdown":"# Transformer Report\n\n## Summary\n\nConfirmed Chinese request.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
+            ),
+        ],
+        make_governance(None),
+    )
+    .with_event_sink(sink.clone())
+    .with_workflow_root(dir.path().join("workflow-sessions"));
+
+    let answer = router
+        .run_with_session(Capability::Research, session, "可以")
+        .await
+        .unwrap();
+
+    assert!(answer.contains("Transformer Report"));
+    let events = sink.events();
+    assert!(
+        events.iter().any(|(kind, data)| {
+            kind == "workflow_validated"
+                && data["capability"] == "research"
+                && data["workflow"] == "tutor.research"
+        }),
+        "Chinese confirmation should enter runtime workflow: {events:?}"
     );
 }
 
