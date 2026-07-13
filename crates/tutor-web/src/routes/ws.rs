@@ -32,6 +32,7 @@ use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, Sessio
 use crate::space_tool::{
     ListNotebookTreeTool, ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool,
 };
+use crate::stream::StreamEvent;
 
 #[derive(Clone)]
 struct WsState {
@@ -194,24 +195,42 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
         Some(e) => e,
         None => return,
     };
-    let mut event_rx = entry.stream.subscribe();
+    let (mut event_rx, snapshot) = entry.stream.subscribe_with_snapshot();
 
     let (mut ws_sink, mut ws_stream) = socket.split();
     if let Some(run) = pool.active_run(&session_id) {
-        let _ = entry
-            .stream
-            .status(
-                "running",
-                serde_json::json!({
+        let mut initial_events = vec![StreamEvent::Status {
+            kind: "running".into(),
+            data: serde_json::json!({
                     "capability": run.capability,
                     "run_id": run.run_id,
                     "status": run.status,
+                    "current_stage": run.current_stage,
                     "rejoined": true,
                     "started_at": run.started_at,
                     "updated_at": run.updated_at,
-                }),
-            )
-            .await;
+            }),
+        }];
+        if !snapshot.content.is_empty() {
+            initial_events.push(StreamEvent::Content {
+                text: snapshot.content,
+                chunk: true,
+            });
+        }
+        if !snapshot.progress_content.is_empty() {
+            initial_events.push(StreamEvent::ProgressContent {
+                text: snapshot.progress_content,
+                chunk: false,
+            });
+        }
+        for event in initial_events {
+            let Ok(json) = serde_json::to_string(&event) else {
+                continue;
+            };
+            if ws_sink.send(Message::Text(json.into())).await.is_err() {
+                return;
+            }
+        }
     }
 
     // Forward events from the agent harness to the WebSocket client
@@ -247,6 +266,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                                 .await;
                             continue;
                         };
+                        entry.stream.begin_run();
                         if let Some(run) = pool.active_run(&session_id) {
                             let _ = pool.append_run_state(&session_id, &run).await;
                         }

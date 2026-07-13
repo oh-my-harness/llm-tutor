@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tutor_agent::event_sink::EventSink;
 
@@ -30,19 +31,41 @@ pub enum StreamEvent {
 #[derive(Clone)]
 pub struct TutorStream {
     tx: broadcast::Sender<StreamEvent>,
+    snapshot: Arc<Mutex<StreamSnapshot>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StreamSnapshot {
+    pub content: String,
+    pub progress_content: String,
 }
 
 impl TutorStream {
     pub fn new(capacity: usize) -> Self {
         let (tx, _rx) = broadcast::channel(capacity);
-        Self { tx }
+        Self {
+            tx,
+            snapshot: Arc::new(Mutex::new(StreamSnapshot::default())),
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
         self.tx.subscribe()
     }
 
+    pub fn subscribe_with_snapshot(&self) -> (broadcast::Receiver<StreamEvent>, StreamSnapshot) {
+        let snapshot = self.snapshot.lock().unwrap();
+        let receiver = self.tx.subscribe();
+        (receiver, snapshot.clone())
+    }
+
+    pub fn begin_run(&self) {
+        *self.snapshot.lock().unwrap() = StreamSnapshot::default();
+    }
+
     pub async fn content(&self, text: &str, chunk: bool) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        snapshot.content.push_str(text);
         let _ = self.tx.send(StreamEvent::Content {
             text: text.to_string(),
             chunk,
@@ -50,6 +73,12 @@ impl TutorStream {
     }
 
     pub async fn progress_content(&self, text: &str, chunk: bool) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        if chunk {
+            snapshot.progress_content.push_str(text);
+        } else {
+            snapshot.progress_content = text.to_string();
+        }
         let _ = self.tx.send(StreamEvent::ProgressContent {
             text: text.to_string(),
             chunk,
@@ -170,5 +199,37 @@ mod tests {
             }
             _ => panic!("expected ProgressContent"),
         }
+    }
+
+    #[tokio::test]
+    async fn snapshot_restores_content_before_continuing_live_stream() {
+        let stream = TutorStream::new(16);
+        stream.begin_run();
+        stream.content("hello ", true).await;
+
+        let (mut rx, snapshot) = stream.subscribe_with_snapshot();
+        assert_eq!(snapshot.content, "hello ");
+
+        stream.content("world", true).await;
+        let event = rx.recv().await.unwrap();
+        match event {
+            StreamEvent::Content { text, chunk } => {
+                assert_eq!(text, "world");
+                assert!(chunk);
+            }
+            _ => panic!("expected Content"),
+        }
+    }
+
+    #[tokio::test]
+    async fn begin_run_clears_previous_stream_snapshot() {
+        let stream = TutorStream::new(16);
+        stream.content("old answer", true).await;
+        stream.progress_content("old progress", false).await;
+
+        stream.begin_run();
+        let (_, snapshot) = stream.subscribe_with_snapshot();
+
+        assert_eq!(snapshot, StreamSnapshot::default());
     }
 }

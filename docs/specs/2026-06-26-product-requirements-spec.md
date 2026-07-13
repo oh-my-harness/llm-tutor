@@ -288,6 +288,18 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   `llm-harness-runtime` / `llm-harness-agent`; missing framework primitives
   shall be recorded in `docs/framework-feedback.md`. Status: implemented; the
   durable resume/replay gap is recorded there.
+- REQ-335: Leaving and returning to an in-process running session shall restore
+  the assistant text generated so far and continue streaming from the same run.
+  Snapshot capture and live subscription shall not lose deltas between them.
+  Status: implemented.
+- REQ-336: WebSocket events and asynchronous session hydration shall be scoped
+  to their originating session. Rapid session switching shall not apply stale
+  content, completion, close, or HTTP responses to the newly selected session.
+  Status: implemented.
+- REQ-337: While any session is marked active in the sidebar, the UI shall
+  periodically reconcile run state with the backend so a completion event missed
+  during navigation cannot leave a permanent running indicator. Status:
+  implemented.
 
 ## 15. Books and Learning Records
 

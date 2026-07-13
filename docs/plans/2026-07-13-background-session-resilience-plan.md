@@ -28,6 +28,12 @@ tool results, interactive cards, or final artifacts.
   the user leaves the current session.
 - Returning to a session with an in-flight run shall show the current run state:
   queued, running, waiting for user input, failed, cancelled, or completed.
+- Returning to an in-flight session shall restore the assistant text generated
+  so far, then continue streaming subsequent deltas without duplication or a
+  blank-message reset.
+- WebSocket events and session-detail responses shall be applied only to the
+  session that produced them. Rapid A/B/A switching must not let a stale socket
+  event or slower HTTP response overwrite the currently selected conversation.
 - The UI shall be able to rejoin or resubscribe to progress for an active run
   without starting a duplicate agent turn.
 - Completed tool results shall remain attached to the originating assistant
@@ -143,6 +149,14 @@ After an app/sidecar restart, a previously active run is restored as
   available.
 - [x] Show a compact "still running" state when progress cannot be replayed but
   the backend run is active.
+- [x] Keep an in-process per-session stream snapshot and atomically pair snapshot
+  capture with live subscription so generated assistant text can be restored
+  after switching away and back.
+- [x] Tag WebSocket callbacks with their source session and reject stale events
+  after rapid session switching.
+- [x] Guard session-detail hydration against out-of-order HTTP responses.
+- [x] Reconcile sidebar running indicators against the backend while any
+  background run remains active.
 
 ### Phase 5: Cross-Mode QA
 

@@ -30,6 +30,7 @@ import type { QuizSession } from './quizTypes'
 import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
 import { attachRestoredResearchReports, researchReportFromTracePayload } from './researchRestore'
 import type { ResearchReportTraceData } from './researchRestore'
+import { isCurrentSessionEvent, isLatestSessionLoad, reconcileSessionRunState } from './sessionResilience'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
 import { openExternalUrl } from './api'
 import {
@@ -181,6 +182,14 @@ export default function App() {
   const [capability, setCapability] = useState<Capability>('chat')
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const activeSessionIdRef = useRef<string | null>(null)
+  const sessionSelectionVersionRef = useRef(0)
+  const activateSession = useCallback((id: string | null) => {
+    activeSessionIdRef.current = id
+    sessionSelectionVersionRef.current += 1
+    setSessionId(id)
+    return sessionSelectionVersionRef.current
+  }, [])
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
   const streamingRef = useRef('')
@@ -254,7 +263,19 @@ export default function App() {
   }, [])
 
   const { send } = useWebSocket(sessionId, {
-    onEvent: (event) => {
+    onEvent: (event, sourceSessionId) => {
+      if (!isCurrentSessionEvent(sourceSessionId, activeSessionIdRef.current)) {
+        if (event.type === 'status') {
+          const payload = event.payload as Record<string, unknown>
+          const kind = payload.kind as string
+          if (kind === 'running' || kind === 'stopping') {
+            updateRecentSessionRun(setRecentSessions, sourceSessionId, runSummaryFromStatusPayload(payload))
+          } else if (kind === 'done' || kind === 'stopped' || kind === 'error') {
+            updateRecentSessionRun(setRecentSessions, sourceSessionId, null)
+          }
+        }
+        return
+      }
       if (event.type === 'content') {
         if (event.payload.chunk) {
           streamingRef.current += event.payload.text
@@ -299,8 +320,8 @@ export default function App() {
           progressStreamingRef.current = ''
           setStreamingText('')
           setRunning(false)
-          if (sessionId && citations.length > 0) {
-            void persistMessageCitations(sessionId, citations).catch((err) => {
+          if (citations.length > 0) {
+            void persistMessageCitations(sourceSessionId, citations).catch((err) => {
               console.warn('failed to persist message citations', err)
             })
           }
@@ -362,9 +383,7 @@ export default function App() {
           setBudgetSpent((payload.spent_usd as number) ?? 0)
         } else if (kind === 'running') {
           setRunning(true)
-          if (sessionId) {
-            updateRecentSessionRun(setRecentSessions, sessionId, runSummaryFromStatusPayload(payload))
-          }
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, runSummaryFromStatusPayload(payload))
           pushStatus({
             kind: 'thinking',
             label: 'Working',
@@ -374,7 +393,7 @@ export default function App() {
           })
         } else if (kind === 'done') {
           setRunning(false)
-          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, null)
           setLatestUsage((prev) => isTokenUsagePayload(payload.usage) ? payload.usage : prev)
           if (!streamingRef.current) {
             pushStatus({
@@ -391,11 +410,9 @@ export default function App() {
             detail: typeof payload.capability === 'string' ? capabilityLabel(payload.capability) : undefined,
           })
           setRunning(false)
-          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, null)
         } else if (kind === 'stopping') {
-          if (sessionId) {
-            updateRecentSessionRun(setRecentSessions, sessionId, runSummaryFromStatusPayload({ ...payload, status: 'cancelling' }))
-          }
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, runSummaryFromStatusPayload({ ...payload, status: 'cancelling' }))
           pushStatus({
             kind: 'thinking',
             label: 'Stopping',
@@ -423,15 +440,17 @@ export default function App() {
           const message = typeof payload.message === 'string' ? payload.message : 'WebSocket error'
           pushStatus({ kind: 'error', label: 'Error', detail: message })
           setRunning(false)
-          if (sessionId) updateRecentSessionRun(setRecentSessions, sessionId, null)
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, null)
         }
       }
     },
-    onClose: () => {
+    onClose: (sourceSessionId) => {
+      if (!isCurrentSessionEvent(sourceSessionId, activeSessionIdRef.current)) return
       setRunning(false)
       pushStatus({ kind: 'idle', label: 'Disconnected', detail: 'WebSocket closed' })
     },
-    onError: () => {
+    onError: (sourceSessionId) => {
+      if (!isCurrentSessionEvent(sourceSessionId, activeSessionIdRef.current)) return
       pushStatus({ kind: 'error', label: 'Connection failed', detail: 'Check tutor-web server' })
       setMessages((prev) => [
         ...prev,
@@ -454,6 +473,34 @@ export default function App() {
       pinned: pinnedSessionIds.has(session.id),
     }))))
   }, [pinnedSessionIds])
+
+  const reconcileActiveSessionRuns = useCallback(async () => {
+    const res = await fetch('/api/sessions')
+    if (!res.ok) {
+      throw new Error(`failed to reconcile session runs: HTTP ${res.status}`)
+    }
+    const data = await res.json() as SessionListResponse
+    const incoming = (data.sessions ?? []).map((session) => ({
+      id: session.id,
+      activeRun: session.active_run ?? null,
+    }))
+    setRecentSessions((current) => reconcileSessionRunState(current, incoming))
+    const currentSessionId = activeSessionIdRef.current
+    if (currentSessionId && incoming.some((session) => session.id === currentSessionId && !session.activeRun)) {
+      setRunning(false)
+    }
+  }, [])
+
+  const hasTrackedActiveRuns = recentSessions.some((session) => Boolean(session.activeRun))
+  useEffect(() => {
+    if (!hasTrackedActiveRuns) return
+    const timer = window.setInterval(() => {
+      void reconcileActiveSessionRuns().catch((err) => {
+        console.warn('failed to reconcile background session runs', err)
+      })
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [hasTrackedActiveRuns, reconcileActiveSessionRuns])
 
   const refreshKnowledgeBases = useCallback(async () => {
     const res = await fetch('/api/knowledge-bases')
@@ -540,6 +587,7 @@ export default function App() {
       const content = buildMessageContentWithAttachments(text, attachments)
       const displayText = text.trim() || (attachments.length > 0 ? `Sent ${attachments.length} attachment(s)` : `Referenced ${mentions.length} Space item(s)`)
       let sid = sessionId
+      let createdSession = false
       if (!sid) {
         const kb = selectedKnowledgeBaseId || null
         const res = await fetch('/api/sessions', {
@@ -559,7 +607,9 @@ export default function App() {
         const data = await res.json()
         const createdSessionId = data.id as string
         sid = createdSessionId
-        setSessionId(createdSessionId)
+        createdSession = true
+        pendingSessionSendRef.current = { sessionId: createdSessionId, content, mentions }
+        activateSession(createdSessionId)
         promoteRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
       } else {
         promoteRecentSession(setRecentSessions, sid, sessionTitleFromMessage(displayText))
@@ -568,14 +618,14 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'user', text: displayText, attachments, mentions }])
       setRunning(true)
       pushStatus({ kind: 'thinking', label: 'Thinking', detail: capabilityLabel(capability) })
-      send({ type: 'message', content, mentions })
+      if (!createdSession) send({ type: 'message', content, mentions }, sid)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Error', detail: message })
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, refreshSessions, messages])
+  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, refreshSessions, messages, activateSession])
 
   const handleStopGeneration = useCallback(() => {
     if (!running) return
@@ -641,7 +691,7 @@ export default function App() {
       }
       const nextSessionId = data.id as string
 
-      setSessionId(nextSessionId)
+      activateSession(nextSessionId)
       promoteRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
       setMessages([{ role: 'user', text: nextText }])
       setTraceEntries([])
@@ -665,7 +715,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [capability, llmSettings, messages, pushStatus, refreshSessions, running, selectedKnowledgeBaseId, selectedNotebookEnabled, send, sessionId])
+  }, [capability, llmSettings, messages, pushStatus, refreshSessions, running, selectedKnowledgeBaseId, selectedNotebookEnabled, send, sessionId, activateSession])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -868,11 +918,11 @@ export default function App() {
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     persistSettings(nextSettings)
-    setSessionId(null)
+    activateSession(null)
   }
 
   const startNewChat = useCallback(() => {
-    setSessionId(null)
+    activateSession(null)
     setMessages([])
     setStreamingText('')
     streamingRef.current = ''
@@ -889,7 +939,7 @@ export default function App() {
     setBudgetWarning(false)
     setRunning(false)
     setView('chat')
-  }, [])
+  }, [activateSession])
 
   const handleNavigate = useCallback((nextView: AppView) => {
     if (nextView === 'chat') {
@@ -1003,6 +1053,7 @@ export default function App() {
 
   const handleSelectSession = async (id: string) => {
     if (id !== sessionId) {
+      const selectionVersion = activateSession(id)
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
@@ -1017,13 +1068,13 @@ export default function App() {
       pendingResearchReportRef.current = undefined
       setLatestUsage(null)
       setRunning(false)
-      setSessionId(id)
       try {
         const res = await fetch(`/api/sessions/${id}`)
         if (!res.ok) {
           throw new Error(`failed to load session: HTTP ${res.status}`)
         }
         const data = await res.json() as SessionDetailResponse
+        if (!isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) return
         const restoredTrace = restoreTraceEntries(data.trace ?? [], data.compact_summary ?? null)
         const withCitations = attachRestoredCitations(
           (data.messages ?? []).map((message) => ({
@@ -1041,7 +1092,11 @@ export default function App() {
           restoredTrace,
         )
         setMessages(restored)
-        void attachRestoredQuizzes(restored, restoredTrace).then(setMessages)
+        void attachRestoredQuizzes(restored, restoredTrace).then((nextMessages) => {
+          if (isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) {
+            setMessages(nextMessages)
+          }
+        })
         setTraceEntries(restoredTrace)
         setLatestUsage(data.latest_usage ?? null)
         if (data.active_run) {
@@ -1074,6 +1129,7 @@ export default function App() {
           updateRecentSessionTitle(setRecentSessions, id, sessionTitleFromMessage(title))
         }
       } catch (err) {
+        if (!isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) return
         const message = err instanceof Error ? err.message : String(err)
         setMessages([{ role: 'assistant', text: `Error: ${message}` }])
       }
@@ -1129,7 +1185,7 @@ export default function App() {
     const previousSessions = recentSessions
     setRecentSessions((prev) => prev.filter((item) => item.id !== id))
     if (sessionId === id) {
-      setSessionId(null)
+      activateSession(null)
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
