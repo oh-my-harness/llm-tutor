@@ -65,6 +65,31 @@ fn progress_text_response(text: &str) -> MockResponse {
     }
 }
 
+fn text_delta_end_turn_response(text: &str) -> MockResponse {
+    MockResponse {
+        model: "mock-model".into(),
+        stream_error: None,
+        events: vec![
+            Ok(StreamEvent::ContentStart {
+                index: 0,
+                kind: ContentKind::Text,
+            }),
+            Ok(StreamEvent::TextDelta {
+                index: 0,
+                text: text.into(),
+            }),
+            Ok(StreamEvent::ContentStop {
+                index: 0,
+                signature: None,
+            }),
+            Ok(StreamEvent::MessageStop {
+                stop_reason: StopReason::EndTurn,
+                usage: Usage::default(),
+            }),
+        ],
+    }
+}
+
 #[derive(Default)]
 struct TraceRecorder {
     events: Mutex<Vec<(String, serde_json::Value)>>,
@@ -463,6 +488,20 @@ async fn research_clarification_uses_chat_fallback_without_report_event() {
             .any(|(kind, data)| { kind == "tool_call" && data["tool"] == "web_search" }),
         "clarification should not call web_search: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn research_greeting_falls_back_to_unstreamed_text_delta() {
+    let router = make_router(
+        vec![text_delta_end_turn_response(
+            "你好！我可以先帮你明确调研目标。",
+        )],
+        make_governance(None),
+    );
+
+    let answer = router.run(Capability::Research, "你好").await.unwrap();
+
+    assert!(answer.contains("你好"));
 }
 
 #[tokio::test]

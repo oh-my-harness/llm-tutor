@@ -299,8 +299,10 @@ async fn run_chat_inner(
 
     // Collect the last complete assistant message.
     let mut last_text = String::new();
+    let mut fallback_text = String::new();
     let mut last_error: Option<String> = None;
     let mut tool_names: HashMap<String, String> = HashMap::new();
+    let mut saw_tool_execution = false;
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
@@ -352,6 +354,8 @@ async fn run_chat_inner(
             AgentHarnessEvent::Agent(AgentEvent::TextDelta { text, .. }) => {
                 if should_emit_text_delta(capability) {
                     emit_content(&router.event_sink, text.clone(), true).await;
+                } else {
+                    fallback_text.push_str(text);
                 }
             }
             AgentHarnessEvent::Agent(AgentEvent::ToolExecutionStart {
@@ -359,6 +363,7 @@ async fn run_chat_inner(
                 tool_name,
                 args,
             }) => {
+                saw_tool_execution = true;
                 tool_names.insert(tool_use_id.clone(), tool_name.clone());
                 emit_trace(
                     &router.event_sink,
@@ -461,6 +466,10 @@ async fn run_chat_inner(
     }
 
     if last_text.is_empty() {
+        let fallback_text = fallback_text.trim();
+        if !saw_tool_execution && !fallback_text.is_empty() {
+            return Ok(fallback_text.to_string());
+        }
         return Err(TutorError::Internal(
             "agent settled without assistant text".into(),
         ));
