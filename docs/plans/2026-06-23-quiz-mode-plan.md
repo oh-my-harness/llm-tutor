@@ -313,6 +313,10 @@ tool call.
   details include the saved `quiz`. The WebSocket bridge persists and streams
   that as a `tool_result` trace; the UI parses it and attaches the interactive
   Quiz card to the assistant message.
+- The interactive Quiz card must not depend only on the live WebSocket event or
+  transient React state. The persisted assistant message should carry a stable
+  attachment reference to the saved Quiz session so navigating away, reloading,
+  or returning to the session can hydrate the same answerable card.
 - The outer agent may then produce a short final assistant response, which uses
   the normal `content` channel. The intermediate generated drafts and verifier
   outputs remain workflow-internal structured data unless the workflow fails and
@@ -367,6 +371,12 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 - [x] Let Quiz capability keep normal chat behavior until the agent calls a tool.
 - [x] Save `create_quiz` output into Quiz Bank.
 - [x] Render generated quizzes as interactive Chat cards.
+- [ ] Persist Chat Quiz card attachments as stable references to saved Quiz
+  sessions and hydrate them when the user returns to the session.
+- [ ] Add a regression test that generates a Quiz in Chat, reloads or reopens
+  the session, and verifies the interactive Quiz card is restored.
+- [ ] Preserve completed `create_quiz` tool results when the user switches
+  sessions before the outer agent produces its final short response.
 - [ ] Add stronger provider-behavior QA so agents consistently plan before
   generating when the request is ambiguous.
 
@@ -398,4 +408,6 @@ V1 is complete when:
 - see whether each answer is correct,
 - see explanation and citations,
 - finish with a score summary,
+- leave and return to the Chat session without losing the interactive Quiz
+  card,
 - reload the app and see the quiz session restored in Space / Quiz Bank.

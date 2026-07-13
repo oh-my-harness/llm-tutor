@@ -18,6 +18,8 @@ checklists.
 - `2026-06-28-source-reference-system-plan.md`: product-level source reference
   system.
 - `2026-06-28-tauri-desktop-release-plan.md`: desktop release hardening and QA.
+- `2026-07-13-background-session-resilience-plan.md`: durable background runs,
+  session rejoin, and restorable interactive Chat attachments.
 
 ## Feature Plans
 

@@ -494,6 +494,36 @@ Acceptance:
 - Each major surface has a documented context menu capability area, even if not
   every concrete menu item is implemented in the first polish slice.
 
+### Phase 7: Background Session Resilience
+
+Status: planned.
+
+Desktop users should be able to start a long-running agent task, switch to
+another session, and return later without losing progress, interactive cards, or
+completed artifacts. The detailed cross-mode plan lives in
+`2026-07-13-background-session-resilience-plan.md`.
+
+Tasks:
+
+- [ ] Restore interactive Chat attachments, especially Quiz cards, from durable
+      message/artifact references after navigation, refresh, or restart.
+- [ ] Persist and expose active run state for long-running Research, Deep Solve,
+      and Quiz generation turns.
+- [ ] Rejoin active runs by stable run/session identifiers when the user returns
+      to the originating session.
+- [ ] Avoid duplicate workflow starts during reconnect or session hydration.
+- [ ] Add desktop QA coverage for switching sessions during a long task and
+      returning to see progress or final output.
+
+Acceptance:
+
+- A Quiz card generated in Chat remains visible and answerable after leaving and
+  returning to that Chat session.
+- A long Research or Deep Solve run shows a coherent running, failed, cancelled,
+  or completed state after the user returns.
+- Restarting the desktop app never silently drops completed tool results from
+  the visible conversation.
+
 ## 13. Done Criteria for v0.1 Desktop Release
 
 - A Windows desktop artifact exists.
@@ -520,3 +550,5 @@ Acceptance:
    MSI, or a combination.
 6. Execute Phase 6 for native-app feel, context menu capability areas,
    pane-local scrolling, and native file/link behavior.
+7. Execute Phase 7 for durable background runs, session rejoin, and restorable
+   interactive Chat attachments.

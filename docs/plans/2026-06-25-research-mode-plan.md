@@ -42,13 +42,16 @@ Included:
 
 Out of scope for V1:
 
-- parallel sub-agents,
-- long-running background research,
 - automatic source quality scoring,
 - academic paper search,
 - recursive crawling,
 - collaborative editing,
 - rich block-based book editor.
+
+Long-running and parallel research are no longer out of scope for the product
+direction. The first parallel sub-task slice exists, but durable background
+execution and session rejoin are tracked separately in
+`2026-07-13-background-session-resilience-plan.md`.
 
 ## 3. Product Shape
 
@@ -513,6 +516,19 @@ The report remains a Notebook research entry even after saving. A future book ch
 - [x] Add PDF/webpage source ingestion into knowledge base.
 - [x] Add longer-running deep research with parallel sub tasks.
 
+### Phase 10: Background Run and Rejoin Hardening
+
+- [ ] Persist a stable run identity for each `create_research_report` workflow
+  so the UI can leave and later rejoin the same run.
+- [ ] Restore current Research stage and completed report attachment when the
+  user returns to the originating session.
+- [ ] Ensure reconnecting to a session subscribes to the existing run instead
+  of starting a duplicate Research workflow.
+- [ ] Preserve final report metadata and source list if the report completes
+  while the user is viewing another session.
+- [ ] Add QA that starts a long Research run, switches sessions, returns, and
+  verifies progress or completion state.
+
 ## 11. Acceptance Criteria
 
 V1 is complete when:
@@ -529,6 +545,8 @@ V1 is complete when:
 - search/read/model progress during the detailed workflow is visible as
   transient progress or structured trace, but is not merged into the durable
   final assistant bubble,
+- leaving and returning to the session during a long Research run restores the
+  current run state or final report without starting a duplicate workflow,
 - the report can be saved as a book chapter,
 - reloading the session preserves the report and sources,
 - report generation can fail with a clear reason when search or fetch fails.

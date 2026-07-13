@@ -1,0 +1,160 @@
+# Background Session Resilience Plan
+
+> Status: proposed | Date: 2026-07-13 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
+
+## 1. Problem
+
+Some product actions create UI that is attached to the current live chat stream
+rather than restored from a durable session projection. For example, a generated
+Quiz can be saved into Quiz Bank, but the interactive Quiz card in the Chat
+message can disappear after the user navigates away and returns. Longer-running
+flows such as Research, Deep Solve, and Quiz generation have the same structural
+risk: the backend task may still be running, but the UI cannot reliably rejoin
+the in-flight stream or reconstruct the current result surface.
+
+The product should support users who start a slow agent task, switch to another
+session or workspace task, and later come back without losing visible progress,
+tool results, interactive cards, or final artifacts.
+
+## 2. Product Requirements
+
+- Chat message content, tool results, workflow progress, and interactive
+  attachments shall be represented as durable session state, not only as
+  in-memory React state created during the active WebSocket stream.
+- Interactive Chat cards, including Quiz cards and Research report cards, shall
+  be restorable from stored product records and message-to-record links after
+  navigation, refresh, or app restart.
+- Long-running agent turns shall continue to have a durable run identity after
+  the user leaves the current session.
+- Returning to a session with an in-flight run shall show the current run state:
+  queued, running, waiting for user input, failed, cancelled, or completed.
+- The UI shall be able to rejoin or resubscribe to progress for an active run
+  without starting a duplicate agent turn.
+- Completed tool results shall remain attached to the originating assistant
+  message even if the user switches sessions before the outer agent produces a
+  final short response.
+- Product records such as Quiz sessions and Notebook research reports remain
+  the source of truth for domain artifacts. Chat messages should store stable
+  references to those artifacts, not large duplicated copies unless a snapshot
+  is needed for historical fidelity.
+- The implementation shall prefer runtime session/run support from
+  `llm-harness-runtime` / `llm-harness-agent`. If the framework lacks a needed
+  durable run or rejoin primitive, record the gap in `docs/framework-feedback.md`
+  before adding a product-side bridge.
+
+## 3. Target Model
+
+Each long-running assistant turn should have a durable run envelope:
+
+```text
+Session
+  Message[]
+    assistant message
+      content parts
+      attachment refs
+      tool result refs
+      workflow progress refs
+  Run[]
+    run id
+    session id
+    active assistant message id
+    capability
+    status
+    started/updated/completed timestamps
+    current stage
+    cancellation state
+```
+
+Domain artifacts stay in their existing stores:
+
+```text
+Quiz card attachment -> quiz_session:<quiz_id>
+Research report attachment -> notebook_entry:<entry_id>
+Deep solve attachment -> deep_solve_run:<run_id> or message snapshot
+```
+
+On session load, the UI should hydrate messages first, then resolve attachment
+references through product APIs. If an attachment cannot be resolved, the
+message should show a clear unavailable state instead of silently dropping the
+card.
+
+## 4. Workflow Rejoin Behavior
+
+When a user returns to a session:
+
+1. Load durable session messages and run envelopes.
+2. Render any completed assistant text and attachment references.
+3. For active runs, open or reuse a subscription keyed by `run_id`.
+4. Append new progress and message deltas to the existing assistant message.
+5. If the run already completed while the user was away, fetch final run output
+   and attach completed artifacts without replaying the whole workflow.
+6. If the app restarted, recover active or terminal run state from runtime
+   session storage. Product code should not invent a separate scheduler unless
+   the runtime cannot provide the needed primitive.
+
+## 5. Implementation Phases
+
+### Phase 1: Audit Current Volatile UI State
+
+- [ ] Trace how Quiz cards are attached to Chat messages during live
+  `create_quiz` tool results.
+- [ ] Confirm whether restored Chat messages include stable quiz attachment
+  references or only text.
+- [ ] Trace Research report restore behavior for completed reports and active
+  report generation.
+- [ ] Identify every UI attachment type that currently depends on transient
+  WebSocket-only state.
+
+### Phase 2: Durable Message Attachments
+
+- [ ] Add or confirm a normalized assistant message attachment shape with
+  `type`, `artifact_id`, `artifact_store`, and optional display snapshot.
+- [ ] Persist Quiz card attachments as references to saved Quiz sessions.
+- [ ] Persist Research report attachments as references to Notebook research
+  entries.
+- [ ] Hydrate attachments on session load and show fallback UI when referenced
+  artifacts are missing.
+- [ ] Add regression tests that create a Quiz through Chat, reload the session,
+  and verify the interactive card is restored.
+
+### Phase 3: Durable Run Envelopes
+
+- [ ] Map runtime run/session identifiers into product session state.
+- [ ] Persist run status transitions and current stage for long-running turns.
+- [ ] Expose an API for session load to return active and recent runs.
+- [ ] Ensure switching sessions does not cancel active runs unless the user
+  explicitly cancels them.
+- [ ] Add cancellation and failure surfaces that update the durable run state.
+
+### Phase 4: Progress Rejoin
+
+- [ ] Let the WebSocket bridge subscribe by `session_id` and active `run_id`.
+- [ ] Avoid duplicate workflow starts when the UI reconnects.
+- [ ] Backfill missed progress from durable trace/session entries where
+  available.
+- [ ] Show a compact "still running" state when progress cannot be replayed but
+  the backend run is active.
+
+### Phase 5: Cross-Mode QA
+
+- [ ] Quiz: start generation, switch sessions, return, verify the card appears
+  and remains answerable.
+- [ ] Research: start a detailed report, switch sessions, return, verify
+  current stage and final report attachment.
+- [ ] Deep Solve: start a long solve, switch sessions, return, verify stage
+  progress and final answer.
+- [ ] Desktop restart: verify completed artifacts are restored and active runs
+  resolve to a clear resumed, failed, or unavailable state.
+
+## 6. Acceptance Criteria
+
+- A generated Quiz card remains visible and usable after leaving and returning
+  to the Chat session.
+- The same Quiz is visible in Space / Quiz Bank and the Chat card links to that
+  durable quiz record.
+- A long-running Research or Deep Solve task can continue while the user works
+  in another session.
+- Returning to the original session shows a coherent run state without starting
+  a duplicate run.
+- App refresh or desktop restart never silently drops completed tool results or
+  interactive cards from the visible conversation.

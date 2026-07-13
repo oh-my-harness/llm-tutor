@@ -219,6 +219,8 @@
 - REQ-297: The verifier shall judge only against supplied source material and shall not introduce external knowledge or new factual claims. Status: implemented in prompt contract; needs provider-behavior QA.
 - REQ-298: Questions that fail deterministic validation or verifier review shall not be saved as final Quiz questions unless they are repaired and re-verified. Status: implemented for first slice through runtime workflow repair and final publish validation.
 - REQ-299: The first verifier implementation may retry or repair failed questions once, then discard unresolved questions rather than publishing weakly grounded content. Status: implemented for first slice with a bounded runtime workflow repair loop.
+- REQ-299A: Interactive Quiz cards rendered inside Chat shall be durable message attachments linked to the saved Quiz session, not only transient WebSocket/UI state. Leaving and returning to the session shall restore the card and keep it answerable. Status: planned in `2026-07-13-background-session-resilience-plan.md`.
+- REQ-299B: If a Quiz is generated while the user switches to another session, the completed `create_quiz` tool result shall remain attached to the originating assistant message and be restored when the user returns. Status: planned.
 
 Current Quiz verification flow:
 
@@ -263,6 +265,25 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-322: Research shall support longer-running multi-step/parallel deep research. Status: implemented for the first slice by allowing the runtime Research workflow search step to spawn independent subtopic agents through `sync_spawn_agent`.
 - REQ-323: Research mode shall preserve normal conversational interaction for clarifying research goals, scope, source preferences, output format, depth, time range, and optional Notebook or Knowledge Base context before starting detailed research. Ordinary Research Chat turns shall stream like normal Chat until a report-generation tool call starts. Status: implemented with Research TextDelta routed through the normal final-answer stream before the `create_research_report` tool boundary.
 - REQ-324: Research mode shall provide a detailed research workflow that can be explicitly started after the user's need is clear. The workflow shall cover search, source reading, source selection, synthesis, citation checking, and report generation; it shall not be forced for every Research message. The target architecture shall align with Quiz generation: the outer Research Chat agent calls a dedicated `create_research_report` product tool, and that tool runs the runtime `WorkflowEngine` and returns structured report metadata. Status: implemented for the first tool-boundary slice with the previous keyword/confirmation pre-router removed from the Research capability entrypoint.
+- REQ-325: Long-running Research runs shall have a durable run identity and status so users can switch sessions, return later, and see the current stage or final report without starting a duplicate workflow. Status: planned in `2026-07-13-background-session-resilience-plan.md`.
+- REQ-326: Research progress and final report attachments shall be restorable from runtime session state and product records after navigation, refresh, or desktop restart. Status: planned.
+
+## 14A. Background Runs and Session Rejoin
+
+- REQ-330: Long-running agent turns shall continue when the user leaves the
+  current session unless the user explicitly cancels them or the backend fails.
+  Status: planned.
+- REQ-331: The UI shall be able to rejoin an active run by stable run/session
+  identifiers and show queued, running, waiting, failed, cancelled, or completed
+  state. Status: planned.
+- REQ-332: Chat messages shall persist tool result attachments and stable
+  references to product artifacts such as Quiz sessions and Notebook research
+  reports. Status: planned.
+- REQ-333: Reconnecting to a session shall not start a duplicate workflow for an
+  already-active run. Status: planned.
+- REQ-334: The implementation shall prefer runtime session/run persistence from
+  `llm-harness-runtime` / `llm-harness-agent`; missing framework primitives
+  shall be recorded in `docs/framework-feedback.md`. Status: planned.
 
 ## 15. Books and Learning Records
 
