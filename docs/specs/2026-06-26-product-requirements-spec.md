@@ -564,6 +564,15 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-422: Settings shall show unsaved changes clearly.
 - REQ-423: Settings shall provide provider health checks. Status: planned.
 - REQ-424: Settings shall support config import/export. Status: planned.
+- REQ-425: Appearance colors shall be expressed through semantic theme tokens
+  rather than component-local palette choices. The default `cool-light` theme
+  shall use a cool-gray application frame and sidebar, a near-white Chat
+  canvas, white assistant content surfaces, medium-gray user bubbles, and blue
+  interaction accents. Status: implemented for the application shell,
+  sidebar, Chat canvas, and ordinary messages.
+- REQ-426: Settings shall allow users to select from multiple color themes,
+  persist the selection locally, and apply it without restarting the app.
+  Status: planned.
 
 ## 24. Navigation and Layout
 

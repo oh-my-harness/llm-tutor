@@ -470,6 +470,18 @@ Chat message presentation target:
   expands or focuses the separate citation/source surface; source details are
   not compressed into the icon toolbar itself.
 
+Theme architecture target:
+
+- The default `cool-light` theme uses a cool-gray frame and sidebar, a
+  near-white Chat canvas, white assistant content surfaces, medium-gray user
+  bubbles, neutral borders, and blue interaction accents.
+- Core colors are semantic CSS variables owned by the active theme rather than
+  repeated Tailwind palette choices inside product components.
+- Future themes shall be selectable from Settings, persisted locally, and
+  applied without restarting. Theme selection UI and additional palettes are a
+  separate follow-up; this phase establishes the token boundary and default
+  theme only.
+
 Tasks:
 
 - [ ] Audit browser-default behaviors that are visible in the desktop app,
@@ -512,6 +524,10 @@ Tasks:
       and ordinary user messages as bounded right-aligned light-gray bubbles.
 - [x] Preserve dedicated rendering for Research reports, Quiz cards, approvals,
       Notebook proposals, progress/status surfaces, citations, tables, and code.
+- [x] Establish the semantic `cool-light` theme tokens and apply them to the
+      application frame, sidebar, Chat canvas, and ordinary message surfaces.
+- [ ] Add a persisted appearance-theme selector and at least one additional
+      complete palette after auditing all remaining component-local colors.
 - [ ] Verify toolbar discovery by pointer and keyboard, no message overlap or
       layout shift, readable line length, and responsive behavior at common
       desktop widths.

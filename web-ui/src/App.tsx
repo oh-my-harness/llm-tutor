@@ -1281,7 +1281,7 @@ export default function App() {
 
   return (
     <I18nProvider language={llmSettings.language}>
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="app-shell flex h-screen overflow-hidden" data-theme="cool-light">
       <Sidebar
         activeView={view}
         activeSessionId={view === 'chat' ? sessionId : null}

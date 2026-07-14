@@ -484,7 +484,7 @@ export function ChatBox({
   }, [])
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="chat-canvas flex h-full min-h-0 flex-col overflow-hidden">
       {saveNotebookMarkdown && (
         saveNotebookResult || saveNotebookNative ? (
           <SaveNotebookOutcomeDialog
@@ -615,14 +615,16 @@ export function ChatBox({
                     />
                   ) : (
                     <>
-                      <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
-                      {msg.citations && msg.citations.length > 0 && (
-                        <CitationList
-                          id={`message-sources-${i}`}
-                          citations={msg.citations}
-                          onSourceNavigate={onSourceNavigate}
-                        />
-                      )}
+                      <div className="assistant-message-surface">
+                        <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
+                        {msg.citations && msg.citations.length > 0 && (
+                          <CitationList
+                            id={`message-sources-${i}`}
+                            citations={msg.citations}
+                            onSourceNavigate={onSourceNavigate}
+                          />
+                        )}
+                      </div>
                       {msg.notebookEditProposal && onApplyNotebookEdit && (
                         <NotebookEditProposalCard
                           proposal={msg.notebookEditProposal}
@@ -652,7 +654,7 @@ export function ChatBox({
                 ) : (
                   <>
                     {editingMessageIndex === i ? (
-                      <div className="w-full max-w-[85%] space-y-2 rounded-lg border border-gray-300 bg-gray-200 p-3">
+                      <div className="user-message-surface w-full max-w-[85%] space-y-2 rounded-lg p-3">
                         <textarea
                           className="min-h-24 w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-400"
                           value={editingMessageText}
@@ -678,7 +680,7 @@ export function ChatBox({
                         </div>
                       </div>
                     ) : (
-                      <div className="w-fit max-w-[85%] rounded-lg border border-gray-300 bg-gray-200 px-4 py-3 text-gray-950">
+                      <div className="user-message-surface w-fit max-w-[85%] rounded-lg px-4 py-3">
                         <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
                         {msg.attachments && msg.attachments.length > 0 && (
                           <AttachmentSummary attachments={msg.attachments} />
@@ -704,13 +706,15 @@ export function ChatBox({
             })}
             {streamingText && (
               <div className="w-full min-w-0 py-2 text-gray-900" aria-live="polite">
-                <MarkdownMessage text={streamingText} onSourceNavigate={onSourceNavigate} />
-                <span className="inline-block h-4 w-0.5 animate-pulse bg-gray-700 align-text-bottom" />
+                <div className="assistant-message-surface">
+                  <MarkdownMessage text={streamingText} onSourceNavigate={onSourceNavigate} />
+                  <span className="inline-block h-4 w-0.5 animate-pulse bg-gray-700 align-text-bottom" />
+                </div>
               </div>
             )}
             </div>
           </div>
-          <div className="bg-gray-50 p-4">
+          <div className="composer-dock p-4">
             <Composer
               inputRef={composerInputRef}
               input={input}
