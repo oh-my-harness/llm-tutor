@@ -8,7 +8,9 @@
 - REQ-002: The product shall support learning from user-provided documents, chat history, web sources, and generated reports.
 - REQ-003: The product shall prioritize grounded learning workflows over general-purpose chat.
 - REQ-004: The product shall keep agent runtime responsibilities in `llm-harness-runtime` / `llm-harness-agent` wherever possible.
-- REQ-005: The product shall keep `llm-tutor` focused on product data, UI, knowledge bases, books, quizzes, reports, settings, and runtime-session mappings.
+- REQ-005: The product shall keep `llm-tutor` focused on product data, UI,
+  knowledge bases, Notebook, quizzes, reports, settings, and runtime-session
+  mappings.
 
 ## 2. Architecture
 
@@ -320,26 +322,22 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   during navigation cannot leave a permanent running indicator. Status:
   implemented.
 
-## 15. Books and Learning Records
+## 15. Retired Books Capability
 
-- REQ-340: Users shall be able to view Books. Status: implemented.
-- REQ-341: Users shall be able to create a Book. Status: implemented.
-- REQ-342: Users shall be able to turn Notebook entries into Book chapters. Status: implemented.
-- REQ-343: Users shall be able to browse Book chapters. Status: implemented.
-- REQ-344: Book chapters shall store Markdown content. Status: implemented.
-- REQ-345: Book chapters shall store source session ID when available. Status: implemented.
-- REQ-346: Book chapters shall store source Notebook entry ID. Status: implemented.
-- REQ-347: Users shall be able to rename Books. Status: planned.
-- REQ-348: Users shall be able to delete Books. Status: planned.
-- REQ-349: Users shall be able to rename chapters. Status: planned.
-- REQ-350: Users shall be able to delete chapters. Status: planned.
-- REQ-351: Users shall be able to reorder chapters. Status: planned.
-- REQ-352: Users shall be able to edit chapter Markdown. Status: planned.
-- REQ-353: Users shall be able to export Books or chapters as Markdown. Status: planned.
-- REQ-354: Users shall be able to export Books or chapters as PDF. Status: planned.
-- REQ-355: Users shall be able to save chat answers into Notebook first, then optionally into Books. Status: planned.
-- REQ-356: Users shall be able to save Quiz summaries into Notebook first, then optionally into Books. Status: planned.
-- REQ-357: Book content shall eventually be usable as context or RAG source. Status: planned.
+Product decision recorded on 2026-07-14: Books are no longer a target product
+capability. Notebook is the single durable destination for research reports and
+other generated learning records.
+
+- REQ-340 through REQ-357: The former Book viewing, creation, chapter,
+  conversion, editing, export, and retrieval requirements are retired and
+  shall not drive future implementation.
+- REQ-358: Product navigation and report/Notebook actions shall not expose Book
+  creation, chapter creation, or save-to-Book workflows. Book UI, routes,
+  stores, source targets, and compatibility code shall be removed. Status:
+  planned.
+- REQ-359: Books retirement does not require migration or compatibility for
+  previously stored Book data. Obsolete Book data may be deleted with the
+  retired storage implementation. Status: planned.
 
 ## 16. Space Workspace
 
@@ -371,8 +369,10 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-633: Users shall be able to create Notebook entries manually. Status: planned.
 - REQ-634: Users shall be able to edit Notebook entries. Status: planned.
 - REQ-635: Users shall be able to delete Notebook entries. Status: planned.
-- REQ-636: Research mode shall default to saving reports into Notebook rather than directly into Books. Status: planned.
-- REQ-637: Users shall be able to send a Notebook entry to Books as a chapter. Status: implemented.
+- REQ-636: Research reports shall be saved to Notebook; no secondary Book
+  destination shall be offered. Status: implemented for the current Research
+  report UI; stale Book references remain to be removed.
+- REQ-637: The former send-to-Books requirement is retired.
 - REQ-638: Notebook entries shall remain a Markdown/plain-text workspace and shall not be indexed into RAG or vector stores. Status: planned.
 - REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: implemented.
 - REQ-640: Agent-produced Notebook edits shall be previewed as a proposed Markdown replacement or diff before they are applied. Status: implemented as complete Markdown replacement preview.
@@ -497,7 +497,10 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-698: L2 shall include `chat.md`. Status: planned.
 - REQ-699: L2 shall include `quiz.md`. Status: planned.
 - REQ-700: L2 shall include `notebook.md`. Status: planned.
-- REQ-701: L2 shall include `research.md`. Status: planned.
+- REQ-700A: L2 shall include `knowledge.md`. Status: planned.
+- REQ-701: The former requirement for a separate `research.md` L2 file is
+  retired. Research remains an L1 evidence surface, while durable report and
+  research-work habits are consolidated into `notebook.md`.
 - REQ-702: Memory shall support an L3 cross-surface memory layer. Status: planned.
 - REQ-703: L3 shall include `recent.md`. Status: planned.
 - REQ-704: L3 shall include `profile.md`. Status: planned.
@@ -518,7 +521,9 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-719: Memory content shall guide teaching behavior and personalization, not act as factual source material for external facts. Status: planned.
 - REQ-720: Memory Markdown footnote refs shall render as clickable inline source chips. Status: planned.
 - REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: planned.
-- REQ-722: Clicking a bottom memory reference item shall navigate to the related Chat, Notebook, Quiz, Research, Book, or Knowledge Base surface when possible. Status: planned.
+- REQ-722: Clicking a bottom memory reference item shall navigate to the related
+  Chat, Notebook, Quiz, Research report, or Knowledge Base surface when
+  possible. Book references are no longer supported. Status: planned.
 - REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: planned.
 - REQ-724: The Memory LLM workspace shall require an explicit maintenance mode
   (`update`, `check`, or `dedupe`) and model selection before the user starts a
@@ -613,6 +618,20 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   changes, and technical terms or proper nouns may remain in their source
   language. The captured language shall remain fixed for the lifetime of the
   run. Status: implemented.
+- REQ-751: Active L2 memory shall consist of `chat.md`, `quiz.md`,
+  `notebook.md`, and `knowledge.md`; it shall not create or expose a separate
+  `research.md` target. Status: planned.
+- REQ-752: `notebook.md` shall summarize durable behavior across ordinary
+  notes and saved Research reports, including organization habits, preferred
+  formats, report preferences, recurring research themes, and unresolved
+  questions. It shall not copy report bodies or external factual findings into
+  learner memory. Status: planned.
+- REQ-753: Research workflow events and unsaved report runs shall remain
+  addressable in L1 so the Memory agent can inspect research behavior even
+  though Research no longer owns an L2 document. Status: planned.
+- REQ-754: Existing `L2/research.md` content shall not be migrated or retained.
+  The obsolete file may be removed when the active L2 catalog is updated.
+  Status: planned.
 
 ## 21. Markdown Rendering
 
@@ -681,7 +700,7 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-441: The sidebar shall include Chat.
 - REQ-442: The sidebar shall include Tutor/assistant entry.
 - REQ-443: The sidebar shall include Writing entry.
-- REQ-444: The sidebar shall include Books.
+- REQ-444: The former Books sidebar requirement is retired.
 - REQ-445: The sidebar shall include Knowledge Base.
 - REQ-446: The sidebar shall include Quiz.
 - REQ-447: The sidebar shall include Space.
@@ -720,7 +739,8 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-470: Product data shall be stored locally for MVP.
 - REQ-471: Knowledge base metadata shall be durable.
 - REQ-472: Quiz sessions shall be durable.
-- REQ-473: Books shall be durable.
+- REQ-473: The former Books durability requirement is retired; no Book data
+  compatibility or migration is required.
 - REQ-474: Runtime sessions shall be durable through runtime session storage.
 - REQ-475: Trace events shall be restorable where relevant.
 - REQ-476: Compact summaries shall be restorable where runtime supports them.
@@ -736,7 +756,8 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-493: RAG retrieval shall be testable without a real LLM.
 - REQ-494: Quiz generation shall have non-real-LLM tests.
 - REQ-495: Research trace events shall have mock tests.
-- REQ-496: Book store and API shall have tests.
+- REQ-496: The former Book store/API test requirement is retired; tests shall
+  be removed with the retired implementation.
 - REQ-497: Attachment parsing shall have tests.
 - REQ-498: `tutor-web` startup smoke test shall be added. Status: planned.
 - REQ-499: `cargo clippy --workspace --all-targets --all-features -- -D warnings` shall be run and cleaned up or documented. Status: planned.
@@ -778,7 +799,10 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: planned; GitHub Actions path documented but not validated.
 - REQ-571: The desktop app shall hide or replace browser-default interactions that make the product feel like an embedded webpage, including visible browser context-menu behavior. Status: in progress; app-owned context menus, native clipboard use, external-link routing, and file-drop interception are implemented.
 - REQ-572: The desktop app shall use a fixed application shell where top-level window scrolling is avoided and scroll behavior is owned by specific panes or work areas. Status: in progress; top-level shell and Chat/Trace panes are hardened, full surface audit remains.
-- REQ-573: The desktop app shall provide product-owned context menu capability areas for major surfaces such as Notebook, Chat, Knowledge, Research, and Books, with detailed menu items specified during implementation design. Status: in progress; framework and first Notebook/generic action slice are implemented.
+- REQ-573: The desktop app shall provide product-owned context menu capability
+  areas for major active surfaces such as Notebook, Chat, Knowledge, and
+  Research, with detailed menu items specified during implementation design.
+  Status: in progress; framework and first Notebook/generic action slice are implemented.
 - REQ-574: The desktop app shall prefer native desktop affordances for file/folder selection, revealing local files, external link opening, and future app-level shortcuts where appropriate. Status: in progress; shared directory picker helper, Notebook Vault folder binding, native clipboard, data directory reveal, and external-link opening are implemented.
 - REQ-575: Desktop polish shall preserve the local-first sidecar architecture and shall not rewrite existing backend routes as Tauri commands unless a native capability requires it. Status: implemented.
 
@@ -790,5 +814,6 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-553: A user shall be able to run a Deep Solve turn and inspect stages.
 - REQ-554: A user shall be able to generate and answer a Quiz.
 - REQ-555: A user shall be able to run a Research turn and get a sourced report.
-- REQ-556: A user shall be able to save a Research report into a Book.
-- REQ-557: A user shall be able to reopen the app and find prior sessions and Books.
+- REQ-556: A user shall be able to save a Research report into Notebook.
+- REQ-557: A user shall be able to reopen the app and find prior sessions and
+  saved Notebook reports.

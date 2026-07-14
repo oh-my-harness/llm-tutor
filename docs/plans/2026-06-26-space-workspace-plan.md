@@ -1,6 +1,6 @@
 # Space Workspace Plan
 
-> Status: implemented | Date: 2026-06-26 | Last updated: 2026-06-30 | Scope: define Space as the project-level learning workspace that contains Notebook, Quiz Bank, and Student Profile.
+> Status: implemented with Book-removal follow-up | Date: 2026-06-26 | Last updated: 2026-07-14 | Scope: define Space as the project-level learning workspace that contains Notebook, Quiz Bank, and Student Profile.
 
 ## 1. Core Positioning
 
@@ -204,7 +204,7 @@ memory/
     chat.md
     quiz.md
     notebook.md
-    research.md
+    knowledge.md
 
   L3/
     recent.md
@@ -233,8 +233,13 @@ L2 stores Markdown summaries per product surface:
 
 - `chat.md`: recurring questions, unresolved topics, notable context.
 - `quiz.md`: strengths, weaknesses, wrong-answer patterns, repeated concepts.
-- `notebook.md`: saved topics, important notes, research artifacts.
-- `research.md`: researched themes, durable findings, source patterns.
+- `notebook.md`: organization habits, recurring note and report themes,
+  preferred note/report formats, and unresolved questions.
+- `knowledge.md`: document interests, frequent queries, and knowledge gaps.
+
+Research remains available as L1 evidence, including activity that has not yet
+been saved, but does not own a separate L2 document. Report bodies and external
+findings remain Notebook artifacts rather than learner-memory copies.
 
 ### L3: Cross-Surface Memory
 
@@ -329,17 +334,12 @@ Quiz remains as:
 
 This keeps planning and generation in the conversation and review in the Space.
 
-### Books Page
+### Books Page (Retired)
 
-Books remain a durable output surface, but they are not the first destination for raw research.
-
-Preferred flow:
-
-```text
-Research report -> Notebook entry -> optional Book chapter
-```
-
-Books are polished outputs. Notebook is the working memory.
+Books are no longer a product surface. Research reports and other generated
+learning records remain in Notebook. The former Book UI, routes, stores,
+actions, and source targets should be deleted without a compatibility or data
+migration layer.
 
 ### Research Reports
 
@@ -448,7 +448,7 @@ later as a cache or projection if the UI needs faster filtering.
 MemoryEntry {
   id: string
   layer: 'L2' | 'L3'
-  file: 'chat' | 'quiz' | 'notebook' | 'research' | 'recent' | 'profile' | 'scope' | 'preferences' | 'teaching_strategy'
+  file: 'chat' | 'quiz' | 'notebook' | 'knowledge' | 'recent' | 'profile' | 'scope' | 'preferences' | 'teaching_strategy'
   section: string
   text: string
   refs: string[]
@@ -465,7 +465,6 @@ Near-term navigation:
 Chat
 Tutor
 Writing
-Books
 Knowledge
 Space
 Memory
@@ -501,7 +500,7 @@ Do not rush this simplification until Space is useful enough.
 - [x] Add Notebook tab list/detail UI.
 - [x] Save Research reports to Notebook as `type = research_report`.
 - [x] Move current "Save to book" primary action to "Save to notebook".
-- [x] Add secondary "Send to book" action from Notebook entry.
+- [ ] Remove any remaining "Send to book" action and Book compatibility path.
 
 ### Phase 3: Quiz Bank
 
@@ -546,11 +545,13 @@ Do not rush this simplification until Space is useful enough.
 - [x] Derive basic stat cards from Quiz history as supplemental UI.
 - [x] Keep profile explainable and user-editable through Markdown.
 
-### Phase 5: Book Integration
+### Phase 5: Book Removal
 
-- [x] Allow Notebook entries to become Book chapters.
-- [x] Replace `sourceReportId` with `sourceNotebookEntryId` in future book chapter metadata.
-- [x] Keep Books as polished outputs, not raw research storage.
+- [ ] Remove Book navigation and page components.
+- [ ] Remove Book routes, stores, source targets, and tests that only support
+  the retired capability.
+- [ ] Remove Book persistence without migrating old data.
+- [ ] Remove stale Book requirements and user-facing documentation.
 
 ## 8. Open Questions
 
@@ -558,5 +559,4 @@ Do not rush this simplification until Space is useful enough.
 - Should Knowledge Bases belong to Spaces, or remain global with optional Space links?
 - Should Student Profile remain pure Markdown for v0.1, or should we add a structured cache once the UI needs filtering?
 - Should Notebook entries be indexed into RAG automatically?
-- Should Book chapters remain separate from Notebook entries or become a published view of them?
 - Should automatic memory consolidation be opt-in per trigger, or globally enabled after the user approves it once?

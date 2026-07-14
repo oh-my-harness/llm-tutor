@@ -1,6 +1,6 @@
 # Next Product Slice Plan
 
-> Status: active | Date: 2026-06-26 | Last updated: 2026-06-30 | Scope: implement the next coherent product slice after the initial Space, Notebook, Memory, Quiz Bank, Research, and web-search work.
+> Status: active | Date: 2026-06-26 | Last updated: 2026-07-14 | Scope: implement the next coherent product slice after the initial Space, Notebook, Memory, Quiz Bank, Research, and web-search work.
 
 ## 0. Plan Hygiene
 
@@ -15,7 +15,7 @@ Use this file with:
 - `docs/specs/2026-06-26-product-requirements-spec.md` for the consolidated
   requirement list.
 - `docs/plans/2026-06-26-space-workspace-plan.md` for Space, Notebook, Quiz
-  Bank, Student Profile, and Book positioning.
+  Bank, and Student Profile positioning.
 - `docs/plans/2026-06-26-space-memory-implementation-plan.md` for Memory and
   student-profile implementation details.
 - `docs/plans/2026-06-28-tauri-desktop-release-plan.md` for desktop release
@@ -30,7 +30,7 @@ The next slice should connect five product loops:
 ```text
 Conversation -> Notebook -> Space review
 Conversation -> Quiz -> Quiz Bank
-Research -> Notebook -> optional Book
+Research -> Notebook
 User activity -> Markdown Memory -> Student Profile
 Memory -> Agent personalization
 ```
@@ -44,7 +44,7 @@ tool/session adapters.
 - Space is the main durable workspace.
 - Space initially contains Notebook, Quiz Bank, and Student Profile.
 - Research reports are Notebook entries, not a separate `ResearchReport` store.
-- Books are polished outputs created from Notebook entries when needed.
+- Books are retired; Notebook is the only durable report destination.
 - Quiz generation stays in chat through the composer mode.
 - Quiz Bank only reviews and manages historical quiz records.
 - Space and Notebook do not generate quizzes directly. They store and review
@@ -68,7 +68,7 @@ Tasks:
 - [x] Keep Space as a tabbed workspace with Notebook, Quiz Bank, and Student Profile.
 - [x] Ensure Notebook list/detail/edit/delete flows are stable.
 - [x] Ensure Research "save" action writes a Notebook entry by default.
-- [x] Ensure Notebook entries can be sent to Books as chapters.
+- [ ] Remove retired Book UI, routes, stores, source targets, and actions.
 - [x] Ensure Quiz Bank lists completed quiz records from chat-generated quizzes.
 - [x] Ensure Quiz Bank can show questions, selected answers, correct answers, explanations, and citations.
 - [x] Ensure Notebook and Quiz Bank expose stable artifact IDs, titles, types, and metadata for Chat `@` references.
@@ -160,13 +160,13 @@ Tasks:
 - [x] Save Research reports to Notebook as `type = research_report`.
 - [x] Preserve query, sources, session id, and tool trace ids in Notebook metadata.
 - [x] Support Chat follow-up flows where the user asks to generate a Quiz from a saved report.
-- [x] Support "Send to Book" from the Notebook report detail.
+- [ ] Remove stale "Send to Book" references and compatibility paths.
 
 Acceptance:
 
 - Research output is clearly separated from ordinary chat.
 - Reports are durable Notebook entries with sources.
-- Books can be created from cleaned-up Notebook material.
+- Reports remain organized and reusable within Notebook.
 
 ## 7. Phase 5: Harden Web Search and External Evidence
 

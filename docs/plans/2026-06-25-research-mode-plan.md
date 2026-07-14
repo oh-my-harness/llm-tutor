@@ -1,6 +1,6 @@
 # Research Mode Plan
 
-> Status: in progress | Date: 2026-06-25 | Last updated: 2026-07-13 | Scope: add a research workflow that searches, reads, cites, produces a report, and can save the report into books.
+> Status: in progress | Date: 2026-06-25 | Last updated: 2026-07-14 | Scope: add a research workflow that searches, reads, cites, produces a report, and saves the report into Notebook.
 
 ## 1. Goal
 
@@ -12,7 +12,7 @@ The user should be able to:
 - see compact progress for planning, searching, reading, and synthesis,
 - get a final Markdown report with citations,
 - inspect the sources used by the report,
-- save the report as a book chapter,
+- save the report as a Notebook research entry,
 - continue asking questions and, from Chat Quiz mode, ask to generate a Quiz
   based on the saved report or current conversation.
 
@@ -27,7 +27,7 @@ Research is different from normal chat:
 
 ## 2. First Version Scope
 
-V1 should focus on a reliable research-to-report-to-book loop.
+V1 should focus on a reliable research-to-report-to-Notebook loop.
 
 Included:
 
@@ -37,8 +37,7 @@ Included:
 - web page fetch/extract tool,
 - report synthesis with citations,
 - source list rendering under the report,
-- save report to book as a Markdown chapter,
-- local durable Notebook entry and optional Book chapter metadata.
+- save the report as a durable Markdown Notebook entry.
 
 Out of scope for V1:
 
@@ -46,7 +45,7 @@ Out of scope for V1:
 - academic paper search,
 - recursive crawling,
 - collaborative editing,
-- rich block-based book editor.
+- a separate publication or Book layer.
 
 Long-running and parallel research are no longer out of scope for the product
 direction. The first parallel sub-task slice exists, but durable background
@@ -80,7 +79,7 @@ Final Report
   sources
 
 Actions
-  Save to book
+  Save to Notebook
   Ask in Chat to generate Quiz
   Continue research
 ```
@@ -251,9 +250,7 @@ Owns product APIs and persistence:
 - `propose_research_plan` product tool,
 - `create_research_report` product tool,
 - notebook entry store for research reports,
-- book store,
 - save report endpoint,
-- save report to book endpoint,
 - session restore mapping for report messages,
 - streaming research trace events over WebSocket.
 
@@ -264,8 +261,7 @@ Owns product experience:
 - mode selector entry,
 - structured research message rendering,
 - source list rendering,
-- save-to-book action,
-- book/chapter browsing,
+- save-to-Notebook action,
 - progress display.
 
 ## 5. Data Model
@@ -296,29 +292,6 @@ ResearchSource {
   snippet?: string
   extractedText?: string
   accessedAt: string
-}
-```
-
-```ts
-Book {
-  id: string
-  title: string
-  description?: string
-  chapters: BookChapter[]
-  createdAt: string
-  updatedAt: string
-}
-```
-
-```ts
-BookChapter {
-  id: string
-  title: string
-  markdown: string
-  sourceReportId?: string
-  sourceSessionId?: string
-  createdAt: string
-  updatedAt: string
 }
 ```
 
@@ -395,23 +368,12 @@ Use RAG when:
 
 Do not cite sources that were not actually searched or fetched.
 
-## 9. Book Integration
+## 9. Durable Report Destination
 
-Books are the durable organization layer.
-
-Research reports can be saved as:
-
-- a new book,
-- a new chapter in an existing book,
-- a replacement for an existing chapter in a later version.
-
-V1 action:
-
-```text
-Save to book -> choose existing book or create book -> create chapter from report Markdown
-```
-
-The report remains a Notebook research entry even after saving. A future book chapter should store `sourceNotebookEntryId` so the user can trace it back.
+Notebook is the single durable destination for Research reports. The product
+does not provide a secondary Book or publication layer. A saved report remains
+a `NotebookEntry(type = research_report)` and can be organized, edited,
+referenced, or used for later Quiz generation from Notebook.
 
 ## 10. Implementation Plan
 
@@ -445,13 +407,11 @@ The report remains a Notebook research entry even after saving. A future book ch
 - [x] Persist research report metadata in `NotebookEntry(type = research_report)`.
 - [x] Restore research reports from Notebook entries and session links.
 
-### Phase 5: Book Save
+### Phase 5: Book Save (Retired)
 
-- [x] Add minimal book store.
-- [x] Add create book/list books APIs.
-- [x] Add save report as chapter API.
-- [x] Add Save to book UI action.
-- [x] Add basic Book page chapter viewer.
+The former Book phase is superseded by the 2026-07-14 product decision. Book
+UI, routes, stores, and save actions are scheduled for removal without legacy
+data compatibility.
 
 ### Phase 6: Research Chat Before Workflow
 
@@ -553,6 +513,6 @@ V1 is complete when:
   final assistant bubble,
 - leaving and returning to the session during a long Research run restores the
   current run state or final report without starting a duplicate workflow,
-- the report can be saved as a book chapter,
+- the report can be saved as a Notebook research entry,
 - reloading the session preserves the report and sources,
 - report generation can fail with a clear reason when search or fetch fails.

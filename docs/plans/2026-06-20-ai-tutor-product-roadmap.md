@@ -2,6 +2,10 @@
 
 > Status: in progress | Date: 2026-06-20 | Last updated: 2026-06-30 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
 
+> Superseding decision (2026-07-14): Books are retired and Research reports use
+> Notebook as their only durable destination. Historical Book milestones below
+> describe earlier implementation work and are not future product direction.
+
 ## 0. Current Planning Entry Points
 
 Use this roadmap for product direction and milestone context. For execution,
@@ -61,14 +65,13 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 | Deep Solve | Guided problem solving | Plan -> solve steps -> synthesize final answer |
 | Quiz | Practice and assessment | Generate questions, collect answer, judge response |
 | Space | Learning workspace | Notebook, quiz bank, and student profile |
-| Books | Polished output | Turn curated notes/reports into chapters |
 | Settings | Runtime control | LLM provider, model, API key, budget limit |
 
 ### Explicitly Out of MVP
 
 - TutorBot channel integrations.
 - Multi-user auth and admin dashboard.
-- Rich Book Engine / living books.
+- Separate Book or publication layer.
 - Math Animator.
 - Deep Research with parallel sub-agents.
 - Full plugin marketplace.
@@ -113,8 +116,6 @@ Minimum entities:
 - `documents`
 - `chunks`
 - `retrieval_hits`
-- `books`
-- `book_chapters`
 - `spaces`
 - `notebook_entries`
 - `quiz_questions`
@@ -232,13 +233,10 @@ Goal: make learning outputs reusable.
 - [x] Add Markdown-based Memory module with L1 events, L2 summaries, and L3 learner memory.
 - [x] Add manual memory consolidation from the Memory module.
 - [x] Add `read_memory` tool so Quiz, Research, Chat, and Deep Solve can actively inspect learner memory.
-- [x] Add books and book chapters.
-- [x] Send curated Notebook entries to Books.
 - [ ] Save chat answers to Notebook.
 - [ ] Save quiz summaries to Notebook.
 - [ ] Save source snippets.
-- [x] Add basic book browser UI.
-- [ ] Add `write_note` / `save_to_book` style tools when runtime/tool policy is ready.
+- [ ] Remove the retired Book implementation and stale save-to-Book paths.
 
 Acceptance:
 
@@ -269,7 +267,6 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 | Feature | Why Later |
 |---|---|
 | Deeper Research | Current Research MVP exists; needs robust citations, report store, regeneration, and parallel task orchestration |
-| Rich Book Engine | Current Books MVP exists; rich editing requires stable document model and many UI block types |
 | Automatic Memory Consolidation | Start with manual Markdown consolidation first; automatic triggers need trust and good review UX |
 | TutorBot | Needs auth, workspace isolation, and channel security |
 | Multi-user | Changes storage, permissions, and deployment model |
@@ -284,7 +281,7 @@ Recommended next implementation order:
 3. Add chat-to-notebook and quiz-summary-to-notebook save flows.
 4. Upgrade RAG chunking from basic character chunks to paragraph/token-aware chunks.
 5. Add model/provider health checks in Settings.
-6. Add export for chat, notebook entries, reports, and book chapters.
+6. Add export for chat, Notebook entries, and reports.
 7. Add a smoke test for `tutor-web` startup.
 8. Decide whether local JSON stores should move to SQLite.
 
@@ -296,7 +293,7 @@ Recommended next implementation order:
 | RAG quality is poor | Start with source-visible retrieval debugging and chunk previews |
 | Provider differences break tool calls | Keep mock provider tests and provider-specific integration tests |
 | Long tasks feel opaque | Stream trace/status events early |
-| Storage model churn | Keep JSON while local MVP is simple; move to SQLite when reports/books/sessions need relational queries |
+| Storage model churn | Keep JSON while local MVP is simple; move to SQLite when reports/sessions need relational queries |
 | UI becomes a debug console | Design around learner workflows, not internal events |
 
 ## 8. Success Metrics

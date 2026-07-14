@@ -95,7 +95,7 @@ NotebookEntry {
 - [x] Add manual note creation.
 - [x] Save Research reports as `type = research_report`.
 - [x] Change Research primary save action from "save to book" to "save to notebook".
-- [x] Add secondary "send to book" action from a Notebook entry.
+- [ ] Remove the retired secondary "send to book" path and its backend support.
 - [x] Add edit UI for existing Notebook entries.
 
 ### Acceptance
@@ -105,7 +105,7 @@ NotebookEntry {
 - [x] User can reopen Space and find the saved report.
 - [x] User can edit Notebook entries.
 - [x] User can delete Notebook entries.
-- [x] Books remain available as polished outputs, not raw report storage.
+- [x] Notebook is the durable destination for Research reports.
 
 ## 5. Phase 3: Quiz Bank Migration
 
@@ -160,7 +160,7 @@ memory/
     chat.md
     quiz.md
     notebook.md
-    research.md
+    knowledge.md
 
   L3/
     recent.md
@@ -197,6 +197,12 @@ memory/
 - [x] Show consolidation preview before applying changes.
 - [x] Keep L1 out of the main visualization while retaining it as workspace event storage.
 - [x] Add L2/L3 memory workbench with update, check, and dedupe assist actions.
+- [ ] Remove `research.md` from the active L2 catalog and file rail.
+- [ ] Expand `notebook.md` to cover saved Research report habits and
+  preferences while keeping report bodies in Notebook.
+- [ ] Delete the obsolete `research.md` target and skeleton without a legacy
+  content migration.
+- [ ] Keep Research events available as L1 evidence for Notebook and L3 runs.
 
 ### Acceptance
 

@@ -97,8 +97,12 @@ memory/L2/chat.md
 memory/L2/quiz.md
 memory/L2/notebook.md
 memory/L2/knowledge.md
-memory/L2/research.md
 ```
+
+Research remains an L1 evidence surface but does not own an L2 document.
+Saved reports are Notebook artifacts, so stable research habits and report
+preferences are consolidated into `notebook.md`. Report bodies and external
+facts stay in Notebook reports rather than being duplicated into Memory.
 
 ### L3: Cross-Surface Learner Memory
 
@@ -205,14 +209,11 @@ surfaces:
     focus: Error patterns, strong topics, weak topics, and question types.
     sections: [Error patterns, Strong topics, Weak topics]
   notebook:
-    focus: Recurring note themes, preferred formats, and open questions.
-    sections: [Themes, Formats, Open questions]
+    focus: Durable behavior across notes and saved research reports, including organization habits, recurring themes, preferred note/report formats, and unresolved questions.
+    sections: [Themes, Organization, Formats, Report preferences, Open questions]
   knowledge:
     focus: Document interests, frequent queries, and knowledge gaps.
     sections: [Interests, Frequent queries, Gaps]
-  research:
-    focus: Research topics, preferred report shape, and unresolved questions.
-    sections: [Topics, Report preferences, Open questions]
 ```
 
 Recommended L3 catalog:
@@ -412,7 +413,7 @@ Display behavior:
 - Clicking an inline source chip should scroll to the matching item in the
   source reference list at the bottom of the rendered content.
 - The bottom reference list should show human-readable labels such as
-  `Chat`, `Notebook`, `Quiz`, `Research`, `Book`, or `Knowledge Base`.
+  `Chat`, `Notebook`, `Quiz`, `Research report`, or `Knowledge Base`.
 - Clicking a bottom reference item should navigate to the corresponding product
   surface and, when possible, focus the exact source record.
 - Stable entry markers such as `<!--m_xxx-->` are internal metadata and must
@@ -428,9 +429,11 @@ chat:<session_id>[:message_id]              -> Chat session, optional message fo
 notebook:<entry_id>                         -> Space / Notebook entry
 quiz:<quiz_id>[:question_id]                -> Space / Quiz Bank item, optional question focus
 research:<notebook_entry_id>                -> Space / Notebook research report
-book:<book_id>[:chapter_id]                 -> Books page, optional chapter focus
 kb:<knowledge_base_id>:<doc_id>[:chunk_id]  -> Knowledge Base document/chunk view
 ```
+
+The retired `book:` reference form is removed rather than retained as a
+compatibility route.
 
 The same source reference component should be reused by Memory, Student Profile,
 Research reports, Quiz review, and RAG answer citations where practical.

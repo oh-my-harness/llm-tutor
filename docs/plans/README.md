@@ -10,7 +10,7 @@ checklists.
 - `2026-06-20-ai-tutor-product-roadmap.md`: high-level product roadmap and
   milestone context.
 - `2026-06-26-space-workspace-plan.md`: Space, Notebook, Quiz Bank, Student
-  Profile, and Book positioning.
+  Profile, and the retirement of the former Books capability.
 - `2026-07-01-notebook-obsidian-plan.md`: Obsidian-like Notebook direction,
   including wiki links, backlinks, tags, and required import/export.
 - `2026-06-26-space-memory-implementation-plan.md`: Memory and student-profile
