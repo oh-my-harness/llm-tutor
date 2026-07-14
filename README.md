@@ -12,7 +12,7 @@
 
 ## 文档
 
-- [使用手册](./MANUAL.md)：安装、配置和全部用户功能
+- [使用手册](./MANUAL.md)：首次配置和全部用户功能
 - [产品需求规格](./docs/specs/2026-06-26-product-requirements-spec.md)
 - [桌面发布计划](./docs/plans/2026-06-28-tauri-desktop-release-plan.md)
 - [桌面 QA 清单](./docs/qa/desktop-v0.1.md)
