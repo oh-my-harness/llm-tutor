@@ -417,23 +417,19 @@ async fn run_memory_change_set(
     let run = run_memory_runtime_workflow_with_tools(llm, workflow_root, &workflow_input, tools)
         .await
         .map_err(|err| err.to_string())?;
-    workflow_output_to_change_set(run_id, &file, run.output, &tracker.read_refs())
+    workflow_output_to_change_set(run_id, &file, run.output, &tracker)
 }
 
 fn workflow_output_to_change_set(
     run_id: String,
     file: &MemoryFile,
     output: tutor_agent::memory::MemoryWorkflowOutput,
-    read_refs: &[String],
+    tracker: &MemoryEvidenceTracker,
 ) -> Result<MemoryChangeSet, String> {
-    let allowed_refs = read_refs
-        .iter()
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
     let entries = parse_memory_entries(&file.markdown);
     let mut changes = Vec::new();
     for change in output.changes {
-        validate_run_refs(&change.refs, &allowed_refs, true)?;
+        let refs = canonicalize_run_refs(&change.refs, tracker, true)?;
         let op = match change.op {
             tutor_agent::memory::MemoryWorkflowChangeOp::Insert => MemoryChangeOp::Insert,
             tutor_agent::memory::MemoryWorkflowChangeOp::Replace => MemoryChangeOp::Replace,
@@ -458,21 +454,21 @@ fn workflow_output_to_change_set(
             entry_id: change.entry_id,
             after_entry_id: change.after_entry_id,
             text: change.text.map(|value| normalize_change_text(&value)),
-            refs: change.refs,
+            refs,
             reason: change.reason,
             before_text,
         });
     }
     let mut findings = Vec::new();
     for finding in output.findings {
-        validate_run_refs(&finding.refs, &allowed_refs, false)?;
+        let refs = canonicalize_run_refs(&finding.refs, tracker, false)?;
         findings.push(MemoryFinding {
             id: finding.id,
             entry_id: finding.entry_id,
             severity: finding.severity,
             kind: finding.kind,
             message: finding.message,
-            refs: finding.refs,
+            refs,
         });
     }
     Ok(MemoryChangeSet {
@@ -485,20 +481,22 @@ fn workflow_output_to_change_set(
     })
 }
 
-fn validate_run_refs(
+fn canonicalize_run_refs(
     refs: &[String],
-    allowed_refs: &std::collections::BTreeSet<&str>,
+    tracker: &MemoryEvidenceTracker,
     required: bool,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     if required && refs.is_empty() {
         return Err("memory change did not cite read evidence".into());
     }
+    let mut canonical_refs = std::collections::BTreeSet::new();
     for reference in refs {
-        if !allowed_refs.contains(reference.as_str()) {
-            return Err(format!("memory change cites unread evidence `{reference}`"));
-        }
+        let canonical = tracker
+            .canonical_reference(reference)
+            .ok_or_else(|| format!("memory change cites unread evidence `{reference}`"))?;
+        canonical_refs.insert(canonical);
     }
-    Ok(())
+    Ok(canonical_refs.into_iter().collect())
 }
 
 fn normalize_change_text(text: &str) -> String {
@@ -707,6 +705,27 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.output_language, MemoryOutputLanguage::EnUs);
+    }
+
+    #[test]
+    fn canonicalizes_read_product_aliases_and_rejects_unread_aliases() {
+        let tracker = MemoryEvidenceTracker::default();
+        let alias = "notebook:4747cc47-597a-410b-a073-5881480bb4c6";
+        let canonical = "notebook:7b2cd73e-2f84-49fb-8600-03d67fe088d4";
+        tracker.record_resolution(
+            "reading_evidence",
+            "read_memory_source",
+            "Resolved notebook evidence".into(),
+            alias,
+            canonical,
+        );
+
+        assert_eq!(
+            canonicalize_run_refs(&[alias.into()], &tracker, true).unwrap(),
+            vec![canonical.to_string()]
+        );
+        let error = canonicalize_run_refs(&["notebook:unread".into()], &tracker, true).unwrap_err();
+        assert!(error.contains("cites unread evidence `notebook:unread`"));
     }
 
     #[tokio::test]

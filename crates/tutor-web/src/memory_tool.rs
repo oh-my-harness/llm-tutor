@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
@@ -19,6 +19,7 @@ pub struct MemoryEvidenceActivity {
 #[derive(Clone, Default)]
 pub struct MemoryEvidenceTracker {
     read_refs: Arc<Mutex<BTreeSet<String>>>,
+    resolved_aliases: Arc<Mutex<BTreeMap<String, String>>>,
     activities: Arc<Mutex<Vec<MemoryEvidenceActivity>>>,
     activity_sender: Option<tokio::sync::mpsc::UnboundedSender<MemoryEvidenceActivity>>,
 }
@@ -40,6 +41,20 @@ impl MemoryEvidenceTracker {
             .unwrap_or_default()
     }
 
+    pub fn canonical_reference(&self, reference: &str) -> Option<String> {
+        if self
+            .read_refs
+            .lock()
+            .is_ok_and(|refs| refs.contains(reference))
+        {
+            return Some(reference.to_string());
+        }
+        self.resolved_aliases
+            .lock()
+            .ok()
+            .and_then(|aliases| aliases.get(reference).cloned())
+    }
+
     fn record(&self, stage: &str, tool: &str, summary: String, refs: Vec<String>) {
         if let Ok(mut read_refs) = self.read_refs.lock() {
             read_refs.extend(refs.iter().cloned());
@@ -56,6 +71,25 @@ impl MemoryEvidenceTracker {
         if let Some(sender) = &self.activity_sender {
             let _ = sender.send(activity);
         }
+    }
+
+    pub(crate) fn record_resolution(
+        &self,
+        stage: &str,
+        tool: &str,
+        summary: String,
+        requested_reference: &str,
+        canonical_reference: &str,
+    ) {
+        if requested_reference != canonical_reference {
+            if let Ok(mut aliases) = self.resolved_aliases.lock() {
+                aliases.insert(
+                    requested_reference.to_string(),
+                    canonical_reference.to_string(),
+                );
+            }
+        }
+        self.record(stage, tool, summary, vec![canonical_reference.to_string()]);
     }
 }
 
@@ -337,11 +371,12 @@ impl Tool for ReadMemorySourceTool {
                 .resolve_source_ref(reference)
                 .map_err(|err| ToolError::Execution(err.to_string()))?;
             let canonical_reference = event_reference(&source.event);
-            self.tracker.record(
+            self.tracker.record_resolution(
                 "reading_evidence",
                 self.name(),
                 format!("Resolved {reference} to {canonical_reference}"),
-                vec![canonical_reference.clone()],
+                reference,
+                &canonical_reference,
             );
             Ok(json_tool_result(json!({
                 "requested_reference": reference,
@@ -511,5 +546,34 @@ mod tests {
             result.details["event"]["payload"]["answer"],
             "complete answer"
         );
+    }
+
+    #[tokio::test]
+    async fn source_reads_map_product_id_aliases_to_canonical_event_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let entry_id = "4747cc47-597a-410b-a073-5881480bb4c6";
+        let event = store
+            .record_event(
+                crate::memory_store::MemoryEventCategory::Notebook,
+                "created",
+                "Created notebook entry",
+                Some(entry_id.into()),
+                json!({ "title": "Transformer notes" }),
+            )
+            .unwrap();
+        let tracker = MemoryEvidenceTracker::default();
+        let tool = ReadMemorySourceTool::new(store, tracker.clone());
+        let alias = format!("notebook:{entry_id}");
+        let canonical = format!("notebook:{}", event.id);
+
+        let result = tool
+            .execute(json!({ "reference": alias }), &make_ctx())
+            .await
+            .unwrap();
+
+        assert_eq!(result.details["canonical_reference"], canonical);
+        assert_eq!(tracker.read_refs(), vec![canonical.clone()]);
+        assert_eq!(tracker.canonical_reference(&alias), Some(canonical));
     }
 }
