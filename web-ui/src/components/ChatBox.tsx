@@ -1658,7 +1658,7 @@ function Composer({
         <div className="relative ml-auto">
           <ToolbarButton
             active={openMenu === 'model'}
-            icon={<Brain size={21} />}
+            icon={<Brain size={16} />}
             label={activeModel?.model ?? t('chat.model.select')}
             onClick={() => toggleMenu('model')}
           />
