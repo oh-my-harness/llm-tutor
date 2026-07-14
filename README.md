@@ -9,6 +9,8 @@
 > 当前版本：`0.1.3`
 >
 > 当前阶段：单用户本地产品原型；核心闭环可用，桌面发布仍在持续人工 QA。
+>
+> 文档状态：已按 `main` 分支截至 2026-07-14 的实现更新。
 
 ## 文档
 
@@ -31,7 +33,7 @@
 | Knowledge / RAG | 创建知识库、绑定 embedding、PDF/文本入库、LanceDB 检索、引用和来源导航。 |
 | Notebook | Markdown 文件树、文件夹、编辑、Wiki Link、反向链接、导入/导出、外部 Vault、生成内容保存。 |
 | Space | 题库、来源筛选、学生画像和跨模块学习资产入口。 |
-| Memory | L1 事件证据与 L2/L3 Markdown 记忆、模型/模式可选的维护 workflow、更新/检查/去重、来源引用和撤销。 |
+| Memory | L1 事件证据、L2 分模块摘要与 L3 跨模块记忆；支持模型/模式可选的更新、检查、去重 workflow，以及逐项 diff 审核。 |
 | Desktop | Tauri 原生窗口、托管 `tutor-web` sidecar、系统文件对话框、桌面剪贴板/右键菜单、外部链接。 |
 | Appearance | `cool-light` 与 `graphite-dark` 主题，中英文界面。 |
 
@@ -249,6 +251,7 @@ GitHub 发布工作流在 `v*` 标签和手动 `workflow_dispatch` 下构建 Win
 - API Key 暂存于本地 JSON，系统钥匙串尚未实现。
 - Linux 安装包和自动更新尚未实现。
 - RAG 切分、引用验证和桌面安装包 QA 仍需持续完善。
+- Memory 已按 `L1 -> L2 -> L3` 分层读取证据，但 L2 新鲜度提示、应用时来源版本校验，以及 `teaching_strategy.md` 的完整依赖顺序仍在完善。
 
 更多用户侧说明见 [使用手册](./MANUAL.md)。
 
