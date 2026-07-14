@@ -657,8 +657,8 @@ presented as factual proof about external domains.
 
 Current `llm-tutor` has Markdown memory files, event-level L1 references,
 bounded runtime evidence tools, a structured `MemoryChangeSet`, central diff
-review, atomic selected-change apply, history, and undo. The remaining
-hardening work should:
+review, atomic selected-change apply, history, undo, and in-process run rejoin
+after workspace navigation. The remaining hardening work should:
 
 - Preserve durable pointers to complete source artifacts instead of relying on
   truncated event summaries alone.

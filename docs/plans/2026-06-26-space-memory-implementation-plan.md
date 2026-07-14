@@ -245,6 +245,8 @@ structured change sets, and central diff review.
 - [x] Validate read-set refs, sections, anchors, text limits, and base revision
   before apply.
 - [x] Apply accepted changes atomically, record history, and support undo.
+- [x] Expose active Memory runs and automatically restore the target file,
+  progress flow, and review result after navigating away and returning.
 - [x] Add boundary and UI tests for pagination, source expansion, duplicate or
   unread refs, stale revisions, partial acceptance, atomic apply, and undo.
 

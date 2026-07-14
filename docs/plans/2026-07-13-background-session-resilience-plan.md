@@ -1,6 +1,6 @@
 # Background Session Resilience Plan
 
-> Status: partially implemented | Date: 2026-07-13 | Last updated: 2026-07-13 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
+> Status: partially implemented | Date: 2026-07-13 | Last updated: 2026-07-14 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
 
 ## 1. Problem
 
@@ -157,6 +157,8 @@ After an app/sidecar restart, a previously active run is restored as
 - [x] Guard session-detail hydration against out-of-order HTTP responses.
 - [x] Reconcile sidebar running indicators against the backend while any
   background run remains active.
+- [x] Let the Memory workspace discover active runs from the backend and restore
+  the target document, flow progress, and pending review after page remount.
 
 ### Phase 5: Cross-Mode QA
 

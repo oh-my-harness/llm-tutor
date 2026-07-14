@@ -27,6 +27,7 @@ import { settingsForSession, type LlmSettings } from '../settings'
 import {
   areAllMemoryChangesSelected,
   memoryChangeIds,
+  newestRestorableMemoryRun,
   toggleMemoryChange,
 } from '../memoryReview'
 
@@ -88,6 +89,7 @@ interface MemoryRun {
   run_id: string
   target_path: string
   action: AssistAction
+  started_at?: string
   status: string
   current_stage: string
   flow: MemoryRunFlowItem[]
@@ -153,15 +155,47 @@ export function MemoryPage({
     }
   }, [])
 
+  const restoreActiveRun = useCallback(async () => {
+    try {
+      const res = await fetch('/api/memory/runs?active_only=true')
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const run = newestRestorableMemoryRun((data.runs ?? []) as MemoryRun[])
+      if (!run) return
+      setMemoryRun(run)
+      setAssistAction(run.action)
+      setLayer(run.target_path.startsWith('L3/') ? 'L3' : 'L2')
+      setActivePath(run.target_path)
+      if (run.change_set) {
+        setSelectedChangeIds(memoryChangeIds(run.change_set.changes))
+        setViewMode('review')
+        setStatus(run.change_set.summary || '记忆变更等待审核')
+        setLoading(false)
+      } else {
+        setViewMode('rendered')
+        setStatus('已重新接入正在运行的记忆工作流')
+        setLoading(true)
+      }
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
   useEffect(() => {
-    void loadFiles()
-  }, [loadFiles])
+    void (async () => {
+      await loadFiles()
+      await restoreActiveRun()
+    })()
+  }, [loadFiles, restoreActiveRun])
 
   useEffect(() => {
     if (!activeFile) return
     setDraft(activeFile.markdown)
-    setMemoryRun(null)
-    setSelectedChangeIds([])
+    if (memoryRun && memoryRun.target_path !== activeFile.path) {
+      setMemoryRun(null)
+      setSelectedChangeIds([])
+      setViewMode('rendered')
+    }
   }, [activeFile?.path, activeFile?.markdown])
 
   const openLayer = (nextLayer: 'L2' | 'L3') => {

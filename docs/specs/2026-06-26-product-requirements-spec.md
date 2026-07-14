@@ -597,6 +597,10 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   shall own document reading/editing/diff review, and the right workbench shall
   own controls and flow progress. L1 shall not appear as ordinary editable
   memory files in the primary rail. Status: implemented.
+- REQ-748: Leaving and returning to the Memory workspace shall rejoin the newest
+  active or reviewable Memory run without starting a duplicate run. The UI
+  shall restore its target file, flow state, and pending change review. Status:
+  implemented.
 
 ## 21. Markdown Rendering
 

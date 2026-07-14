@@ -84,6 +84,11 @@ struct ApplyMemoryRunRequest {
     accepted_change_ids: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct MemoryRunsQuery {
+    active_only: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 struct MemoryRunFlowItem {
     stage: String,
@@ -96,6 +101,7 @@ struct MemoryRunSnapshot {
     run_id: String,
     target_path: String,
     action: MemoryAssistAction,
+    started_at: chrono::DateTime<chrono::Utc>,
     status: String,
     current_stage: String,
     flow: Vec<MemoryRunFlowItem>,
@@ -128,6 +134,7 @@ async fn start_memory_run(
         run_id: run_id.clone(),
         target_path: file.path.clone(),
         action: req.action,
+        started_at: chrono::Utc::now(),
         status: "running".into(),
         current_stage: "queued".into(),
         flow: vec![MemoryRunFlowItem {
@@ -256,6 +263,23 @@ async fn get_memory_run(
         Some(run) => (StatusCode::OK, Json(serde_json::json!({ "run": run }))).into_response(),
         None => error_response(StatusCode::NOT_FOUND, "memory run was not found".into()),
     }
+}
+
+async fn list_memory_runs(
+    State(state): State<MemoryState>,
+    Query(query): Query<MemoryRunsQuery>,
+) -> impl IntoResponse {
+    let active_only = query.active_only.unwrap_or(false);
+    let mut runs = state
+        .runs
+        .read()
+        .await
+        .values()
+        .filter(|run| !active_only || matches!(run.status.as_str(), "running" | "awaiting_review"))
+        .cloned()
+        .collect::<Vec<_>>();
+    runs.sort_by(|left, right| right.started_at.cmp(&left.started_at));
+    (StatusCode::OK, Json(serde_json::json!({ "runs": runs }))).into_response()
 }
 
 async fn cancel_memory_run(
@@ -741,7 +765,10 @@ pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>)
         )
         .route("/api/memory/undo", axum::routing::post(undo_memory))
         .route("/api/memory/assist", axum::routing::post(assist_memory))
-        .route("/api/memory/runs", axum::routing::post(start_memory_run))
+        .route(
+            "/api/memory/runs",
+            get(list_memory_runs).post(start_memory_run),
+        )
         .route(
             "/api/memory/runs/{run_id}",
             get(get_memory_run).delete(cancel_memory_run),
@@ -777,6 +804,7 @@ mod tests {
                     run_id: run_id.clone(),
                     target_path: "L2/chat.md".into(),
                     action: MemoryAssistAction::Update,
+                    started_at: chrono::Utc::now(),
                     status: "running".into(),
                     current_stage: "discovering_sources".into(),
                     flow: vec![],
@@ -803,6 +831,61 @@ mod tests {
         assert_eq!(run.current_stage, "cancelled");
         assert_eq!(run.flow.last().unwrap().stage, "cancelled");
         assert!(state.tasks.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn active_memory_runs_are_listed_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = chrono::Utc::now();
+        let snapshot = |run_id: &str, status: &str, started_at| MemoryRunSnapshot {
+            run_id: run_id.into(),
+            target_path: "L2/chat.md".into(),
+            action: MemoryAssistAction::Update,
+            started_at,
+            status: status.into(),
+            current_stage: status.into(),
+            flow: vec![],
+            change_set: None,
+            error: None,
+        };
+        let state = MemoryState {
+            store: Arc::new(MemoryStore::new_with_root(dir.path().join("memory"))),
+            workflow_root: dir.path().join("workflow-sessions"),
+            runs: Arc::new(tokio::sync::RwLock::new(HashMap::from([
+                (
+                    "older-running".into(),
+                    snapshot(
+                        "older-running",
+                        "running",
+                        now - chrono::Duration::seconds(5),
+                    ),
+                ),
+                (
+                    "newer-review".into(),
+                    snapshot("newer-review", "awaiting_review", now),
+                ),
+                (
+                    "completed".into(),
+                    snapshot("completed", "completed", now + chrono::Duration::seconds(5)),
+                ),
+            ]))),
+            tasks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        };
+
+        let response = list_memory_runs(
+            State(state),
+            Query(MemoryRunsQuery {
+                active_only: Some(true),
+            }),
+        )
+        .await
+        .into_response();
+        let body = response_json(response).await;
+        let runs = body["runs"].as_array().unwrap();
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["run_id"], "newer-review");
+        assert_eq!(runs[1]["run_id"], "older-running");
     }
 
     #[tokio::test]

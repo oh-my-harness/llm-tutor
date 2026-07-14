@@ -16,3 +16,11 @@ export function areAllMemoryChangesSelected(
   const selected = new Set(selectedIds)
   return changes.every((change) => selected.has(change.id))
 }
+
+export function newestRestorableMemoryRun<T extends { status: string; started_at?: string }>(
+  runs: readonly T[],
+): T | null {
+  return [...runs]
+    .filter((run) => run.status === 'running' || run.status === 'awaiting_review')
+    .sort((left, right) => (right.started_at ?? '').localeCompare(left.started_at ?? ''))[0] ?? null
+}
