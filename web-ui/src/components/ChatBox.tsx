@@ -525,7 +525,7 @@ export function ChatBox({
         )
       )}
       {empty ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
+        <div className="chat-scroll-pane flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
           <div className="w-full max-w-4xl">
             <div className="mb-10 flex items-center justify-center gap-4 text-center">
               <Sparkles size={42} className="text-gray-800" />
@@ -562,7 +562,7 @@ export function ChatBox({
       ) : (
         <>
           <ContextCapacity stats={contextStats} />
-          <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div ref={scrollRef} onScroll={handleScroll} className="chat-scroll-pane min-h-0 flex-1 overflow-y-auto p-4">
             <div className="mx-auto w-full max-w-6xl space-y-3">
             {messages.map((msg, i) => {
               const structuredAssistant = isStructuredAssistantMessage(msg, capability)

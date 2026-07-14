@@ -11,6 +11,8 @@
   --surface-border-subtle: #e6e9ee;
   --sidebar-scrollbar-thumb: #9aa1ab;
   --sidebar-scrollbar-thumb-hover: #7e8793;
+  --chat-scrollbar-thumb: #a3a9b2;
+  --chat-scrollbar-thumb-hover: #858d98;
   --text-primary: #111827;
 }
 
@@ -65,6 +67,34 @@ body {
 .chat-canvas,
 .composer-dock {
   background: var(--chat-canvas);
+}
+
+.chat-scroll-pane {
+  scrollbar-color: var(--chat-scrollbar-thumb) var(--chat-canvas);
+}
+
+.chat-scroll-pane::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-scroll-pane::-webkit-scrollbar-track,
+.chat-scroll-pane::-webkit-scrollbar-corner {
+  background: var(--chat-canvas);
+}
+
+.chat-scroll-pane::-webkit-scrollbar-thumb {
+  border: 2px solid var(--chat-canvas);
+  border-radius: 999px;
+  background: var(--chat-scrollbar-thumb);
+}
+
+.chat-scroll-pane::-webkit-scrollbar-thumb:hover {
+  background: var(--chat-scrollbar-thumb-hover);
+}
+
+.chat-scroll-pane::-webkit-scrollbar-button {
+  display: none;
 }
 
 .assistant-message-surface {
