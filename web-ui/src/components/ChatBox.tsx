@@ -1658,7 +1658,7 @@ function Composer({
         <div className="relative ml-auto">
           <ToolbarButton
             active={openMenu === 'model'}
-            icon={<Brain size={16} />}
+            icon={<Brain size={21} />}
             label={activeModel?.model ?? t('chat.model.select')}
             onClick={() => toggleMenu('model')}
           />
@@ -1667,7 +1667,7 @@ function Composer({
               {llmConfigs.length === 0 ? (
                 <DropdownOption
                   selected
-                  icon={<Brain size={14} />}
+                  icon={<Brain size={21} />}
                   title={t('chat.model.none')}
                   description={t('chat.model.configureFirst')}
                   onClick={() => setOpenMenu(null)}
@@ -1677,7 +1677,7 @@ function Composer({
                   <DropdownOption
                     key={config.id}
                     selected={config.id === activeModel?.id}
-                    icon={<Brain size={14} />}
+                    icon={<Brain size={21} />}
                     title={config.name || config.model}
                     description={`${llmApiModeLabel(config.provider)} / ${config.model}`}
                     onClick={() => {
