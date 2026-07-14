@@ -204,7 +204,57 @@ memory/
 - [x] User can edit `profile.md`, `preferences.md`, and `teaching_strategy.md`.
 - [x] User can manually consolidate recent activity into Markdown memory.
 - [x] Memory files support source references in Markdown and the profile UI can surface those references.
-- [x] User can ask the Memory workbench to prepare update drafts, inspect memory quality, and remove duplicate entries.
+- [x] User can ask the first-slice Memory workbench to prepare update drafts,
+  inspect memory quality, and remove duplicate entries. The draft-oriented
+  review is transitional and is superseded by the target design below.
+
+### Target Redesign: Evidence Exploration and Diff Review
+
+Status: planned on 2026-07-14. The approved target contract is defined in
+`docs/specs/2026-06-26-memory-consolidation-design.md` and requirements
+`REQ-727` through `REQ-747`.
+
+The next Memory workbench slice replaces prompt-injected evidence batches and
+full-document drafts with agent-directed L1 exploration, visible flow progress,
+structured change sets, and central diff review.
+
+#### Tasks
+
+- [ ] Give every L1 event a stable event/turn reference instead of reusing a
+  session-only reference for multiple events.
+- [ ] Preserve complete evidence through a bounded snapshot or durable source
+  pointer for Chat, Quiz, Notebook, Knowledge, and Research events.
+- [ ] Add runtime-native, read-only tools to list/search L1 events, read an
+  event, read surrounding context, and resolve the original artifact.
+- [ ] Start discovery in the target surface while allowing the agent to expand
+  explicitly to other L1 surfaces.
+- [ ] Emit product-level flow events for discovery, reads, analysis, proposal,
+  validation, review, apply, completion, failure, and cancellation.
+- [ ] Replace full `proposed_markdown` and report-oriented output with a
+  versioned `MemoryChangeSet` containing findings and evidence-bound changes.
+- [ ] Keep the right workbench limited to controls, flow status, counts, errors,
+  and a compact completion summary.
+- [ ] Add Read/Edit/Review modes to the central document surface.
+- [ ] Render insert/replace/delete operations as deterministic inline diff,
+  with per-change reasons and navigable source chips.
+- [ ] Support accept/reject per change and accept/reject all.
+- [ ] Validate read-set refs, sections, anchors, text limits, and base revision
+  before apply.
+- [ ] Apply accepted changes atomically, record history, and support undo.
+- [ ] Add boundary and UI tests for pagination, source expansion, duplicate or
+  unread refs, stale revisions, partial acceptance, atomic apply, and undo.
+
+#### Acceptance
+
+- [ ] The Memory agent can address all L1 evidence without receiving the whole
+  ledger in its initial prompt.
+- [ ] Every evidence read is visible in the run flow and every proposed change
+  cites evidence read during that run.
+- [ ] The right workbench never uses a full Markdown draft as its normal result.
+- [ ] The center document area shows a reviewable diff and source-backed reason
+  for each change.
+- [ ] No persistent document changes occur before explicit user confirmation.
+- [ ] Selected changes apply atomically and can be undone.
 
 ## 7. Phase 5: `read_memory` Tool
 

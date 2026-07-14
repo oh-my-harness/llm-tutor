@@ -1,8 +1,8 @@
 # Memory Consolidation Design
 
-> Status: draft | Date: 2026-06-26 | Scope: summarize the DeepTutor-inspired
-> memory consolidation workflow and define the target prompt/input/output
-> contract for `llm-tutor`.
+> Status: approved target design | Created: 2026-06-26 | Updated: 2026-07-14 |
+> Scope: define the memory consolidation workflow, evidence access boundary,
+> structured change contract, and review experience for `llm-tutor`.
 
 ## 1. Goal
 
@@ -13,10 +13,15 @@ Target flow:
 
 ```text
 Product event / workspace record
-  -> normalized consolidation input
-  -> LLM returns structured JSON operations
-  -> product code validates refs and applies operations
-  -> Markdown memory documents are serialized deterministically
+  -> append-only L1 event plus durable source pointer
+  -> user starts a Memory maintenance run
+  -> agent receives target schema and compact evidence catalog
+  -> agent explores L1 through bounded read-only tools
+  -> agent returns an evidence-bound MemoryChangeSet
+  -> product validates refs, anchors, and base revision
+  -> user reviews and selects changes in the central diff
+  -> product applies accepted operations atomically
+  -> Markdown memory documents are serialized with history and undo
   -> agents read L3 memory through read_memory when useful
 ```
 
@@ -36,6 +41,11 @@ formatting, entry ids, reference validation, deduplication, and file writes.
 - Allow agents to write only explicit user preferences by default.
 - Route profile, scope, recent, and teaching-strategy updates through a
   user-visible memory workbench.
+- Make all L1 evidence addressable to the Memory agent without injecting the
+  complete ledger into every prompt.
+- Keep L1 access read-only and make every evidence read visible in the run flow.
+- Return structured changes, not a complete Markdown draft.
+- Require user review before any agent-produced change is written.
 
 ## 3. Layers
 
@@ -108,10 +118,13 @@ should be updated through the memory workbench.
 
 ## 4. Normalized Consolidation Input
 
-DeepTutor's strongest idea is that all consolidation jobs are fed a normalized
-view instead of arbitrary app-specific payloads.
+DeepTutor's strongest idea is that consolidation consumes normalized evidence
+instead of arbitrary app-specific payloads. In the target design, the complete
+evidence set is not assembled before the run. The initial context contains the
+job, target, base revision, and a compact evidence catalog. L1 tools then return
+bounded evidence using the same normalized shape.
 
-The input should contain:
+Each normalized evidence packet should contain:
 
 - job metadata,
 - existing target memory,
@@ -133,6 +146,7 @@ ConsolidationInput {
   }
   target: {
     title: string
+    baseRevision: string
     existingMarkdown: string
     allowedSections: string[]
     focus: string
@@ -148,7 +162,8 @@ ConsolidationInput {
 }
 ```
 
-The LLM-facing source chunk should be rendered like this:
+An LLM-facing evidence chunk returned after a list/search/read request should
+be rendered like this:
 
 ```md
 # Chunk-local citeable refs
@@ -224,219 +239,119 @@ stored section keys are stable. A display-name map can translate them.
 
 ## 6. Update Prompt Contract
 
-Update mode extracts new memory facts from source chunks.
+Update mode discovers evidence through the L1 tools and proposes small,
+evidence-bound changes. The model does not receive an automatically assembled
+full ledger and does not write a complete document.
 
 ### L2 Update Prompt
 
-System prompt template:
+The prompt establishes the target surface, allowed sections, current document,
+base revision, and tool-use rules. Its output is a `MemoryChangeSet` fragment:
 
-```text
-You are the memory curator for llm-tutor user {user_label}.
-
-ROLE:
-Read a chunk of the user's recent {surface} activity. Extract durable facts
-about the learner. Prefer learning-relevant facts: misconceptions, strengths,
-recurring topics, preferences, and review needs. Drop one-off chatter.
-
-OUTPUT:
-Return exactly one JSON object. No prose. No Markdown fences.
-
+```json
 {
-  "facts": [
+  "findings": [],
+  "changes": [
     {
+      "id": "change_01",
+      "op": "insert",
       "text": "<one concise fact, <= 240 chars>",
       "section": "<one of: {sections}>",
-      "refs": ["<surface>:<entity_id>", "..."]
+      "refs": ["<surface>:<event_id>", "..."],
+      "reason": "<why this is durable and useful>"
     }
   ]
 }
-
-HARD RULES:
-- Every fact must cite at least one ref.
-- Refs must come from the chunk-local citeable refs list or @entity markers.
-- Do not invent ids.
-- Do not cite refs outside this chunk.
-- Do not duplicate facts already captured in existing memory.
-- Use cautious language. Avoid absolute claims unless quoting the user.
-- If nothing durable appears, return {"facts": []}.
-- Today is {today}.
-
-Surface focus:
-{focus}
 ```
 
-User prompt template:
+Rules:
 
-```text
-# Existing {surface} memory
-{existing_memory}
-
-# Source chunk {chunk_index}/{chunk_total}
-{chunk}
-
-Return JSON. Cite only refs visible in the source chunk.
-```
+- Start with the target surface and use list/search before reading detailed
+  evidence.
+- Expand to another surface only when it can materially validate the change.
+- Prefer durable misconceptions, demonstrated mastery, recurring topics, and
+  stable learning needs over one-off chatter.
+- Every insert or replacement must cite event-level evidence read in this run.
+- Do not duplicate facts already represented by a stable memory entry.
+- Use only allowed sections and cautious language.
+- Return no change when the evidence is weak or transient.
 
 ### L3 Update Prompt
 
-L3 update differs from L2 update in one important way: it synthesizes across L2
-surface memories and should hedge every learner-level claim.
+L3 update normally begins with stable L2 entries and follows their provenance
+to L1 when a claim needs verification. L3 changes cite stable L2 entry ids whose
+source chain resolves to L1; direct L1 event refs may also be included when the
+agent reads them. Bare surface names are not sufficient provenance in the
+target design.
 
-System prompt template:
-
-```text
-You are the cross-surface memory curator for llm-tutor user {user_label}.
-
-ROLE:
-Read a chunk of L2 memory from one or more surfaces. Synthesize durable, hedged
-claims about the learner.
-
-OUTPUT:
-Return exactly one JSON object.
-
-{
-  "facts": [
-    {
-      "text": "<one hedged learner claim, <= 240 chars>",
-      "section": "<one of: {sections}>",
-      "refs": ["<surface>", "..."]
-    }
-  ]
-}
-
-HARD RULES:
-- Refs are bare surface names from the chunk-local citeable refs list.
-- Do not emit entry ids in L3 update.
-- Prefer claims like "Across quiz and chat entries..." or
-  "Quiz entries show...".
-- Do not overgeneralize from a single weak signal.
-- Do not duplicate existing memory.
-- If nothing durable appears, return {"facts": []}.
-- Today is {today}.
-
-Slot focus:
-{focus}
-```
+Learner-level claims must remain hedged, avoid generalizing from a single weak
+signal, and preserve the distinction between observed behavior and inferred
+teaching strategy.
 
 ## 7. Audit Prompt Contract
 
-Audit mode checks existing memory against source evidence. It should produce
-line-level edit operations, not rewritten documents.
+Audit mode checks current entries against their source chains. It returns
+findings and optional anchored changes, never a rewritten document:
 
-Input for audit should render the target memory as a numbered view and annotate
-each bullet with its evidence.
-
-Example L2 audit input:
-
-```md
-# Line-numbered view
- 1: # chat memory
- 2:
- 3: ## Misconceptions
- 4: - User confuses lithography model and photoresist model [^1] <!--m_abc-->
-
-# Evidence for line 4
-refs:
-- chat:session_123
-source:
-User asked "what is lithography model, what is photoresist model" after an
-assistant answer that mixed the terms.
-```
-
-System prompt template:
-
-```text
-You are the memory auditor for llm-tutor user {user_label}.
-
-ROLE:
-Read a chunk of {key} memory with each entry annotated by original evidence.
-Find factual errors, unsupported claims, stale claims, and overgeneralizations.
-
-OUTPUT:
-Return exactly one JSON object.
-
+```json
 {
-  "edits": [
+  "findings": [
     {
+      "entryId": "m_abc",
+      "severity": "warning",
+      "kind": "unsupported | stale | contradictory | overgeneralized",
+      "message": "<compact explanation>",
+      "refs": ["chat:event_123"]
+    }
+  ],
+  "changes": [
+    {
+      "id": "change_01",
       "op": "replace",
-      "line": 4,
-      "new_text": "<corrected fact, <= 240 chars>",
-      "refs": ["<allowed ref>", "..."],
-      "reason": "<short reason>"
-    },
-    {
-      "op": "delete",
-      "line_start": 4,
-      "line_end": 4,
-      "reason": "<short reason>"
-    },
-    {
-      "op": "insert",
-      "after_line": 4,
-      "text": "<new fact, <= 240 chars>",
-      "section": "<optional allowed section>",
-      "refs": ["<allowed ref>", "..."],
+      "entryId": "m_abc",
+      "text": "<corrected fact, <= 240 chars>",
+      "refs": ["chat:event_123"],
       "reason": "<short reason>"
     }
   ]
 }
-
-HARD RULES:
-- Edit only visible lines.
-- Do not edit titles, blanks, or section headers.
-- Replace/insert must cite visible evidence.
-- Keep wording cautious and evidence-bound.
-- If nothing needs fixing, return {"edits": []}.
-- Today is {today}.
 ```
 
-For L3 audit, evidence should be the L2 entries that support the L3 claim. L3
-audit may cite L2 entry ids because it is checking an existing L3 claim against
-specific L2 evidence.
+Audit must resolve existing refs before judging a claim. It may search for newer
+contradicting evidence, but any expansion is visible in flow. Changes target
+stable entry ids; line-number edits are accepted only as a compatibility input
+for documents that have not yet received stable markers.
 
 ## 8. Dedup Prompt Contract
 
-Dedup mode should not add facts. It only merges, rewrites, or deletes existing
-memory lines.
+Dedup mode proposes only replacements and deletions against stable entry ids:
 
-System prompt template:
-
-```text
-You are the memory dedup pass for llm-tutor user {user_label}.
-
-ROLE:
-Read the full memory document as a line-numbered view. Merge duplicates,
-collapse near-duplicates, and delete low-signal repeated entries.
-
-OUTPUT:
-Return exactly one JSON object.
-
+```json
 {
-  "edits": [
+  "findings": [],
+  "changes": [
     {
+      "id": "change_01",
       "op": "replace",
-      "line": 4,
-      "new_text": "<merged fact, <= 240 chars>",
+      "entryId": "m_abc",
+      "text": "<merged fact, <= 240 chars>",
       "refs": ["<existing-or-unioned-ref>", "..."],
       "reason": "<short reason>"
     },
     {
+      "id": "change_02",
       "op": "delete",
-      "line_start": 5,
-      "line_end": 5,
-      "reason": "duplicate of line 4"
+      "entryId": "m_def",
+      "refs": [],
+      "reason": "duplicate of m_abc"
     }
   ]
 }
-
-HARD RULES:
-- Use only replace and delete.
-- Do not insert new facts.
-- Preserve or union refs when merging.
-- Delete the lower-quality duplicate.
-- If nothing needs deduping, return {"edits": []}.
-- Today is {today}.
 ```
+
+Dedup must not add unrelated facts. It preserves or unions valid refs when
+merging, keeps the stronger entry, and returns no changes when entries carry
+distinct useful meaning.
 
 ## 9. Markdown Output Contract
 
@@ -513,35 +428,212 @@ Before writing memory:
 
 - Parse LLM output as JSON.
 - Reject non-JSON prose.
-- Reject facts with empty `text`.
+- Validate the `MemoryChangeSet` target path and base revision.
+- Reject unsupported operations or unresolved entry/section anchors.
+- Reject insert/replace changes with empty or overlong `text`.
 - Reject sections not in the allowed section list.
-- Reject refs outside the current ref pool.
-- Reject L2 facts with no refs.
-- Reject L3 update facts whose refs are not bare allowed surface names.
-- Truncate or reject facts above the max length.
-- Apply operations through a single parser/serializer path.
-
-Audit/dedup operations should also validate line numbers and operation type.
-Apply edits in reverse line order so line numbers remain stable.
+- Reject refs that were not returned by an evidence tool in the current run.
+- Reject L2 insert/replace changes with no event-level refs.
+- Require L3 refs to resolve through stable L2 entries or directly read L1
+  events; reject bare surface names as final provenance.
+- Re-resolve source refs before apply to detect stale or removed evidence.
+- Apply only user-accepted operations through one deterministic
+  parser/serializer path.
+- Reject the entire apply when validation or base-revision checks fail; do not
+  leave a partially modified document.
 
 ## 12. Workbench Behavior
 
-The Memory workbench should expose three actions for L2 and L3:
+The Memory workbench exposes three actions for L2 and L3:
 
-- Update memory: read new inputs and append validated facts.
-- Check memory: audit current facts against their sources.
-- Remove duplicates: merge duplicate or near-duplicate entries.
+- Update memory: discover evidence and propose evidence-bound additions or
+  corrections.
+- Check memory: audit current facts against their sources and return findings
+  with optional changes.
+- Remove duplicates: propose merges, replacements, or deletions without adding
+  unrelated facts.
 
-Recommended UX:
+### 12.1 Workbench Output
 
-- Show model progress by chunk.
-- Show LLM input/output in an expandable trace.
-- Show proposed facts or edits before applying when practical.
-- Allow undo of the latest run when a run writes files.
-- Keep L1 hidden from the primary memory overview, but allow source refs to
-  resolve back to source records.
+The compact workbench on the right is a run controller and flow monitor. It
+must not render a complete proposed document or use a long model report as the
+primary result.
+
+The normal run view shows:
+
+- selected action and model,
+- current flow step and overall status,
+- evidence categories searched,
+- evidence items read,
+- candidate findings and change counts,
+- validation status,
+- errors, cancellation, and retry state,
+- runtime cost or token usage when available,
+- a final compact summary such as `4 changes ready for review`.
+
+The flow state vocabulary is:
+
+```text
+queued
+  -> discovering_sources
+  -> reading_evidence
+  -> analyzing_memory
+  -> proposing_changes
+  -> validating_changes
+  -> awaiting_review
+  -> applying
+  -> completed | failed | cancelled
+```
+
+Chunk progress and tool reads should map into these product-level states. Raw
+prompt/input/output diagnostics may remain available in an explicit developer
+trace, but are not part of the normal workbench result.
+
+### 12.2 Structured Change Set
+
+The Memory agent must not return `proposed_markdown`. It returns a structured
+change set against an explicit document revision:
+
+```ts
+MemoryChangeSet {
+  runId: string
+  targetPath: string
+  baseRevision: string
+  summary: string
+  findings: MemoryFinding[]
+  changes: MemoryChange[]
+}
+
+MemoryFinding {
+  id: string
+  entryId?: string
+  severity: 'info' | 'warning' | 'error'
+  kind: string
+  message: string
+  refs: string[]
+}
+
+MemoryChange {
+  id: string
+  op: 'insert' | 'replace' | 'delete'
+  section?: string
+  entryId?: string
+  afterEntryId?: string
+  text?: string
+  refs: string[]
+  reason: string
+}
+```
+
+Stable entry ids and section anchors are preferred over raw line numbers. The
+product validates target revision, operation type, anchors, allowed sections,
+text limits, and source refs, then deterministically renders the proposed
+result and diff.
+
+Operation requirements are explicit: insert requires `section` and `text`;
+replace requires `entryId` and `text`; delete requires `entryId` and omits
+`text`. `reason` is always required. Evidence refs are required unless product
+validation can prove the operation is a purely structural removal of an empty
+or malformed entry.
+
+### 12.3 Central Diff Review
+
+The center document area remains the primary surface and provides three modes:
+
+- Read: rendered Markdown.
+- Edit: direct user editing.
+- Review: an inline diff for the pending change set, with an optional split
+  view when space permits.
+
+Review mode must:
+
+- distinguish inserted, removed, and replaced content,
+- group each operation as an independently reviewable change,
+- show the agent reason and source chips beside each change,
+- resolve a source chip back to its L1 event and original product artifact,
+- allow accept/reject per change and accept/reject all,
+- preview the deterministic document resulting from accepted changes,
+- detect a stale `baseRevision` before apply,
+- apply accepted changes atomically,
+- create history and support undo after apply.
+
+No persistent memory document changes before explicit user confirmation.
+
+### 12.4 Layout Responsibility
+
+- The left rail selects L2/L3 memory files and stays compact.
+- The center area owns reading, editing, findings, and diff review.
+- The right workbench owns controls and run progress only.
+- L1 remains out of the primary file rail; it is reached through evidence
+  exploration and source navigation.
+
+### 12.5 Existing Behavior to Replace
+
+The current full-draft preview and report-oriented result are transitional.
+They should be replaced by flow progress plus central structured diff review.
+Existing chunk execution may remain internally while the user-facing contract
+moves to `MemoryChangeSet`.
 
 ## 13. Agent Tool Boundaries
+
+### 13.1 Memory Workbench Evidence Tools
+
+The Memory workbench agent has read-only, on-demand access to all L1 evidence.
+This means all evidence is addressable; it does not mean all evidence is
+inserted into the initial prompt.
+
+Required tool capabilities:
+
+```ts
+list_memory_events({
+  surface?: 'chat' | 'quiz' | 'notebook' | 'knowledge' | 'research'
+  from?: string
+  to?: string
+  cursor?: string
+  limit?: number
+})
+
+search_memory_events({
+  query: string
+  surface?: string
+  sessionId?: string
+  from?: string
+  to?: string
+  cursor?: string
+  limit?: number
+})
+
+read_memory_event({ eventId: string })
+
+read_memory_context({
+  eventId: string
+  before?: number
+  after?: number
+})
+
+read_memory_source({ reference: string })
+```
+
+The initial workflow context contains the target document, schema, base
+revision, task rules, and a compact L1 catalog. The agent starts with the target
+surface by default and may explicitly expand to other surfaces when useful.
+Cross-surface expansion must appear in the run flow.
+
+Evidence tools must:
+
+- paginate and enforce bounded result sizes,
+- return stable event-level ids rather than session-only ids,
+- preserve source surface, timestamp, session/turn identity, and artifact refs,
+- provide complete source resolution through a snapshot or durable pointer,
+- emit trace/progress events for every list, search, and read,
+- remain read-only and expose no arbitrary filesystem access,
+- support cancellation and workflow budgets.
+
+Every proposed fact or edit must cite evidence actually read during that run.
+The product rejects unknown, unread, or stale refs. L1 itself remains append-only
+from the Memory workflow's perspective.
+
+### 13.2 Product Agent Memory Tools
 
 `read_memory`:
 
@@ -564,16 +656,25 @@ presented as factual proof about external domains.
 ## 14. Implementation Notes for `llm-tutor`
 
 Current `llm-tutor` already has Markdown memory files, L1 event recording, a
-Memory UI, and `read_memory`. The next quality improvements should be:
+Memory UI, and `read_memory`. Its Memory workflow still receives product-built
+evidence chunks and returns draft-oriented results. The next implementation
+slice should:
 
-- Replace ad hoc memory assist prompts with the unified input envelope above.
-- Move toward JSON-only update/audit/dedup operations.
-- Add strict ref-pool validation before writes.
-- Add line-numbered audit/dedup views.
+- Add runtime-native, read-only L1 discovery and source-reading tools.
+- Upgrade L1 refs from session-level identity to stable event/turn identity.
+- Preserve durable pointers to complete source artifacts instead of relying on
+  truncated event summaries alone.
+- Replace draft/report output with `MemoryChangeSet`.
+- Add strict read-set and ref validation before review or writes.
+- Add product-level flow events for evidence discovery, analysis, validation,
+  review, and apply.
+- Move review into the center document area and add per-change diff decisions.
+- Add base-revision conflict detection and atomic selected-change apply.
 - Add serializer-level footnote normalization.
 - Keep L3 updates hedged and source-attributed.
-- Add tests for malformed JSON, invalid refs, duplicate refs, unknown sections,
-  and idempotent parse/serialize.
+- Add tests for pagination, unread/invalid refs, duplicate event refs, stale
+  revisions, partial acceptance, atomic apply, undo, malformed changes, unknown
+  sections, and idempotent parse/serialize.
 
 ## 15. Why This Shape Is Better
 
