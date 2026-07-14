@@ -9,6 +9,7 @@ use tower_http::cors::{Any, CorsLayer};
 mod book_store;
 mod knowledge_store;
 mod memory_store;
+mod memory_tool;
 mod notebook_store;
 mod quiz_store;
 mod quiz_tool;

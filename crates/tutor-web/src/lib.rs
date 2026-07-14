@@ -1,6 +1,7 @@
 pub mod book_store;
 pub mod knowledge_store;
 pub mod memory_store;
+pub mod memory_tool;
 pub mod notebook_store;
 pub mod quiz_store;
 pub mod quiz_tool;

@@ -169,7 +169,13 @@ pub fn memory_workflow() -> Workflow {
                 "Run memory workflow",
                 "Read the workflow Context. The `memory_prompt` variable contains the full memory maintenance instruction, including target file, action, current Markdown, normalized evidence, and output schema. \
                  Maintain learner memory according to that instruction. When done, call submit_step_result with the JSON object requested by `memory_prompt`.",
-                vec![],
+                vec![
+                    "list_memory_events".into(),
+                    "search_memory_events".into(),
+                    "read_memory_event".into(),
+                    "read_memory_context".into(),
+                    "read_memory_source".into(),
+                ],
             ),
         ],
         edges: vec![Edge {

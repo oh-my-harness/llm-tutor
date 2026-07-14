@@ -1,6 +1,6 @@
 # Memory Consolidation Design
 
-> Status: approved target design | Created: 2026-06-26 | Updated: 2026-07-14 |
+> Status: core workflow implemented; artifact resolution and budgets remain | Created: 2026-06-26 | Updated: 2026-07-14 |
 > Scope: define the memory consolidation workflow, evidence access boundary,
 > structured change contract, and review experience for `llm-tutor`.
 
@@ -655,26 +655,20 @@ presented as factual proof about external domains.
 
 ## 14. Implementation Notes for `llm-tutor`
 
-Current `llm-tutor` already has Markdown memory files, L1 event recording, a
-Memory UI, and `read_memory`. Its Memory workflow still receives product-built
-evidence chunks and returns draft-oriented results. The next implementation
-slice should:
+Current `llm-tutor` has Markdown memory files, event-level L1 references,
+bounded runtime evidence tools, a structured `MemoryChangeSet`, central diff
+review, atomic selected-change apply, history, and undo. The remaining
+hardening work should:
 
-- Add runtime-native, read-only L1 discovery and source-reading tools.
-- Upgrade L1 refs from session-level identity to stable event/turn identity.
 - Preserve durable pointers to complete source artifacts instead of relying on
   truncated event summaries alone.
-- Replace draft/report output with `MemoryChangeSet`.
-- Add strict read-set and ref validation before review or writes.
-- Add product-level flow events for evidence discovery, analysis, validation,
-  review, and apply.
-- Move review into the center document area and add per-change diff decisions.
-- Add base-revision conflict detection and atomic selected-change apply.
-- Add serializer-level footnote normalization.
+- Add explicit runtime budgets to Memory runs.
+- Add retry/rebase controls for failed or stale runs.
+- Persist run envelopes so an in-progress Memory run can rejoin after a full
+  application restart.
 - Keep L3 updates hedged and source-attributed.
-- Add tests for pagination, unread/invalid refs, duplicate event refs, stale
-  revisions, partial acceptance, atomic apply, undo, malformed changes, unknown
-  sections, and idempotent parse/serialize.
+- Extend end-to-end tests to cover original-artifact resolution, cancellation,
+  restart rejoin, and cross-surface expansion in a live model run.
 
 ## 15. Why This Shape Is Better
 

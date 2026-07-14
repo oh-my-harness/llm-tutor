@@ -566,7 +566,7 @@ async fn run_tutor_message(
                     serde_json::json!({
                         "session_id": entry.id,
                         "capability": entry.capability,
-                    "user": content.chars().take(500).collect::<String>(),
+                    "user": content,
                     "space_mentions": mentions.iter().map(|mention| serde_json::json!({
                         "id": mention.id,
                         "type": mention.mention_type,
@@ -574,7 +574,7 @@ async fn run_tutor_message(
                         "question_id": mention.question_id,
                         "title": mention.title,
                     })).collect::<Vec<_>>(),
-                        "assistant": answer.chars().take(1000).collect::<String>(),
+                        "assistant": answer,
                     }),
                 );
             }

@@ -1,21 +1,26 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
 };
 use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::ExecutionEnv;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
 
 use crate::memory_store::{
-    MemoryAssistAction, MemoryAssistTrace, MemoryAssistTraceChunk, MemoryFact, MemoryStore,
-    MemoryTextEdit, MemoryTextEditOp,
+    MemoryAssistAction, MemoryChange, MemoryChangeOp, MemoryChangeSet, MemoryFile, MemoryFinding,
+    MemoryStore, parse_memory_entries,
+};
+use crate::memory_tool::{
+    ListMemoryEventsTool, MemoryEvidenceActivity, MemoryEvidenceTracker, ReadMemoryContextTool,
+    ReadMemoryEventTool, ReadMemorySourceTool, SearchMemoryEventsTool,
 };
 
 #[derive(Deserialize)]
@@ -57,7 +62,7 @@ struct AssistMemoryRequest {
     llm: Option<MemoryLlmConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct MemoryLlmConfig {
     provider: String,
     model: String,
@@ -67,10 +72,434 @@ struct MemoryLlmConfig {
     context_window_tokens: Option<u32>,
 }
 
+#[derive(Deserialize)]
+struct StartMemoryRunRequest {
+    target_path: String,
+    action: MemoryAssistAction,
+    llm: MemoryLlmConfig,
+}
+
+#[derive(Deserialize)]
+struct ApplyMemoryRunRequest {
+    accepted_change_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct MemoryRunFlowItem {
+    stage: String,
+    status: String,
+    summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemoryRunSnapshot {
+    run_id: String,
+    target_path: String,
+    action: MemoryAssistAction,
+    status: String,
+    current_stage: String,
+    flow: Vec<MemoryRunFlowItem>,
+    change_set: Option<MemoryChangeSet>,
+    error: Option<String>,
+}
+
 #[derive(Clone)]
 pub(crate) struct MemoryState {
     store: Arc<MemoryStore>,
     workflow_root: PathBuf,
+    runs: Arc<tokio::sync::RwLock<HashMap<String, MemoryRunSnapshot>>>,
+    tasks: Arc<tokio::sync::RwLock<HashMap<String, tokio::task::AbortHandle>>>,
+}
+
+async fn start_memory_run(
+    State(state): State<MemoryState>,
+    Json(req): Json<StartMemoryRunRequest>,
+) -> impl IntoResponse {
+    let llm = match build_llm_config(req.llm) {
+        Ok(llm) => llm,
+        Err(err) => return error_response(StatusCode::BAD_REQUEST, err),
+    };
+    let file = match state.store.read(&req.target_path) {
+        Ok(file) => file,
+        Err(err) => return error_response(StatusCode::BAD_REQUEST, err.to_string()),
+    };
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let snapshot = MemoryRunSnapshot {
+        run_id: run_id.clone(),
+        target_path: file.path.clone(),
+        action: req.action,
+        status: "running".into(),
+        current_stage: "queued".into(),
+        flow: vec![MemoryRunFlowItem {
+            stage: "queued".into(),
+            status: "done".into(),
+            summary: "Memory run queued".into(),
+        }],
+        change_set: None,
+        error: None,
+    };
+    state
+        .runs
+        .write()
+        .await
+        .insert(run_id.clone(), snapshot.clone());
+
+    let task_state = state.clone();
+    let task_run_id = run_id.clone();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _ = start_rx.await;
+        update_run_stage(
+            &task_state.runs,
+            &task_run_id,
+            "discovering_sources",
+            "running",
+            "Preparing the L1 evidence catalog",
+        )
+        .await;
+        let (activity_tx, mut activity_rx) = tokio::sync::mpsc::unbounded_channel();
+        let tracker = MemoryEvidenceTracker::with_activity_sender(activity_tx);
+        let activity_runs = task_state.runs.clone();
+        let activity_run_id = task_run_id.clone();
+        let activity_task = tokio::spawn(async move {
+            while let Some(activity) = activity_rx.recv().await {
+                record_evidence_activity(&activity_runs, &activity_run_id, activity).await;
+            }
+        });
+
+        let result = run_memory_change_set(
+            task_state.store.clone(),
+            &task_state.workflow_root,
+            file,
+            req.action,
+            &llm,
+            tracker,
+            task_run_id.clone(),
+        )
+        .await;
+        let _ = activity_task.await;
+        match result {
+            Ok(change_set) => {
+                update_run_stage(
+                    &task_state.runs,
+                    &task_run_id,
+                    "analyzing_memory",
+                    "done",
+                    "Compared the evidence with the current memory document",
+                )
+                .await;
+                update_run_stage(
+                    &task_state.runs,
+                    &task_run_id,
+                    "proposing_changes",
+                    "done",
+                    "Built a structured memory change set",
+                )
+                .await;
+                let summary = if change_set.changes.is_empty() {
+                    "No reviewable changes were proposed".to_string()
+                } else {
+                    format!("{} changes ready for review", change_set.changes.len())
+                };
+                let mut runs = task_state.runs.write().await;
+                if let Some(run) = runs.get_mut(&task_run_id) {
+                    run.current_stage = "awaiting_review".into();
+                    run.status = "awaiting_review".into();
+                    run.flow.push(MemoryRunFlowItem {
+                        stage: "validating_changes".into(),
+                        status: "done".into(),
+                        summary: "Change anchors and evidence references validated".into(),
+                    });
+                    run.flow.push(MemoryRunFlowItem {
+                        stage: "awaiting_review".into(),
+                        status: "waiting".into(),
+                        summary,
+                    });
+                    run.change_set = Some(change_set);
+                }
+            }
+            Err(err) => {
+                let mut runs = task_state.runs.write().await;
+                if let Some(run) = runs.get_mut(&task_run_id) {
+                    run.current_stage = "failed".into();
+                    run.status = "failed".into();
+                    run.error = Some(err.clone());
+                    run.flow.push(MemoryRunFlowItem {
+                        stage: "failed".into(),
+                        status: "error".into(),
+                        summary: err,
+                    });
+                }
+            }
+        }
+        task_state.tasks.write().await.remove(&task_run_id);
+    });
+    state
+        .tasks
+        .write()
+        .await
+        .insert(run_id.clone(), task.abort_handle());
+    let _ = start_tx.send(());
+
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "run": snapshot })),
+    )
+        .into_response()
+}
+
+async fn get_memory_run(
+    State(state): State<MemoryState>,
+    AxumPath(run_id): AxumPath<String>,
+) -> impl IntoResponse {
+    match state.runs.read().await.get(&run_id).cloned() {
+        Some(run) => (StatusCode::OK, Json(serde_json::json!({ "run": run }))).into_response(),
+        None => error_response(StatusCode::NOT_FOUND, "memory run was not found".into()),
+    }
+}
+
+async fn cancel_memory_run(
+    State(state): State<MemoryState>,
+    AxumPath(run_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let Some(task) = state.tasks.write().await.remove(&run_id) else {
+        return match state.runs.read().await.get(&run_id) {
+            Some(_) => error_response(StatusCode::CONFLICT, "memory run is not active".into()),
+            None => error_response(StatusCode::NOT_FOUND, "memory run was not found".into()),
+        };
+    };
+    task.abort();
+    let mut runs = state.runs.write().await;
+    let Some(run) = runs.get_mut(&run_id) else {
+        return error_response(StatusCode::NOT_FOUND, "memory run was not found".into());
+    };
+    run.current_stage = "cancelled".into();
+    run.status = "cancelled".into();
+    run.flow.push(MemoryRunFlowItem {
+        stage: "cancelled".into(),
+        status: "done".into(),
+        summary: "Memory run cancelled by the user".into(),
+    });
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "run": run.clone() })),
+    )
+        .into_response()
+}
+
+async fn apply_memory_run(
+    State(state): State<MemoryState>,
+    AxumPath(run_id): AxumPath<String>,
+    Json(req): Json<ApplyMemoryRunRequest>,
+) -> impl IntoResponse {
+    let change_set = {
+        let runs = state.runs.read().await;
+        let Some(run) = runs.get(&run_id) else {
+            return error_response(StatusCode::NOT_FOUND, "memory run was not found".into());
+        };
+        let Some(change_set) = run.change_set.clone() else {
+            return error_response(
+                StatusCode::CONFLICT,
+                "memory run is not ready for review".into(),
+            );
+        };
+        change_set
+    };
+    update_run_stage(
+        &state.runs,
+        &run_id,
+        "applying",
+        "running",
+        "Applying accepted changes",
+    )
+    .await;
+    match state.store.apply_memory_changes(
+        &change_set.target_path,
+        &change_set.base_revision,
+        &change_set.changes,
+        &req.accepted_change_ids,
+    ) {
+        Ok(file) => {
+            update_run_stage(
+                &state.runs,
+                &run_id,
+                "completed",
+                "done",
+                "Accepted changes applied",
+            )
+            .await;
+            if let Some(run) = state.runs.write().await.get_mut(&run_id) {
+                run.status = "completed".into();
+            }
+            (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response()
+        }
+        Err(err) => {
+            if let Some(run) = state.runs.write().await.get_mut(&run_id) {
+                run.current_stage = "awaiting_review".into();
+                run.status = "awaiting_review".into();
+                run.error = Some(err.to_string());
+            }
+            error_response(StatusCode::CONFLICT, err.to_string())
+        }
+    }
+}
+
+async fn update_run_stage(
+    runs: &tokio::sync::RwLock<HashMap<String, MemoryRunSnapshot>>,
+    run_id: &str,
+    stage: &str,
+    status: &str,
+    summary: &str,
+) {
+    let mut runs = runs.write().await;
+    if let Some(run) = runs.get_mut(run_id) {
+        run.current_stage = stage.into();
+        run.flow.push(MemoryRunFlowItem {
+            stage: stage.into(),
+            status: status.into(),
+            summary: summary.into(),
+        });
+    }
+}
+
+async fn record_evidence_activity(
+    runs: &tokio::sync::RwLock<HashMap<String, MemoryRunSnapshot>>,
+    run_id: &str,
+    activity: MemoryEvidenceActivity,
+) {
+    update_run_stage(runs, run_id, &activity.stage, "done", &activity.summary).await;
+}
+
+async fn run_memory_change_set(
+    store: Arc<MemoryStore>,
+    workflow_root: &PathBuf,
+    file: MemoryFile,
+    action: MemoryAssistAction,
+    llm: &LlmConfig,
+    tracker: MemoryEvidenceTracker,
+    run_id: String,
+) -> Result<MemoryChangeSet, String> {
+    let context = store
+        .agent_context(&file.path, &file.markdown)
+        .map_err(|err| err.to_string())?;
+    let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
+        target_path: file.path.clone(),
+        action: workflow_action(action),
+        current_markdown: file.markdown.clone(),
+        consolidation_input_json: serde_json::to_string_pretty(&context)
+            .map_err(|err| err.to_string())?,
+    };
+    let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
+        Arc::new(ListMemoryEventsTool::new(store.clone(), tracker.clone())),
+        Arc::new(SearchMemoryEventsTool::new(store.clone(), tracker.clone())),
+        Arc::new(ReadMemoryEventTool::new(store.clone(), tracker.clone())),
+        Arc::new(ReadMemoryContextTool::new(store.clone(), tracker.clone())),
+        Arc::new(ReadMemorySourceTool::new(store, tracker.clone())),
+    ];
+    let run = run_memory_runtime_workflow_with_tools(llm, workflow_root, &workflow_input, tools)
+        .await
+        .map_err(|err| err.to_string())?;
+    workflow_output_to_change_set(run_id, &file, run.output, &tracker.read_refs())
+}
+
+fn workflow_output_to_change_set(
+    run_id: String,
+    file: &MemoryFile,
+    output: tutor_agent::memory::MemoryWorkflowOutput,
+    read_refs: &[String],
+) -> Result<MemoryChangeSet, String> {
+    let allowed_refs = read_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let entries = parse_memory_entries(&file.markdown);
+    let mut changes = Vec::new();
+    for change in output.changes {
+        validate_run_refs(&change.refs, &allowed_refs, true)?;
+        let op = match change.op {
+            tutor_agent::memory::MemoryWorkflowChangeOp::Insert => MemoryChangeOp::Insert,
+            tutor_agent::memory::MemoryWorkflowChangeOp::Replace => MemoryChangeOp::Replace,
+            tutor_agent::memory::MemoryWorkflowChangeOp::Delete => MemoryChangeOp::Delete,
+        };
+        let before_text = change.entry_id.as_deref().and_then(|entry_id| {
+            entries
+                .iter()
+                .find(|entry| entry.marker == entry_id)
+                .map(|entry| entry.text.clone())
+        });
+        if op != MemoryChangeOp::Insert && before_text.is_none() {
+            return Err(format!(
+                "memory change targets unknown entry `{}`",
+                change.entry_id.as_deref().unwrap_or_default()
+            ));
+        }
+        changes.push(MemoryChange {
+            id: change.id,
+            op,
+            section: change.section,
+            entry_id: change.entry_id,
+            after_entry_id: change.after_entry_id,
+            text: change.text.map(|value| normalize_change_text(&value)),
+            refs: change.refs,
+            reason: change.reason,
+            before_text,
+        });
+    }
+    let mut findings = Vec::new();
+    for finding in output.findings {
+        validate_run_refs(&finding.refs, &allowed_refs, false)?;
+        findings.push(MemoryFinding {
+            id: finding.id,
+            entry_id: finding.entry_id,
+            severity: finding.severity,
+            kind: finding.kind,
+            message: finding.message,
+            refs: finding.refs,
+        });
+    }
+    Ok(MemoryChangeSet {
+        run_id,
+        target_path: file.path.clone(),
+        base_revision: file.revision.clone(),
+        summary: output.summary,
+        findings,
+        changes,
+    })
+}
+
+fn validate_run_refs(
+    refs: &[String],
+    allowed_refs: &std::collections::BTreeSet<&str>,
+    required: bool,
+) -> Result<(), String> {
+    if required && refs.is_empty() {
+        return Err("memory change did not cite read evidence".into());
+    }
+    for reference in refs {
+        if !allowed_refs.contains(reference.as_str()) {
+            return Err(format!("memory change cites unread evidence `{reference}`"));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_change_text(text: &str) -> String {
+    text.trim()
+        .strip_prefix("- ")
+        .unwrap_or(text.trim())
+        .split("<!--")
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn workflow_action(action: MemoryAssistAction) -> tutor_agent::memory::MemoryWorkflowAction {
+    match action {
+        MemoryAssistAction::Update => tutor_agent::memory::MemoryWorkflowAction::Update,
+        MemoryAssistAction::Check => tutor_agent::memory::MemoryWorkflowAction::Check,
+        MemoryAssistAction::Dedupe => tutor_agent::memory::MemoryWorkflowAction::Dedupe,
+    }
 }
 
 async fn list_files(State(state): State<MemoryState>) -> impl IntoResponse {
@@ -212,204 +641,31 @@ async fn assist_memory_with_llm(
     llm: MemoryLlmConfig,
 ) -> Result<crate::memory_store::MemoryAssistResult, String> {
     let llm = build_llm_config(llm)?;
-    let current = match markdown {
-        Some(value) => value,
-        None => {
-            store
-                .read(&target_path)
-                .map_err(|err| err.to_string())?
-                .markdown
-        }
-    };
-    if action == MemoryAssistAction::Update {
-        return assist_memory_update_with_llm(store, workflow_root, target_path, current, &llm)
-            .await;
+    let mut file = store.read(&target_path).map_err(|err| err.to_string())?;
+    if let Some(markdown) = markdown {
+        file.markdown = markdown;
+        file.revision = crate::memory_store::memory_revision(&file.markdown);
     }
-    let input = store
-        .consolidation_input(&target_path, action, Some(current.clone()))
-        .map_err(|err| err.to_string())?;
-    let consolidation_input_json =
-        serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?;
-    let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
-        target_path: target_path.clone(),
-        action: match action {
-            MemoryAssistAction::Update => tutor_agent::memory::MemoryWorkflowAction::Update,
-            MemoryAssistAction::Check => tutor_agent::memory::MemoryWorkflowAction::Check,
-            MemoryAssistAction::Dedupe => tutor_agent::memory::MemoryWorkflowAction::Dedupe,
-        },
-        current_markdown: current,
-        consolidation_input_json,
-    };
-    let run = run_memory_runtime_workflow(&llm, workflow_root, &workflow_input)
-        .await
-        .map_err(|err| err.to_string())?;
-    let output_json = serde_json::to_string_pretty(&serde_json::json!({
-        "output": &run.output,
-        "runtime_cost": &run.cost,
-    }))
-    .map_err(|err| err.to_string())?;
-    let output = run.output;
-    let edits = workflow_edits_to_memory_edits(&output.edits);
-    store
-        .validate_text_edits_for_action(
-            action,
-            &input.target.existing_markdown,
-            &edits,
-            &input.chunk.citeable_refs,
-        )
-        .map_err(|err| err.to_string())?;
-    let proposed_markdown = if action == MemoryAssistAction::Dedupe && output.changed {
-        Some(
-            store
-                .apply_text_edits(&input.target.existing_markdown, &edits)
-                .map_err(|err| err.to_string())?,
-        )
-    } else {
-        output.proposed_markdown.clone()
-    };
+    let change_set = run_memory_change_set(
+        Arc::new(store.clone()),
+        workflow_root,
+        file,
+        action,
+        &llm,
+        MemoryEvidenceTracker::default(),
+        uuid::Uuid::new_v4().to_string(),
+    )
+    .await?;
     Ok(crate::memory_store::MemoryAssistResult {
         target_path,
         action,
-        report_markdown: output.report_markdown,
-        proposed_markdown,
+        report_markdown: change_set.summary,
+        proposed_markdown: None,
         facts: Vec::new(),
-        edits,
-        trace: Some(MemoryAssistTrace {
-            input_json: serde_json::to_string_pretty(&input).map_err(|err| err.to_string())?,
-            output_json,
-            chunks: vec![MemoryAssistTraceChunk {
-                index: input.chunk.index,
-                total: input.chunk.total,
-                citeable_refs: input.chunk.citeable_refs.clone(),
-                status: "done".into(),
-            }],
-        }),
-        changed: output.changed,
-    })
-}
-
-async fn assist_memory_update_with_llm(
-    store: &MemoryStore,
-    workflow_root: &PathBuf,
-    target_path: String,
-    current: String,
-    llm: &LlmConfig,
-) -> Result<crate::memory_store::MemoryAssistResult, String> {
-    let inputs = store
-        .consolidation_inputs(
-            &target_path,
-            MemoryAssistAction::Update,
-            Some(current.clone()),
-        )
-        .map_err(|err| err.to_string())?;
-    let mut outputs = Vec::new();
-    let mut runtime_costs = Vec::new();
-    let mut facts = Vec::new();
-    let mut citeable_refs = Vec::<String>::new();
-    let mut trace_chunks = Vec::new();
-
-    for input in &inputs {
-        for reference in &input.chunk.citeable_refs {
-            if !citeable_refs.iter().any(|item| item == reference) {
-                citeable_refs.push(reference.clone());
-            }
-        }
-        let consolidation_input_json =
-            serde_json::to_string_pretty(input).map_err(|err| err.to_string())?;
-        let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
-            target_path: target_path.clone(),
-            action: tutor_agent::memory::MemoryWorkflowAction::Update,
-            current_markdown: current.clone(),
-            consolidation_input_json,
-        };
-        let run = run_memory_runtime_workflow(llm, workflow_root, &workflow_input)
-            .await
-            .map_err(|err| err.to_string())?;
-        runtime_costs.push(run.cost);
-        let output = run.output;
-        for fact in &output.facts {
-            facts.push(MemoryFact {
-                text: fact.text.clone(),
-                section: fact.section.clone(),
-                refs: fact.refs.clone(),
-            });
-        }
-        trace_chunks.push(MemoryAssistTraceChunk {
-            index: input.chunk.index,
-            total: input.chunk.total,
-            citeable_refs: input.chunk.citeable_refs.clone(),
-            status: "done".into(),
-        });
-        outputs.push(output);
-    }
-
-    let first_input = inputs
-        .first()
-        .ok_or_else(|| "memory workflow did not build any input chunks".to_string())?;
-    let changed = outputs.iter().any(|output| output.changed) && !facts.is_empty();
-    let proposed_markdown = if changed {
-        Some(
-            store
-                .append_memory_facts(
-                    &target_path,
-                    &first_input.target.existing_markdown,
-                    &facts,
-                    &citeable_refs,
-                    &first_input.target.allowed_sections,
-                )
-                .map_err(|err| err.to_string())?,
-        )
-    } else {
-        None
-    };
-    let report_markdown = outputs
-        .iter()
-        .map(|output| output.report_markdown.trim())
-        .filter(|report| !report.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
-    Ok(crate::memory_store::MemoryAssistResult {
-        target_path,
-        action: MemoryAssistAction::Update,
-        report_markdown: if report_markdown.is_empty() {
-            "No update facts were returned.".into()
-        } else {
-            report_markdown
-        },
-        proposed_markdown,
-        facts,
         edits: Vec::new(),
-        trace: Some(MemoryAssistTrace {
-            input_json: serde_json::to_string_pretty(&inputs).map_err(|err| err.to_string())?,
-            output_json: serde_json::to_string_pretty(&serde_json::json!({
-                "outputs": outputs,
-                "runtime_costs": runtime_costs,
-            }))
-            .map_err(|err| err.to_string())?,
-            chunks: trace_chunks,
-        }),
-        changed,
+        trace: None,
+        changed: !change_set.changes.is_empty(),
     })
-}
-
-fn workflow_edits_to_memory_edits(
-    edits: &[tutor_agent::memory::MemoryWorkflowEdit],
-) -> Vec<MemoryTextEdit> {
-    edits
-        .iter()
-        .map(|edit| MemoryTextEdit {
-            op: match edit.op {
-                tutor_agent::memory::MemoryWorkflowEditOp::Replace => MemoryTextEditOp::Replace,
-                tutor_agent::memory::MemoryWorkflowEditOp::Delete => MemoryTextEditOp::Delete,
-                tutor_agent::memory::MemoryWorkflowEditOp::Insert => MemoryTextEditOp::Insert,
-            },
-            start_line: edit.start_line,
-            end_line: edit.end_line,
-            text: edit.text.clone(),
-            refs: edit.refs.clone(),
-            reason: edit.reason.clone(),
-        })
-        .collect()
 }
 
 fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {
@@ -444,10 +700,11 @@ fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {
     ))
 }
 
-async fn run_memory_runtime_workflow(
+async fn run_memory_runtime_workflow_with_tools(
     llm: &LlmConfig,
     workflow_root: &PathBuf,
     input: &tutor_agent::memory::MemoryWorkflowInput,
+    tools: Vec<Arc<dyn llm_harness_types::Tool>>,
 ) -> tutor_agent::Result<tutor_agent::memory::MemoryWorkflowRun> {
     let cwd = std::env::current_dir()
         .map_err(|err| tutor_agent::TutorError::Internal(err.to_string()))?;
@@ -459,13 +716,15 @@ async fn run_memory_runtime_workflow(
         env,
         workflow_root.join("memory"),
     );
-    tutor_agent::memory::run_memory_workflow_with_runtime(input, engine_config).await
+    tutor_agent::memory::run_memory_workflow_with_tools(input, engine_config, tools).await
 }
 
 pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>) -> Router {
     let state = MemoryState {
         store,
         workflow_root: workflow_root.into(),
+        runs: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        tasks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     };
     Router::new()
         .route("/api/memory/files", get(list_files))
@@ -482,6 +741,15 @@ pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>)
         )
         .route("/api/memory/undo", axum::routing::post(undo_memory))
         .route("/api/memory/assist", axum::routing::post(assist_memory))
+        .route("/api/memory/runs", axum::routing::post(start_memory_run))
+        .route(
+            "/api/memory/runs/{run_id}",
+            get(get_memory_run).delete(cancel_memory_run),
+        )
+        .route(
+            "/api/memory/runs/{run_id}/apply",
+            axum::routing::post(apply_memory_run),
+        )
         .with_state(state)
 }
 
@@ -495,6 +763,47 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn cancellation_aborts_and_records_the_memory_run_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_id = "run-to-cancel".to_string();
+        let state = MemoryState {
+            store: Arc::new(MemoryStore::new_with_root(dir.path().join("memory"))),
+            workflow_root: dir.path().join("workflow-sessions"),
+            runs: Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+                run_id.clone(),
+                MemoryRunSnapshot {
+                    run_id: run_id.clone(),
+                    target_path: "L2/chat.md".into(),
+                    action: MemoryAssistAction::Update,
+                    status: "running".into(),
+                    current_stage: "discovering_sources".into(),
+                    flow: vec![],
+                    change_set: None,
+                    error: None,
+                },
+            )]))),
+            tasks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        };
+        let task = tokio::spawn(std::future::pending::<()>());
+        state
+            .tasks
+            .write()
+            .await
+            .insert(run_id.clone(), task.abort_handle());
+
+        let response = cancel_memory_run(State(state.clone()), AxumPath(run_id.clone()))
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let run = state.runs.read().await.get(&run_id).cloned().unwrap();
+        assert_eq!(run.status, "cancelled");
+        assert_eq!(run.current_stage, "cancelled");
+        assert_eq!(run.flow.last().unwrap().stage, "cancelled");
+        assert!(state.tasks.read().await.is_empty());
+    }
 
     #[tokio::test]
     async fn lists_and_updates_memory_file() {

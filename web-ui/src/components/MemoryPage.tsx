@@ -6,9 +6,12 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Circle,
   FileText,
+  GitCompareArrows,
   GitBranch,
   Layers3,
+  LoaderCircle,
   RefreshCw,
   RotateCcw,
   Save,
@@ -16,33 +19,20 @@ import {
   Sparkles,
   Split,
   Wand2,
+  X,
 } from 'lucide-react'
 import { MarkdownMessage } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 import { settingsForSession, type LlmSettings } from '../settings'
+import {
+  areAllMemoryChangesSelected,
+  memoryChangeIds,
+  toggleMemoryChange,
+} from '../memoryReview'
 
 type Layer = 'overview' | 'L2' | 'L3'
 type AssistAction = 'update' | 'check' | 'dedupe'
-type ViewMode = 'rendered' | 'source'
-type MemoryEdit = {
-  op: 'replace' | 'delete' | 'insert'
-  start_line: number
-  end_line?: number | null
-  text?: string | null
-  refs?: string[]
-  reason?: string | null
-}
-type MemoryFact = {
-  text: string
-  section: string
-  refs: string[]
-}
-type TraceChunk = {
-  index: number
-  total: number
-  citeableRefs?: string[]
-  status: string
-}
+type ViewMode = 'rendered' | 'source' | 'review'
 type MemoryModelOption = {
   id: string
   label: string
@@ -55,21 +45,54 @@ interface MemoryFile {
   level: string
   name: string
   markdown: string
+  revision: string
 }
 
-interface AssistResult {
+interface MemoryChange {
+  id: string
+  op: 'insert' | 'replace' | 'delete'
+  section?: string | null
+  entry_id?: string | null
+  after_entry_id?: string | null
+  text?: string | null
+  refs: string[]
+  reason: string
+  before_text?: string | null
+}
+
+interface MemoryFinding {
+  id: string
+  entry_id?: string | null
+  severity: string
+  kind: string
+  message: string
+  refs: string[]
+}
+
+interface MemoryChangeSet {
+  run_id: string
+  target_path: string
+  base_revision: string
+  summary: string
+  findings: MemoryFinding[]
+  changes: MemoryChange[]
+}
+
+interface MemoryRunFlowItem {
+  stage: string
+  status: string
+  summary: string
+}
+
+interface MemoryRun {
+  run_id: string
   target_path: string
   action: AssistAction
-  report_markdown: string
-  proposed_markdown?: string | null
-  facts?: MemoryFact[]
-  edits?: MemoryEdit[]
-  trace?: {
-    input_json: string
-    output_json: string
-    chunks?: TraceChunk[]
-  } | null
-  changed: boolean
+  status: string
+  current_stage: string
+  flow: MemoryRunFlowItem[]
+  change_set?: MemoryChangeSet | null
+  error?: string | null
 }
 
 const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/knowledge.md', 'L2/research.md']
@@ -91,7 +114,8 @@ export function MemoryPage({
   const [selectedModelId, setSelectedModelId] = useState(
     settings.activeLlmConfigId ?? '__default__',
   )
-  const [assistResult, setAssistResult] = useState<AssistResult | null>(null)
+  const [memoryRun, setMemoryRun] = useState<MemoryRun | null>(null)
+  const [selectedChangeIds, setSelectedChangeIds] = useState<string[]>([])
   const [status, setStatus] = useState('Loading memory...')
   const [loading, setLoading] = useState(false)
 
@@ -136,14 +160,16 @@ export function MemoryPage({
   useEffect(() => {
     if (!activeFile) return
     setDraft(activeFile.markdown)
-    setAssistResult(null)
+    setMemoryRun(null)
+    setSelectedChangeIds([])
   }, [activeFile?.path, activeFile?.markdown])
 
   const openLayer = (nextLayer: 'L2' | 'L3') => {
     const firstPath = (nextLayer === 'L2' ? l2Paths[0] : l3Paths[0]) ?? null
     setLayer(nextLayer)
     setActivePath((current) => current && current.startsWith(`${nextLayer}/`) ? current : firstPath)
-    setAssistResult(null)
+    setMemoryRun(null)
+    setSelectedChangeIds([])
   }
 
   const saveActiveFile = async () => {
@@ -186,7 +212,8 @@ export function MemoryPage({
       if (!updated) throw new Error('Undo response did not include a memory file')
       setFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
       setDraft(updated.markdown)
-      setAssistResult(null)
+      setMemoryRun(null)
+      setSelectedChangeIds([])
       setStatus('Memory restored from latest snapshot')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
@@ -197,6 +224,10 @@ export function MemoryPage({
 
   const runAssist = async () => {
     if (!activeFile) return
+    if (draft !== activeFile.markdown) {
+      setStatus('请先保存当前文档修改，再运行记忆工作流。')
+      return
+    }
     const configId = selectedModelId === '__default__' ? null : selectedModelId
     const llm = settingsForSession(settings, configId)
     if (!llm.model || !llm.api_key) {
@@ -206,21 +237,90 @@ export function MemoryPage({
     setStatus(`正在${assistActionLabel(assistAction)}记忆…`)
     setLoading(true)
     try {
-      const res = await fetch('/api/memory/assist', {
+      const res = await fetch('/api/memory/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target_path: activeFile.path,
           action: assistAction,
-          markdown: draft,
           llm,
         }),
       })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const result = data.result as AssistResult
-      setAssistResult(result)
-      setStatus(`${assistActionLabel(assistAction)}记忆完成`)
+      const run = data.run as MemoryRun
+      setMemoryRun(run)
+      setSelectedChangeIds([])
+      setStatus(`${assistActionLabel(assistAction)}记忆运行中`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+      setLoading(false)
+    }
+  }
+
+  const cancelMemoryRun = async () => {
+    if (!memoryRun || memoryRun.status !== 'running') return
+    try {
+      const res = await fetch(`/api/memory/runs/${encodeURIComponent(memoryRun.run_id)}`, {
+        method: 'DELETE',
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      setMemoryRun(data.run as MemoryRun)
+      setLoading(false)
+      setStatus('记忆工作流已取消')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  useEffect(() => {
+    if (!memoryRun || !['running'].includes(memoryRun.status)) return
+    const timeout = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/memory/runs/${encodeURIComponent(memoryRun.run_id)}`)
+        const data = await safeJson(res)
+        if (!res.ok) throw new Error(errorMessage(data, res.status))
+        const run = data.run as MemoryRun
+        setMemoryRun(run)
+        if (run.change_set) {
+          setSelectedChangeIds(memoryChangeIds(run.change_set.changes))
+          setViewMode('review')
+        }
+        if (run.status === 'awaiting_review') {
+          setLoading(false)
+          setStatus(run.change_set?.summary ?? '记忆变更等待审核')
+        } else if (run.status === 'failed') {
+          setLoading(false)
+          setStatus(run.error ?? '记忆工作流失败')
+        }
+      } catch (err) {
+        setLoading(false)
+        setStatus(err instanceof Error ? err.message : String(err))
+      }
+    }, 500)
+    return () => window.clearTimeout(timeout)
+  }, [memoryRun])
+
+  const applySelectedChanges = async () => {
+    if (!memoryRun?.change_set || selectedChangeIds.length === 0) return
+    setLoading(true)
+    setStatus('正在应用已接受的记忆变更…')
+    try {
+      const res = await fetch(`/api/memory/runs/${encodeURIComponent(memoryRun.run_id)}/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accepted_change_ids: selectedChangeIds }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(errorMessage(data, res.status))
+      const updated = data.file as MemoryFile
+      setFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
+      setDraft(updated.markdown)
+      setMemoryRun((current) => current ? { ...current, status: 'completed', current_stage: 'completed' } : current)
+      setSelectedChangeIds([])
+      setViewMode('rendered')
+      setStatus('已应用选中的记忆变更')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -248,7 +348,8 @@ export function MemoryPage({
             viewMode={viewMode}
             loading={loading}
             status={status}
-            assistResult={assistResult}
+            memoryRun={memoryRun}
+            selectedChangeIds={selectedChangeIds}
             assistAction={assistAction}
             modelOptions={modelOptions}
             selectedModelId={selectedModelId}
@@ -261,14 +362,18 @@ export function MemoryPage({
             onAssistActionChange={setAssistAction}
             onSelectedModelChange={setSelectedModelId}
             onRunAssist={() => void runAssist()}
+            onCancelRun={() => void cancelMemoryRun()}
             onSourceNavigate={onSourceNavigate}
-            onApplyProposal={(markdown) => {
-              setDraft(markdown)
-              setStatus('Memory draft updated from agent proposal')
-            }}
+            onToggleChange={(changeId) => setSelectedChangeIds((current) => toggleMemoryChange(current, changeId))}
+            onSelectAllChanges={(selected) => setSelectedChangeIds(selected
+              ? memoryChangeIds(memoryRun?.change_set?.changes ?? [])
+              : [])}
+            onApplySelectedChanges={() => void applySelectedChanges()}
             onReset={() => {
               setDraft(activeFile?.markdown ?? '')
-              setAssistResult(null)
+              setMemoryRun(null)
+              setSelectedChangeIds([])
+              setViewMode('rendered')
               setAssistAction('update')
               setSelectedModelId(settings.activeLlmConfigId ?? modelOptions[0]?.id ?? '__default__')
             }}
@@ -399,7 +504,8 @@ function LayerWorkspace({
   viewMode,
   loading,
   status,
-  assistResult,
+  memoryRun,
+  selectedChangeIds,
   assistAction,
   modelOptions,
   selectedModelId,
@@ -412,8 +518,11 @@ function LayerWorkspace({
   onAssistActionChange,
   onSelectedModelChange,
   onRunAssist,
+  onCancelRun,
   onSourceNavigate,
-  onApplyProposal,
+  onToggleChange,
+  onSelectAllChanges,
+  onApplySelectedChanges,
   onReset,
 }: {
   layer: 'L2' | 'L3'
@@ -423,7 +532,8 @@ function LayerWorkspace({
   viewMode: ViewMode
   loading: boolean
   status: string
-  assistResult: AssistResult | null
+  memoryRun: MemoryRun | null
+  selectedChangeIds: string[]
   assistAction: AssistAction
   modelOptions: MemoryModelOption[]
   selectedModelId: string
@@ -436,8 +546,11 @@ function LayerWorkspace({
   onAssistActionChange: (action: AssistAction) => void
   onSelectedModelChange: (id: string) => void
   onRunAssist: () => void
+  onCancelRun: () => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
-  onApplyProposal: (markdown: string) => void
+  onToggleChange: (changeId: string) => void
+  onSelectAllChanges: (selected: boolean) => void
+  onApplySelectedChanges: () => void
   onReset: () => void
 }) {
   return (
@@ -493,8 +606,9 @@ function LayerWorkspace({
               <p className="text-xs text-gray-500">{activeFile?.path ?? status}</p>
             </div>
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
-              <button className={modeButtonClassName(viewMode === 'rendered')} type="button" onClick={() => onViewModeChange('rendered')}>渲染视图</button>
-              <button className={modeButtonClassName(viewMode === 'source')} type="button" onClick={() => onViewModeChange('source')}>带行号</button>
+              <button className={modeButtonClassName(viewMode === 'rendered')} type="button" onClick={() => onViewModeChange('rendered')}>阅读</button>
+              <button className={modeButtonClassName(viewMode === 'source')} type="button" onClick={() => onViewModeChange('source')}>编辑</button>
+              <button className={modeButtonClassName(viewMode === 'review')} type="button" disabled={!memoryRun?.change_set} onClick={() => onViewModeChange('review')}>审核</button>
             </div>
             <button className={compactIconButtonClassName} type="button" disabled={loading || !activeFile || draft === activeFile.markdown} onClick={onSave} aria-label="保存记忆" title="保存记忆">
               <Save size={16} />
@@ -510,6 +624,16 @@ function LayerWorkspace({
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
               />
+            ) : viewMode === 'review' && memoryRun?.change_set ? (
+              <ChangeReview
+                changeSet={memoryRun.change_set}
+                selectedChangeIds={selectedChangeIds}
+                loading={loading}
+                onToggleChange={onToggleChange}
+                onSelectAll={onSelectAllChanges}
+                onApply={onApplySelectedChanges}
+                onSourceNavigate={onSourceNavigate}
+              />
             ) : (
               <article className="mx-auto min-h-full w-full max-w-5xl px-5 py-3">
                 <MarkdownMessage text={draft || ' '} onSourceNavigate={onSourceNavigate} />
@@ -520,7 +644,7 @@ function LayerWorkspace({
 
         <AgentWorkspace
           loading={loading}
-          assistResult={assistResult}
+          memoryRun={memoryRun}
           assistAction={assistAction}
           modelOptions={modelOptions}
           selectedModelId={selectedModelId}
@@ -529,7 +653,7 @@ function LayerWorkspace({
           onAssistActionChange={onAssistActionChange}
           onSelectedModelChange={onSelectedModelChange}
           onRunAssist={onRunAssist}
-          onApplyProposal={onApplyProposal}
+          onCancelRun={onCancelRun}
           onReset={onReset}
         />
       </div>
@@ -539,7 +663,7 @@ function LayerWorkspace({
 
 function AgentWorkspace({
   loading,
-  assistResult,
+  memoryRun,
   assistAction,
   modelOptions,
   selectedModelId,
@@ -548,11 +672,11 @@ function AgentWorkspace({
   onAssistActionChange,
   onSelectedModelChange,
   onRunAssist,
-  onApplyProposal,
+  onCancelRun,
   onReset,
 }: {
   loading: boolean
-  assistResult: AssistResult | null
+  memoryRun: MemoryRun | null
   assistAction: AssistAction
   modelOptions: MemoryModelOption[]
   selectedModelId: string
@@ -561,7 +685,7 @@ function AgentWorkspace({
   onAssistActionChange: (action: AssistAction) => void
   onSelectedModelChange: (id: string) => void
   onRunAssist: () => void
-  onApplyProposal: (markdown: string) => void
+  onCancelRun: () => void
   onReset: () => void
 }) {
   const selectedModel = modelOptions.find((option) => option.id === selectedModelId)
@@ -596,39 +720,27 @@ function AgentWorkspace({
           <Send size={15} />
           {loading ? '运行中…' : `运行${assistActionLabel(assistAction)}`}
         </button>
+        {memoryRun?.status === 'running' && (
+          <button
+            className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 text-xs font-medium text-gray-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+            type="button"
+            onClick={onCancelRun}
+          >
+            <X size={14} />
+            取消运行
+          </button>
+        )}
         <div className="truncate text-[11px] text-gray-400" title={status} aria-live="polite">
           {selectedModel?.configured ? status : '该模型缺少名称或 API Key，请先到设置中完善'}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {assistResult ? (
-          <article className="rounded-md border border-blue-100 bg-blue-50/40 p-3">
-            <MarkdownMessage text={assistResult.report_markdown} />
-            {assistResult.facts && assistResult.facts.length > 0 && (
-              <FactPreview facts={assistResult.facts} />
-            )}
-            {assistResult.edits && assistResult.edits.length > 0 && (
-              <EditPreview edits={assistResult.edits} />
-            )}
-            {assistResult.trace && <TracePreview trace={assistResult.trace} />}
-            {assistResult.changed && (
-              <p className="mt-4 text-sm text-blue-700">已生成可预览的记忆变更，请检查 edits 和报告后再应用到草稿。</p>
-            )}
-            {assistResult.proposed_markdown && (
-              <button
-                className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
-                type="button"
-                onClick={() => onApplyProposal(assistResult.proposed_markdown ?? '')}
-              >
-                <Wand2 size={15} />
-                应用到草稿
-              </button>
-            )}
-          </article>
+        {memoryRun ? (
+          <RunFlow run={memoryRun} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-center text-sm leading-6 text-gray-500">
             <Sparkles size={24} className="mb-3 text-gray-300" />
-            选择模式和模型后运行。结果会显示在这里，变更保存前仍可检查。
+            选择模式和模型后运行。这里显示证据读取和分析进度，变更会在中间文档区审核。
           </div>
         )}
       </div>
@@ -725,103 +837,114 @@ function ModelPicker({
   )
 }
 
-function FactPreview({ facts }: { facts: MemoryFact[] }) {
+function RunFlow({ run }: { run: MemoryRun }) {
   return (
-    <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Proposed facts</div>
-      <div className="space-y-2">
-        {facts.map((fact, index) => (
-          <div key={`${fact.section}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-700">
-            <div className="mb-1 font-medium text-gray-900">{fact.section}</div>
-            <div className="leading-5">{fact.text}</div>
-            {fact.refs.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {fact.refs.map((ref) => (
-                  <span key={ref} className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-700">{ref}</span>
-                ))}
-              </div>
-            )}
+    <div className="space-y-1.5">
+      {run.flow.map((item, index) => {
+        const active = item.stage === run.current_stage && run.status === 'running'
+        const failed = item.status === 'error'
+        return (
+          <div key={`${item.stage}-${index}`} className="flex gap-2.5 rounded-md px-2 py-2 text-xs">
+            <span className={`mt-0.5 ${failed ? 'text-red-600' : active ? 'text-blue-600' : 'text-emerald-600'}`}>
+              {failed ? <X size={14} /> : active ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
+            </span>
+            <div className="min-w-0">
+              <div className="font-medium text-gray-800">{flowStageLabel(item.stage)}</div>
+              <div className="mt-0.5 leading-5 text-gray-500">{item.summary}</div>
+            </div>
           </div>
-        ))}
-      </div>
+        )
+      })}
+      {run.status === 'awaiting_review' && (
+        <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 p-2.5 text-xs leading-5 text-blue-800">
+          {run.change_set?.summary ?? '变更已准备好，请在中间区域审核。'}
+        </div>
+      )}
+      {run.error && <div className="mt-3 text-xs leading-5 text-red-600">{run.error}</div>}
     </div>
   )
 }
 
-function EditPreview({ edits }: { edits: MemoryEdit[] }) {
+function ChangeReview({
+  changeSet,
+  selectedChangeIds,
+  loading,
+  onToggleChange,
+  onSelectAll,
+  onApply,
+  onSourceNavigate,
+}: {
+  changeSet: MemoryChangeSet
+  selectedChangeIds: string[]
+  loading: boolean
+  onToggleChange: (changeId: string) => void
+  onSelectAll: (selected: boolean) => void
+  onApply: () => void
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+}) {
+  const allSelected = areAllMemoryChangesSelected(changeSet.changes, selectedChangeIds)
   return (
-    <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Line edits</div>
-      <div className="space-y-2">
-        {edits.map((edit, index) => (
-          <div key={`${edit.op}-${edit.start_line}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-700">
-            <div className="flex items-center gap-2">
-              <span className={`rounded px-1.5 py-0.5 font-medium ${editBadgeClassName(edit.op)}`}>{edit.op}</span>
-              <span>{formatEditRange(edit)}</span>
+    <div className="mx-auto w-full max-w-5xl px-5 py-3">
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3">
+        <GitCompareArrows size={18} className="text-blue-600" />
+        <div className="mr-auto">
+          <h3 className="text-sm font-semibold text-gray-900">记忆变更审核</h3>
+          <p className="mt-0.5 text-xs text-gray-500">{changeSet.summary}</p>
+        </div>
+        <button className={secondaryButtonClassName} type="button" disabled={changeSet.changes.length === 0} onClick={() => onSelectAll(!allSelected)}>
+          {allSelected ? '全部拒绝' : '全部接受'}
+        </button>
+        <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200" type="button" disabled={loading || selectedChangeIds.length === 0} onClick={onApply}>
+          <Check size={14} />
+          应用 {selectedChangeIds.length} 项
+        </button>
+      </div>
+      {changeSet.findings.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {changeSet.findings.map((finding) => (
+            <div key={finding.id} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+              {finding.message}
             </div>
-            {edit.reason && (
-              <div className="mt-2 text-gray-500">{edit.reason}</div>
-            )}
-            {edit.refs && edit.refs.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {edit.refs.map((ref) => (
-                  <span key={ref} className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-700">{ref}</span>
-                ))}
+          ))}
+        </div>
+      )}
+      <div className="space-y-3">
+        {changeSet.changes.map((change) => {
+          const selected = selectedChangeIds.includes(change.id)
+          return (
+            <section key={change.id} className={`overflow-hidden rounded-md border ${selected ? 'border-blue-200' : 'border-gray-200 opacity-60'}`}>
+              <button className="flex w-full items-center gap-2 bg-gray-50 px-3 py-2 text-left" type="button" onClick={() => onToggleChange(change.id)}>
+                <span className={selected ? 'text-blue-600' : 'text-gray-300'}>{selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}</span>
+                <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${changeBadgeClassName(change.op)}`}>{changeOpLabel(change.op)}</span>
+                <span className="truncate text-xs text-gray-500">{change.section ?? change.entry_id ?? '记忆条目'}</span>
+              </button>
+              <div className="space-y-2 p-3 text-sm">
+                {change.before_text && (
+                  <div className="border-l-2 border-red-300 bg-red-50 px-3 py-2 leading-6 text-red-800">
+                    <span className="mr-2 select-none font-mono text-red-500">-</span>{change.before_text}
+                  </div>
+                )}
+                {change.text && change.op !== 'delete' && (
+                  <div className="border-l-2 border-emerald-300 bg-emerald-50 px-3 py-2 leading-6 text-emerald-900">
+                    <span className="mr-2 select-none font-mono text-emerald-600">+</span>{change.text}
+                  </div>
+                )}
+                <p className="text-xs leading-5 text-gray-500">{change.reason}</p>
+                {change.refs.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {change.refs.map((ref) => (
+                      <button key={ref} className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] text-blue-700 hover:bg-blue-100" type="button" onClick={() => void navigateMemorySource(ref, onSourceNavigate)}>
+                        {ref}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {edit.text && (
-              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-[11px] leading-5 text-gray-700">
-                {edit.text}
-              </pre>
-            )}
-          </div>
-        ))}
+            </section>
+          )
+        })}
+        {changeSet.changes.length === 0 && <div className="py-12 text-center text-sm text-gray-500">没有需要审核的文档变更。</div>}
       </div>
-    </div>
-  )
-}
-
-function TracePreview({ trace }: { trace: NonNullable<AssistResult['trace']> }) {
-  return (
-    <details className="mt-4 rounded-lg border border-gray-200 bg-white p-3">
-      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">
-        LLM trace
-      </summary>
-      <div className="mt-3 space-y-3">
-        {trace.chunks && trace.chunks.length > 0 && (
-          <div className="rounded-md border border-blue-100 bg-blue-50/60 p-2">
-            <div className="mb-2 text-xs font-medium text-blue-700">Chunks</div>
-            <div className="space-y-1">
-              {trace.chunks.map((chunk) => (
-                <div key={`${chunk.index}-${chunk.total}`} className="text-xs text-gray-600">
-                  <span className="font-medium text-gray-800">
-                    {chunk.index}/{chunk.total}
-                  </span>
-                  <span className="ml-2">{chunk.status}</span>
-                  {chunk.citeableRefs && chunk.citeableRefs.length > 0 && (
-                    <span className="ml-2 font-mono text-[11px] text-blue-700">
-                      {chunk.citeableRefs.join(', ')}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <TraceBlock title="Input" value={trace.input_json} />
-        <TraceBlock title="Output" value={trace.output_json} />
-      </div>
-    </details>
-  )
-}
-
-function TraceBlock({ title, value }: { title: string; value: string }) {
-  return (
-    <div>
-      <div className="mb-1 text-xs font-medium text-gray-500">{title}</div>
-      <pre className="max-h-56 overflow-auto rounded-md bg-gray-950 p-3 font-mono text-[11px] leading-5 text-gray-100">
-        {value}
-      </pre>
     </div>
   )
 }
@@ -874,15 +997,60 @@ function memoryModelOptions(settings: LlmSettings): MemoryModelOption[] {
   }]
 }
 
-function formatEditRange(edit: MemoryEdit) {
-  const end = edit.end_line ?? edit.start_line
-  return end === edit.start_line ? `line ${edit.start_line}` : `lines ${edit.start_line}-${end}`
-}
-
-function editBadgeClassName(op: MemoryEdit['op']) {
+function changeBadgeClassName(op: MemoryChange['op']) {
   if (op === 'delete') return 'bg-red-50 text-red-700'
   if (op === 'replace') return 'bg-amber-50 text-amber-700'
   return 'bg-green-50 text-green-700'
+}
+
+function changeOpLabel(op: MemoryChange['op']) {
+  if (op === 'delete') return '删除'
+  if (op === 'replace') return '修改'
+  return '新增'
+}
+
+function flowStageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    queued: '准备任务',
+    discovering_sources: '发现来源',
+    reading_evidence: '读取证据',
+    analyzing_memory: '分析记忆',
+    proposing_changes: '形成修改',
+    validating_changes: '验证修改',
+    awaiting_review: '等待审核',
+    applying: '应用修改',
+    completed: '运行完成',
+    failed: '运行失败',
+    cancelled: '已取消',
+  }
+  return labels[stage] ?? stage
+}
+
+async function navigateMemorySource(
+  raw: string,
+  onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void,
+) {
+  if (!onSourceNavigate) return
+  const res = await fetch(`/api/memory/source?reference=${encodeURIComponent(raw)}`)
+  const data = await safeJson(res)
+  if (!res.ok) return
+  const event = (data.source as { event?: { category?: string; source_id?: string | null; summary?: string } })?.event
+  const sourceId = event?.source_id
+  if (!event?.category || !sourceId) return
+  let target: SourceTarget | undefined
+  if (event.category === 'chat') target = { type: 'chat', sessionId: sourceId }
+  else if (event.category === 'quiz') target = { type: 'quiz', quizId: sourceId }
+  else if (event.category === 'notebook') target = { type: 'notebook', entryId: sourceId }
+  else if (event.category === 'research') target = { type: 'research', notebookEntryId: sourceId }
+  if (!target) return
+  onSourceNavigate(target, {
+    id: raw,
+    label: raw,
+    raw,
+    surface: target.type,
+    description: event.summary,
+    target,
+  })
 }
 
 function memoryFileLabel(path: string) {

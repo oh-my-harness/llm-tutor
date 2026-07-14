@@ -39,6 +39,7 @@ pub struct MemoryFile {
     pub level: String,
     pub name: String,
     pub markdown: String,
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +48,7 @@ pub struct MemoryUndoResult {
     pub restored_from: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryEvent {
     pub id: String,
     pub category: MemoryEventCategory,
@@ -62,6 +63,27 @@ pub struct MemoryEvent {
 pub struct ResolvedMemorySource {
     pub reference: String,
     pub event: MemoryEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryEventPage {
+    pub events: Vec<MemoryEvent>,
+    pub next_cursor: Option<String>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryEventContext {
+    pub event: MemoryEvent,
+    pub before: Vec<MemoryEvent>,
+    pub after: Vec<MemoryEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryEventCatalogItem {
+    pub surface: String,
+    pub count: usize,
+    pub latest_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,6 +230,51 @@ pub struct MemoryTextEdit {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryChangeOp {
+    Insert,
+    Replace,
+    Delete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryFinding {
+    pub id: String,
+    pub entry_id: Option<String>,
+    pub severity: String,
+    pub kind: String,
+    pub message: String,
+    #[serde(default)]
+    pub refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryChange {
+    pub id: String,
+    pub op: MemoryChangeOp,
+    pub section: Option<String>,
+    pub entry_id: Option<String>,
+    pub after_entry_id: Option<String>,
+    pub text: Option<String>,
+    #[serde(default)]
+    pub refs: Vec<String>,
+    pub reason: String,
+    pub before_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryChangeSet {
+    pub run_id: String,
+    pub target_path: String,
+    pub base_revision: String,
+    pub summary: String,
+    #[serde(default)]
+    pub findings: Vec<MemoryFinding>,
+    #[serde(default)]
+    pub changes: Vec<MemoryChange>,
+}
+
 impl MemoryStore {
     pub fn new() -> Self {
         Self::new_with_root(default_root().join("memory"))
@@ -250,6 +317,7 @@ impl MemoryStore {
             path: path_to_slash(&path),
             level,
             name,
+            revision: memory_revision(&markdown),
             markdown,
         })
     }
@@ -320,32 +388,111 @@ impl MemoryStore {
     }
 
     pub fn recent_events(&self, limit: usize) -> Result<Vec<MemoryEvent>> {
-        self.ensure_skeleton()?;
-        let mut events = Vec::new();
-        for category in [
-            MemoryEventCategory::Chat,
-            MemoryEventCategory::Quiz,
-            MemoryEventCategory::Notebook,
-            MemoryEventCategory::Knowledge,
-            MemoryEventCategory::Research,
-        ] {
-            let path = self.root.join(event_file(category));
-            let Ok(text) = fs::read_to_string(path) else {
-                continue;
-            };
-            for line in text.lines() {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Ok(event) = serde_json::from_str::<MemoryEvent>(line) {
-                    events.push(event);
-                }
-            }
-        }
+        let mut events = self.all_events()?;
         events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         events.truncate(limit);
         Ok(events)
+    }
+
+    pub fn event_catalog(&self) -> Result<Vec<MemoryEventCatalogItem>> {
+        let events = self.all_events()?;
+        let mut catalog = Vec::new();
+        for category in all_event_categories() {
+            let matching = events
+                .iter()
+                .filter(|event| event.category == category)
+                .collect::<Vec<_>>();
+            catalog.push(MemoryEventCatalogItem {
+                surface: event_surface(category).to_string(),
+                count: matching.len(),
+                latest_at: matching.iter().map(|event| event.created_at).max(),
+            });
+        }
+        Ok(catalog)
+    }
+
+    pub fn query_events(
+        &self,
+        surface: Option<&str>,
+        query: Option<&str>,
+        session_id: Option<&str>,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<MemoryEventPage> {
+        let category = match surface {
+            Some(value) => Some(
+                category_for_surface(value)
+                    .ok_or_else(|| anyhow!("unsupported memory event surface `{value}`"))?,
+            ),
+            None => None,
+        };
+        let query = query.map(str::trim).filter(|value| !value.is_empty());
+        let session_id = session_id.map(str::trim).filter(|value| !value.is_empty());
+        let offset = cursor
+            .map(str::parse::<usize>)
+            .transpose()
+            .map_err(|_| anyhow!("invalid memory event cursor"))?
+            .unwrap_or(0);
+        let limit = limit.clamp(1, 100);
+        let mut events = self.all_events()?;
+        events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        events.retain(|event| {
+            category.is_none_or(|value| event.category == value)
+                && session_id.is_none_or(|value| event.source_id.as_deref() == Some(value))
+                && query.is_none_or(|value| event_matches_query(event, value))
+        });
+        let total = events.len();
+        let page = events
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let next_offset = offset.saturating_add(page.len());
+        Ok(MemoryEventPage {
+            events: page,
+            next_cursor: (next_offset < total).then(|| next_offset.to_string()),
+            total,
+        })
+    }
+
+    pub fn read_event(&self, event_id: &str) -> Result<MemoryEvent> {
+        let event_id = event_id.trim();
+        self.all_events()?
+            .into_iter()
+            .find(|event| event.id == event_id)
+            .ok_or_else(|| anyhow!("memory event `{event_id}` was not found"))
+    }
+
+    pub fn event_context(
+        &self,
+        event_id: &str,
+        before: usize,
+        after: usize,
+    ) -> Result<MemoryEventContext> {
+        let event = self.read_event(event_id)?;
+        let mut related = self
+            .all_events()?
+            .into_iter()
+            .filter(|candidate| {
+                candidate.category == event.category
+                    && match event.source_id.as_deref() {
+                        Some(source_id) => candidate.source_id.as_deref() == Some(source_id),
+                        None => candidate.id == event.id,
+                    }
+            })
+            .collect::<Vec<_>>();
+        related.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        let index = related
+            .iter()
+            .position(|candidate| candidate.id == event.id)
+            .ok_or_else(|| anyhow!("memory event context is unavailable"))?;
+        let before_start = index.saturating_sub(before.min(20));
+        let after_end = (index + 1 + after.min(20)).min(related.len());
+        Ok(MemoryEventContext {
+            event,
+            before: related[before_start..index].to_vec(),
+            after: related[index + 1..after_end].to_vec(),
+        })
     }
 
     pub fn resolve_source_ref(&self, reference: &str) -> Result<ResolvedMemorySource> {
@@ -372,6 +519,128 @@ impl MemoryStore {
             }
         }
         Err(anyhow!("memory source ref `{reference}` was not found"))
+    }
+
+    pub fn apply_memory_changes(
+        &self,
+        target_path: &str,
+        base_revision: &str,
+        changes: &[MemoryChange],
+        accepted_change_ids: &[String],
+    ) -> Result<MemoryFile> {
+        let current = self.read(target_path)?;
+        if current.revision != base_revision {
+            return Err(anyhow!(
+                "memory document changed since this run; rerun before applying"
+            ));
+        }
+        let accepted = accepted_change_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let selected = changes
+            .iter()
+            .filter(|change| accepted.contains(change.id.as_str()))
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return Err(anyhow!("no memory changes were selected"));
+        }
+        let target = target_catalog(target_path, current.markdown.clone());
+        let allowed_sections = target
+            .allowed_sections
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut entries = parse_memory_entries(&current.markdown);
+        for change in selected {
+            validate_memory_change(change, &allowed_sections)?;
+            for reference in &change.refs {
+                if reference.contains(':') {
+                    self.resolve_source_ref(reference)?;
+                }
+            }
+            match change.op {
+                MemoryChangeOp::Insert => {
+                    let entry = memory_entry_from_change(change)?;
+                    let index = change
+                        .after_entry_id
+                        .as_deref()
+                        .and_then(|id| entries.iter().position(|entry| entry.marker == id))
+                        .map(|index| index + 1)
+                        .unwrap_or(entries.len());
+                    entries.insert(index, entry);
+                }
+                MemoryChangeOp::Replace => {
+                    let entry_id = change.entry_id.as_deref().unwrap_or_default();
+                    let entry = entries
+                        .iter_mut()
+                        .find(|entry| entry.marker == entry_id)
+                        .ok_or_else(|| anyhow!("memory entry `{entry_id}` was not found"))?;
+                    entry.text = change
+                        .text
+                        .as_deref()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    if let Some(section) = change.section.as_deref() {
+                        entry.section = Some(section.trim().to_string());
+                    }
+                    if !change.refs.is_empty() {
+                        entry.source_refs = change.refs.clone();
+                    }
+                }
+                MemoryChangeOp::Delete => {
+                    let entry_id = change.entry_id.as_deref().unwrap_or_default();
+                    let index = entries
+                        .iter()
+                        .position(|entry| entry.marker == entry_id)
+                        .ok_or_else(|| anyhow!("memory entry `{entry_id}` was not found"))?;
+                    entries.remove(index);
+                }
+            }
+        }
+        let title = memory_title(&current.markdown).unwrap_or(target.title);
+        let markdown = serialize_memory_entries(&title, &entries)?;
+        self.write(target_path, markdown)
+    }
+
+    pub fn agent_context(&self, target_path: &str, current: &str) -> Result<serde_json::Value> {
+        let target_path = path_to_slash(&normalize_memory_path(target_path)?);
+        let target = target_catalog(&target_path, current.to_string());
+        let default_surface = target_surface(&target_path);
+        Ok(serde_json::json!({
+            "target": {
+                "path": target_path,
+                "title": target.title,
+                "focus": target.focus,
+                "allowedSections": target.allowed_sections,
+                "baseRevision": memory_revision(current),
+                "defaultSurface": default_surface,
+            },
+            "l1Catalog": self.event_catalog()?,
+            "instructions": {
+                "allL1Addressable": true,
+                "startWithTargetSurface": true,
+                "readBeforeCiting": true,
+            }
+        }))
+    }
+
+    fn all_events(&self) -> Result<Vec<MemoryEvent>> {
+        self.ensure_skeleton()?;
+        let mut events = Vec::new();
+        for category in all_event_categories() {
+            let path = self.root.join(event_file(category));
+            let Ok(text) = fs::read_to_string(path) else {
+                continue;
+            };
+            for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                if let Ok(event) = serde_json::from_str::<MemoryEvent>(line) {
+                    events.push(event);
+                }
+            }
+        }
+        Ok(events)
     }
 
     pub fn consolidation_preview(&self) -> Result<MemoryConsolidationPreview> {
@@ -1293,6 +1562,16 @@ fn event_file(category: MemoryEventCategory) -> &'static str {
     }
 }
 
+fn all_event_categories() -> [MemoryEventCategory; 5] {
+    [
+        MemoryEventCategory::Chat,
+        MemoryEventCategory::Quiz,
+        MemoryEventCategory::Notebook,
+        MemoryEventCategory::Knowledge,
+        MemoryEventCategory::Research,
+    ]
+}
+
 fn event_kind_label(category: MemoryEventCategory, action: &str) -> String {
     let category = match category {
         MemoryEventCategory::Chat => "chat",
@@ -1326,8 +1605,105 @@ fn category_for_surface(surface: &str) -> Option<MemoryEventCategory> {
 }
 
 fn event_citeable_ref(event: &MemoryEvent) -> String {
-    let id = event.source_id.as_deref().unwrap_or(&event.id);
-    format!("{}:{}", event_surface(event.category), id)
+    format!("{}:{}", event_surface(event.category), event.id)
+}
+
+fn event_matches_query(event: &MemoryEvent, query: &str) -> bool {
+    let query = query.to_lowercase();
+    event.summary.to_lowercase().contains(&query)
+        || event.action.to_lowercase().contains(&query)
+        || event.payload.to_string().to_lowercase().contains(&query)
+}
+
+pub fn memory_revision(markdown: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in markdown.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn validate_memory_change(
+    change: &MemoryChange,
+    allowed_sections: &std::collections::BTreeSet<&str>,
+) -> Result<()> {
+    if change.id.trim().is_empty() {
+        return Err(anyhow!("memory change id is empty"));
+    }
+    if change.reason.trim().is_empty() {
+        return Err(anyhow!("memory change requires a reason"));
+    }
+    match change.op {
+        MemoryChangeOp::Insert => {
+            let section = change.section.as_deref().unwrap_or_default().trim();
+            if !allowed_sections.contains(section) {
+                return Err(anyhow!("memory insert uses unknown section `{section}`"));
+            }
+            validate_change_text(change)?;
+            if change.refs.is_empty() {
+                return Err(anyhow!("memory insert requires evidence refs"));
+            }
+        }
+        MemoryChangeOp::Replace => {
+            if change
+                .entry_id
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                return Err(anyhow!("memory replace requires an entry id"));
+            }
+            if let Some(section) = change.section.as_deref()
+                && !allowed_sections.contains(section.trim())
+            {
+                return Err(anyhow!("memory replace uses unknown section `{section}`"));
+            }
+            validate_change_text(change)?;
+        }
+        MemoryChangeOp::Delete => {
+            if change
+                .entry_id
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                return Err(anyhow!("memory delete requires an entry id"));
+            }
+            if change.text.is_some() {
+                return Err(anyhow!("memory delete must not include replacement text"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_change_text(change: &MemoryChange) -> Result<()> {
+    let text = change.text.as_deref().unwrap_or_default().trim();
+    if text.is_empty() {
+        return Err(anyhow!("memory change text is empty"));
+    }
+    if text.chars().count() > MAX_MEMORY_FACT_TEXT_CHARS {
+        return Err(anyhow!("memory change text is too long"));
+    }
+    Ok(())
+}
+
+fn memory_entry_from_change(change: &MemoryChange) -> Result<MemoryEntry> {
+    Ok(MemoryEntry {
+        line_number: 0,
+        section: change.section.as_deref().map(str::trim).map(str::to_string),
+        text: change
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        marker: format!("m_{}", uuid::Uuid::new_v4().simple()),
+        source_refs: change.refs.clone(),
+    })
 }
 
 fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<MemoryEvent> {
@@ -1352,6 +1728,25 @@ fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<
         .filter(|event| category.is_none_or(|category| event.category == category))
         .take(20)
         .collect()
+}
+
+fn target_surface(target_path: &str) -> Option<&'static str> {
+    if target_path.contains("chat") {
+        Some("chat")
+    } else if target_path.contains("quiz")
+        || target_path.contains("profile")
+        || target_path.contains("teaching_strategy")
+    {
+        Some("quiz")
+    } else if target_path.contains("notebook") || target_path.contains("scope") {
+        Some("notebook")
+    } else if target_path.contains("knowledge") {
+        Some("knowledge")
+    } else if target_path.contains("research") {
+        Some("research")
+    } else {
+        None
+    }
 }
 
 fn target_catalog(target_path: &str, existing_markdown: String) -> ConsolidationTarget {
@@ -2007,10 +2402,221 @@ mod tests {
     }
 
     #[test]
+    fn event_queries_paginate_with_event_scoped_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let first = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "asked",
+                "First question about vectors",
+                Some("session-1".into()),
+                json!({ "content": "full first question" }),
+            )
+            .unwrap();
+        let second = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "answered",
+                "Second answer about vectors",
+                Some("session-1".into()),
+                json!({ "answer": "full second answer" }),
+            )
+            .unwrap();
+
+        let first_page = store
+            .query_events(Some("chat"), Some("vectors"), Some("session-1"), None, 1)
+            .unwrap();
+        let second_page = store
+            .query_events(
+                Some("chat"),
+                Some("vectors"),
+                Some("session-1"),
+                first_page.next_cursor.as_deref(),
+                1,
+            )
+            .unwrap();
+
+        assert_eq!(first_page.total, 2);
+        assert_eq!(first_page.events.len(), 1);
+        assert_eq!(second_page.events.len(), 1);
+        let refs = [
+            event_citeable_ref(&first_page.events[0]),
+            event_citeable_ref(&second_page.events[0]),
+        ];
+        assert_ne!(refs[0], refs[1]);
+        assert!(refs.contains(&format!("chat:{}", first.id)));
+        assert!(refs.contains(&format!("chat:{}", second.id)));
+        assert!(second_page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn event_context_is_bounded_to_the_same_source_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let before = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "asked",
+                "Question",
+                Some("session-1".into()),
+                json!({}),
+            )
+            .unwrap();
+        let focus = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "answered",
+                "Answer",
+                Some("session-1".into()),
+                json!({}),
+            )
+            .unwrap();
+        store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "asked",
+                "Unrelated question",
+                Some("session-2".into()),
+                json!({}),
+            )
+            .unwrap();
+
+        let context = store.event_context(&focus.id, 2, 2).unwrap();
+
+        assert_eq!(context.event.id, focus.id);
+        assert!(context.before.iter().any(|event| event.id == before.id));
+        assert!(
+            context
+                .before
+                .iter()
+                .chain(context.after.iter())
+                .all(|event| event.source_id.as_deref() == Some("session-1"))
+        );
+    }
+
+    #[test]
+    fn memory_change_apply_supports_partial_acceptance_and_stale_revision_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let event = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "answered",
+                "Explained vectors visually",
+                Some("session-1".into()),
+                json!({ "answer": "complete evidence" }),
+            )
+            .unwrap();
+        let original = store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n## Topics\n\n- Old vector note. <!--m_old-->".into(),
+            )
+            .unwrap();
+        let changes = vec![
+            MemoryChange {
+                id: "replace-old".into(),
+                op: MemoryChangeOp::Replace,
+                section: Some("Topics".into()),
+                entry_id: Some("m_old".into()),
+                after_entry_id: None,
+                text: Some("Improved vector note.".into()),
+                refs: vec![format!("chat:{}", event.id)],
+                reason: "The read evidence is more specific.".into(),
+                before_text: Some("Old vector note.".into()),
+            },
+            MemoryChange {
+                id: "insert-new".into(),
+                op: MemoryChangeOp::Insert,
+                section: Some("Mastery".into()),
+                entry_id: None,
+                after_entry_id: None,
+                text: Some("Understands vector addition.".into()),
+                refs: vec![format!("chat:{}", event.id)],
+                reason: "The answer demonstrates mastery.".into(),
+                before_text: None,
+            },
+        ];
+
+        let applied = store
+            .apply_memory_changes(
+                "L2/chat.md",
+                &original.revision,
+                &changes,
+                &["replace-old".into()],
+            )
+            .unwrap();
+
+        assert!(applied.markdown.contains("Improved vector note"));
+        assert!(!applied.markdown.contains("Understands vector addition"));
+        let stale = store
+            .apply_memory_changes(
+                "L2/chat.md",
+                &original.revision,
+                &changes,
+                &["insert-new".into()],
+            )
+            .unwrap_err();
+        assert!(stale.to_string().contains("changed since this run"));
+    }
+
+    #[test]
+    fn memory_change_apply_is_atomic_when_one_selected_change_is_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let original = store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n## Topics\n\n- Original note. <!--m_original-->".into(),
+            )
+            .unwrap();
+        let changes = vec![
+            MemoryChange {
+                id: "valid".into(),
+                op: MemoryChangeOp::Replace,
+                section: Some("Topics".into()),
+                entry_id: Some("m_original".into()),
+                after_entry_id: None,
+                text: Some("Changed note.".into()),
+                refs: vec![],
+                reason: "Clarify the note.".into(),
+                before_text: Some("Original note.".into()),
+            },
+            MemoryChange {
+                id: "invalid".into(),
+                op: MemoryChangeOp::Delete,
+                section: None,
+                entry_id: Some("m_missing".into()),
+                after_entry_id: None,
+                text: None,
+                refs: vec![],
+                reason: "Remove a duplicate.".into(),
+                before_text: None,
+            },
+        ];
+
+        let error = store
+            .apply_memory_changes(
+                "L2/chat.md",
+                &original.revision,
+                &changes,
+                &["valid".into(), "invalid".into()],
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("m_missing"));
+        let unchanged = store.read("L2/chat.md").unwrap();
+        assert_eq!(unchanged.revision, original.revision);
+        assert!(unchanged.markdown.contains("Original note"));
+        assert!(!unchanged.markdown.contains("Changed note"));
+    }
+
+    #[test]
     fn consolidation_input_normalizes_events_with_citeable_refs() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
-        store
+        let event = store
             .record_event(
                 MemoryEventCategory::Quiz,
                 "answered",
@@ -2026,8 +2632,9 @@ mod tests {
 
         assert_eq!(input.job.layer, "L2");
         assert_eq!(input.job.key, "quiz");
-        assert_eq!(input.chunk.citeable_refs, vec!["quiz:quiz-attempt-1"]);
-        assert!(input.chunk.text.contains("@entity quiz:quiz-attempt-1"));
+        let reference = format!("quiz:{}", event.id);
+        assert_eq!(input.chunk.citeable_refs, vec![reference.clone()]);
+        assert!(input.chunk.text.contains(&format!("@entity {reference}")));
         assert!(
             input
                 .target
@@ -2248,7 +2855,7 @@ mod tests {
     fn knowledge_consolidation_input_uses_knowledge_events_and_l3_surface_refs() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
-        store
+        let event = store
             .record_event(
                 MemoryEventCategory::Knowledge,
                 "search",
@@ -2263,8 +2870,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(l2_input.job.key, "knowledge");
-        assert_eq!(l2_input.chunk.citeable_refs, vec!["knowledge:kb-1"]);
-        assert!(l2_input.chunk.text.contains("@entity knowledge:kb-1"));
+        let reference = format!("knowledge:{}", event.id);
+        assert_eq!(l2_input.chunk.citeable_refs, vec![reference.clone()]);
+        assert!(
+            l2_input
+                .chunk
+                .text
+                .contains(&format!("@entity {reference}"))
+        );
         assert!(
             l2_input
                 .target

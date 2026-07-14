@@ -210,7 +210,9 @@ memory/
 
 ### Target Redesign: Evidence Exploration and Diff Review
 
-Status: planned on 2026-07-14. The approved target contract is defined in
+Status: core review workflow implemented on 2026-07-14. Original-artifact
+resolution and explicit workflow budgets remain follow-up hardening. The
+approved target contract is defined in
 `docs/specs/2026-06-26-memory-consolidation-design.md` and requirements
 `REQ-727` through `REQ-747`.
 
@@ -220,41 +222,43 @@ structured change sets, and central diff review.
 
 #### Tasks
 
-- [ ] Give every L1 event a stable event/turn reference instead of reusing a
+- [x] Give every L1 event a stable event/turn reference instead of reusing a
   session-only reference for multiple events.
 - [ ] Preserve complete evidence through a bounded snapshot or durable source
   pointer for Chat, Quiz, Notebook, Knowledge, and Research events.
-- [ ] Add runtime-native, read-only tools to list/search L1 events, read an
-  event, read surrounding context, and resolve the original artifact.
-- [ ] Start discovery in the target surface while allowing the agent to expand
+- [x] Add runtime-native, read-only tools to list/search L1 events, read an
+  event, read surrounding context, and resolve a complete L1 event snapshot.
+- [ ] Resolve each event onward to its original product artifact when the
+  snapshot alone is insufficient.
+- [x] Start discovery in the target surface while allowing the agent to expand
   explicitly to other L1 surfaces.
-- [ ] Emit product-level flow events for discovery, reads, analysis, proposal,
+- [x] Emit product-level flow events for discovery, reads, analysis, proposal,
   validation, review, apply, completion, failure, and cancellation.
-- [ ] Replace full `proposed_markdown` and report-oriented output with a
+- [x] Replace full `proposed_markdown` and report-oriented output with a
   versioned `MemoryChangeSet` containing findings and evidence-bound changes.
-- [ ] Keep the right workbench limited to controls, flow status, counts, errors,
+- [x] Keep the right workbench limited to controls, flow status, counts, errors,
   and a compact completion summary.
-- [ ] Add Read/Edit/Review modes to the central document surface.
-- [ ] Render insert/replace/delete operations as deterministic inline diff,
+- [x] Add Read/Edit/Review modes to the central document surface.
+- [x] Render insert/replace/delete operations as deterministic inline diff,
   with per-change reasons and navigable source chips.
-- [ ] Support accept/reject per change and accept/reject all.
-- [ ] Validate read-set refs, sections, anchors, text limits, and base revision
+- [x] Support accept/reject per change and accept/reject all.
+- [x] Validate read-set refs, sections, anchors, text limits, and base revision
   before apply.
-- [ ] Apply accepted changes atomically, record history, and support undo.
-- [ ] Add boundary and UI tests for pagination, source expansion, duplicate or
+- [x] Apply accepted changes atomically, record history, and support undo.
+- [x] Add boundary and UI tests for pagination, source expansion, duplicate or
   unread refs, stale revisions, partial acceptance, atomic apply, and undo.
 
 #### Acceptance
 
-- [ ] The Memory agent can address all L1 evidence without receiving the whole
+- [x] The Memory agent can address all L1 evidence without receiving the whole
   ledger in its initial prompt.
-- [ ] Every evidence read is visible in the run flow and every proposed change
+- [x] Every evidence read is visible in the run flow and every proposed change
   cites evidence read during that run.
-- [ ] The right workbench never uses a full Markdown draft as its normal result.
-- [ ] The center document area shows a reviewable diff and source-backed reason
+- [x] The right workbench never uses a full Markdown draft as its normal result.
+- [x] The center document area shows a reviewable diff and source-backed reason
   for each change.
-- [ ] No persistent document changes occur before explicit user confirmation.
-- [ ] Selected changes apply atomically and can be undone.
+- [x] No persistent document changes occur before explicit user confirmation.
+- [x] Selected changes apply atomically and can be undone.
 
 ## 7. Phase 5: `read_memory` Tool
 
