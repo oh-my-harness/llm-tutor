@@ -20,8 +20,9 @@ use crate::memory_store::{
     MemoryStore, parse_memory_entries,
 };
 use crate::memory_tool::{
-    ListMemoryEventsTool, MemoryEvidenceActivity, MemoryEvidenceTracker, ReadMemoryContextTool,
-    ReadMemoryEventTool, ReadMemorySourceTool, SearchMemoryEventsTool,
+    ListMemoryEntriesTool, ListMemoryEventsTool, MemoryEvidenceActivity, MemoryEvidenceTracker,
+    ReadMemoryContextTool, ReadMemoryEntrySourcesTool, ReadMemoryEntryTool, ReadMemoryEventTool,
+    ReadMemorySourceTool, SearchMemoryEntriesTool, SearchMemoryEventsTool,
 };
 
 #[derive(Deserialize)]
@@ -411,7 +412,7 @@ async fn run_memory_change_set(
         llm,
         workflow_root,
         &workflow_input,
-        memory_evidence_tools(store.clone(), tracker.clone()),
+        memory_evidence_tools(store.clone(), tracker.clone(), &file.path),
     )
     .await
     .map_err(|err| err.to_string())?;
@@ -431,7 +432,7 @@ async fn run_memory_change_set(
             llm,
             workflow_root,
             &repair_input,
-            memory_evidence_tools(store, tracker.clone()),
+            memory_evidence_tools(store, tracker.clone(), &file.path),
         )
         .await
         .map_err(|err| err.to_string())?
@@ -443,14 +444,54 @@ async fn run_memory_change_set(
 fn memory_evidence_tools(
     store: Arc<MemoryStore>,
     tracker: MemoryEvidenceTracker,
+    target_path: &str,
 ) -> Vec<Arc<dyn llm_harness_types::Tool>> {
-    vec![
-        Arc::new(ListMemoryEventsTool::new(store.clone(), tracker.clone())),
-        Arc::new(SearchMemoryEventsTool::new(store.clone(), tracker.clone())),
-        Arc::new(ReadMemoryEventTool::new(store.clone(), tracker.clone())),
-        Arc::new(ReadMemoryContextTool::new(store.clone(), tracker.clone())),
-        Arc::new(ReadMemorySourceTool::new(store, tracker)),
-    ]
+    let mut tools: Vec<Arc<dyn llm_harness_types::Tool>> = Vec::new();
+    if target_path.starts_with("L2/") || target_path == "L3/recent.md" {
+        tools.extend([
+            Arc::new(ListMemoryEventsTool::new(store.clone(), tracker.clone())) as Arc<_>,
+            Arc::new(SearchMemoryEventsTool::new(store.clone(), tracker.clone())) as Arc<_>,
+            Arc::new(ReadMemoryEventTool::new(store.clone(), tracker.clone())) as Arc<_>,
+            Arc::new(ReadMemoryContextTool::new(store.clone(), tracker.clone())) as Arc<_>,
+            Arc::new(ReadMemorySourceTool::new(store.clone(), tracker.clone())) as Arc<_>,
+        ]);
+    }
+    if target_path.starts_with("L3/") {
+        let paths = l3_source_paths(target_path);
+        tools.extend([
+            Arc::new(ListMemoryEntriesTool::new(
+                store.clone(),
+                tracker.clone(),
+                paths.clone(),
+            )) as Arc<_>,
+            Arc::new(SearchMemoryEntriesTool::new(
+                store.clone(),
+                tracker.clone(),
+                paths.clone(),
+            )) as Arc<_>,
+            Arc::new(ReadMemoryEntryTool::new(
+                store.clone(),
+                tracker.clone(),
+                paths.clone(),
+            )) as Arc<_>,
+            Arc::new(ReadMemoryEntrySourcesTool::new(store, tracker, paths)) as Arc<_>,
+        ]);
+    }
+    tools
+}
+
+fn l3_source_paths(target_path: &str) -> Vec<String> {
+    let paths = match target_path {
+        "L3/preferences.md" => vec!["L2/chat.md", "L2/notebook.md"],
+        "L3/profile.md" | "L3/scope.md" | "L3/recent.md" | "L3/teaching_strategy.md" => vec![
+            "L2/chat.md",
+            "L2/quiz.md",
+            "L2/notebook.md",
+            "L2/knowledge.md",
+        ],
+        _ => Vec::new(),
+    };
+    paths.into_iter().map(str::to_string).collect()
 }
 
 fn unread_workflow_refs(
@@ -480,10 +521,15 @@ fn evidence_repair_input(
 ) -> Result<tutor_agent::memory::MemoryWorkflowInput, String> {
     let mut context = serde_json::from_str::<serde_json::Value>(&input.consolidation_input_json)
         .map_err(|err| format!("invalid memory workflow context: {err}"))?;
+    let required_action = if input.target_path.starts_with("L3/") {
+        "Call read_memory_entry for every retained L2 reference below. Use read_memory_entry_sources only when source verification is needed, then resubmit the full result. Remove any claim whose evidence you do not read or that the full entry does not support."
+    } else {
+        "Call read_memory_event or read_memory_source for every retained reference below, inspect the complete event, then resubmit the full result. Remove any claim whose evidence you do not read or that the full event does not support."
+    };
     context["validationFeedback"] = serde_json::json!({
         "reason": "The previous draft cited evidence that was listed or inferred but not read.",
         "unreadRefs": unread_refs,
-        "requiredAction": "Call read_memory_event or read_memory_source for every retained reference below, inspect the complete event, then resubmit the full result. Remove any claim whose evidence you do not read or that the full event does not support.",
+        "requiredAction": required_action,
         "repairAttempt": 1,
     });
     let mut repair_input = input.clone();
@@ -502,6 +548,7 @@ fn workflow_output_to_change_set(
     let mut changes = Vec::new();
     for change in output.changes {
         let refs = canonicalize_run_refs(&change.refs, tracker, true)?;
+        validate_target_refs(&file.path, &refs)?;
         let op = match change.op {
             tutor_agent::memory::MemoryWorkflowChangeOp::Insert => MemoryChangeOp::Insert,
             tutor_agent::memory::MemoryWorkflowChangeOp::Replace => MemoryChangeOp::Replace,
@@ -534,6 +581,7 @@ fn workflow_output_to_change_set(
     let mut findings = Vec::new();
     for finding in output.findings {
         let refs = canonicalize_run_refs(&finding.refs, tracker, false)?;
+        validate_target_refs(&file.path, &refs)?;
         findings.push(MemoryFinding {
             id: finding.id,
             entry_id: finding.entry_id,
@@ -551,6 +599,20 @@ fn workflow_output_to_change_set(
         findings,
         changes,
     })
+}
+
+fn validate_target_refs(target_path: &str, refs: &[String]) -> Result<(), String> {
+    if target_path.starts_with("L3/") && target_path != "L3/recent.md" {
+        if let Some(reference) = refs
+            .iter()
+            .find(|reference| !reference.starts_with("memory:L2/"))
+        {
+            return Err(format!(
+                "ordinary L3 memory change must cite read L2 evidence, not `{reference}`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn canonicalize_run_refs(
@@ -798,6 +860,68 @@ mod tests {
         );
         let error = canonicalize_run_refs(&["notebook:unread".into()], &tracker, true).unwrap_err();
         assert!(error.contains("cites unread evidence `notebook:unread`"));
+    }
+
+    #[test]
+    fn routes_memory_tools_by_target_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let tracker = MemoryEvidenceTracker::default();
+
+        let l2 = memory_evidence_tools(store.clone(), tracker.clone(), "L2/chat.md")
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert!(l2.iter().any(|name| name == "read_memory_event"));
+        assert!(!l2.iter().any(|name| name == "read_memory_entry"));
+
+        let profile = memory_evidence_tools(store.clone(), tracker.clone(), "L3/profile.md")
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert!(profile.iter().any(|name| name == "read_memory_entry"));
+        assert!(!profile.iter().any(|name| name == "read_memory_event"));
+
+        let recent = memory_evidence_tools(store, tracker, "L3/recent.md")
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        assert!(recent.iter().any(|name| name == "read_memory_entry"));
+        assert!(recent.iter().any(|name| name == "read_memory_event"));
+    }
+
+    #[test]
+    fn ordinary_l3_rejects_direct_l1_references() {
+        assert!(validate_target_refs("L3/profile.md", &["chat:event-1".into()]).is_err());
+        assert!(
+            validate_target_refs("L3/profile.md", &["memory:L2/chat.md#m_example".into()]).is_ok()
+        );
+        assert!(validate_target_refs("L3/recent.md", &["chat:event-1".into()]).is_ok());
+    }
+
+    #[test]
+    fn l3_evidence_repair_requests_the_available_l2_read_tool() {
+        let input = tutor_agent::memory::MemoryWorkflowInput {
+            target_path: "L3/profile.md".into(),
+            action: tutor_agent::memory::MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
+            current_markdown: "# Student profile".into(),
+            consolidation_input_json: "{}".into(),
+        };
+
+        let repair =
+            evidence_repair_input(&input, &["memory:L2/chat.md#m_candidate".into()]).unwrap();
+
+        assert!(
+            repair
+                .consolidation_input_json
+                .contains("read_memory_entry")
+        );
+        assert!(
+            !repair
+                .consolidation_input_json
+                .contains("read_memory_event")
+        );
     }
 
     #[test]

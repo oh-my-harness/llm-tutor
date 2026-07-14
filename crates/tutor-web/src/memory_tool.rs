@@ -6,7 +6,7 @@ use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::memory_store::{MemoryEvent, MemoryStore};
+use crate::memory_store::{MemoryEvent, MemoryL2Entry, MemoryStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryEvidenceActivity {
@@ -18,7 +18,8 @@ pub struct MemoryEvidenceActivity {
 
 #[derive(Clone, Default)]
 pub struct MemoryEvidenceTracker {
-    read_refs: Arc<Mutex<BTreeSet<String>>>,
+    read_l1_refs: Arc<Mutex<BTreeSet<String>>>,
+    read_l2_refs: Arc<Mutex<BTreeSet<String>>>,
     resolved_aliases: Arc<Mutex<BTreeMap<String, String>>>,
     activities: Arc<Mutex<Vec<MemoryEvidenceActivity>>>,
     activity_sender: Option<tokio::sync::mpsc::UnboundedSender<MemoryEvidenceActivity>>,
@@ -34,8 +35,29 @@ impl MemoryEvidenceTracker {
         }
     }
 
+    #[cfg(test)]
     pub fn read_refs(&self) -> Vec<String> {
-        self.read_refs
+        let mut refs = BTreeSet::new();
+        if let Ok(read) = self.read_l1_refs.lock() {
+            refs.extend(read.iter().cloned());
+        }
+        if let Ok(read) = self.read_l2_refs.lock() {
+            refs.extend(read.iter().cloned());
+        }
+        refs.into_iter().collect()
+    }
+
+    #[cfg(test)]
+    pub fn read_l1_refs(&self) -> Vec<String> {
+        self.read_l1_refs
+            .lock()
+            .map(|refs| refs.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub fn read_l2_refs(&self) -> Vec<String> {
+        self.read_l2_refs
             .lock()
             .map(|refs| refs.iter().cloned().collect())
             .unwrap_or_default()
@@ -43,9 +65,13 @@ impl MemoryEvidenceTracker {
 
     pub fn canonical_reference(&self, reference: &str) -> Option<String> {
         if self
-            .read_refs
+            .read_l1_refs
             .lock()
             .is_ok_and(|refs| refs.contains(reference))
+            || self
+                .read_l2_refs
+                .lock()
+                .is_ok_and(|refs| refs.contains(reference))
         {
             return Some(reference.to_string());
         }
@@ -55,10 +81,7 @@ impl MemoryEvidenceTracker {
             .and_then(|aliases| aliases.get(reference).cloned())
     }
 
-    fn record(&self, stage: &str, tool: &str, summary: String, refs: Vec<String>) {
-        if let Ok(mut read_refs) = self.read_refs.lock() {
-            read_refs.extend(refs.iter().cloned());
-        }
+    fn record_activity(&self, stage: &str, tool: &str, summary: String, refs: Vec<String>) {
         let activity = MemoryEvidenceActivity {
             stage: stage.into(),
             tool: tool.into(),
@@ -71,6 +94,20 @@ impl MemoryEvidenceTracker {
         if let Some(sender) = &self.activity_sender {
             let _ = sender.send(activity);
         }
+    }
+
+    fn record_l1(&self, stage: &str, tool: &str, summary: String, refs: Vec<String>) {
+        if let Ok(mut read_refs) = self.read_l1_refs.lock() {
+            read_refs.extend(refs.iter().cloned());
+        }
+        self.record_activity(stage, tool, summary, refs);
+    }
+
+    fn record_l2(&self, stage: &str, tool: &str, summary: String, refs: Vec<String>) {
+        if let Ok(mut read_refs) = self.read_l2_refs.lock() {
+            read_refs.extend(refs.iter().cloned());
+        }
+        self.record_activity(stage, tool, summary, refs);
     }
 
     pub(crate) fn record_resolution(
@@ -89,11 +126,11 @@ impl MemoryEvidenceTracker {
                 );
             }
         }
-        self.record(stage, tool, summary, vec![canonical_reference.to_string()]);
+        self.record_l1(stage, tool, summary, vec![canonical_reference.to_string()]);
     }
 
     pub(crate) fn record_stage(&self, stage: &str, summary: String) {
-        self.record(stage, "memory_workflow", summary, Vec::new());
+        self.record_activity(stage, "memory_workflow", summary, Vec::new());
     }
 }
 
@@ -127,6 +164,34 @@ pub struct ReadMemorySourceTool {
     tracker: MemoryEvidenceTracker,
 }
 
+#[derive(Clone)]
+pub struct ListMemoryEntriesTool {
+    store: Arc<MemoryStore>,
+    tracker: MemoryEvidenceTracker,
+    allowed_paths: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct SearchMemoryEntriesTool {
+    store: Arc<MemoryStore>,
+    tracker: MemoryEvidenceTracker,
+    allowed_paths: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct ReadMemoryEntryTool {
+    store: Arc<MemoryStore>,
+    tracker: MemoryEvidenceTracker,
+    allowed_paths: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct ReadMemoryEntrySourcesTool {
+    store: Arc<MemoryStore>,
+    tracker: MemoryEvidenceTracker,
+    allowed_paths: Vec<String>,
+}
+
 macro_rules! tool_constructor {
     ($tool:ident) => {
         impl $tool {
@@ -142,6 +207,28 @@ tool_constructor!(SearchMemoryEventsTool);
 tool_constructor!(ReadMemoryEventTool);
 tool_constructor!(ReadMemoryContextTool);
 tool_constructor!(ReadMemorySourceTool);
+macro_rules! l2_tool_constructor {
+    ($tool:ident) => {
+        impl $tool {
+            pub fn new(
+                store: Arc<MemoryStore>,
+                tracker: MemoryEvidenceTracker,
+                allowed_paths: Vec<String>,
+            ) -> Self {
+                Self {
+                    store,
+                    tracker,
+                    allowed_paths,
+                }
+            }
+        }
+    };
+}
+
+l2_tool_constructor!(ListMemoryEntriesTool);
+l2_tool_constructor!(SearchMemoryEntriesTool);
+l2_tool_constructor!(ReadMemoryEntryTool);
+l2_tool_constructor!(ReadMemoryEntrySourcesTool);
 
 impl Tool for ListMemoryEventsTool {
     fn name(&self) -> &str {
@@ -171,7 +258,7 @@ impl Tool for ListMemoryEventsTool {
                 .store
                 .query_events(surface, None, session_id, cursor, limit)
                 .map_err(|err| ToolError::Execution(err.to_string()))?;
-            self.tracker.record(
+            self.tracker.record_activity(
                 "discovering_sources",
                 self.name(),
                 format!(
@@ -222,7 +309,7 @@ impl Tool for SearchMemoryEventsTool {
                 .store
                 .query_events(surface, Some(query), session_id, cursor, limit)
                 .map_err(|err| ToolError::Execution(err.to_string()))?;
-            self.tracker.record(
+            self.tracker.record_activity(
                 "discovering_sources",
                 self.name(),
                 format!(
@@ -273,7 +360,7 @@ impl Tool for ReadMemoryEventTool {
                 .read_event(event_id)
                 .map_err(|err| ToolError::Execution(err.to_string()))?;
             let reference = event_reference(&event);
-            self.tracker.record(
+            self.tracker.record_l1(
                 "reading_evidence",
                 self.name(),
                 format!("Read {} evidence", reference),
@@ -330,7 +417,7 @@ impl Tool for ReadMemoryContextTool {
                 .chain(context.after.iter())
                 .map(event_reference)
                 .collect::<Vec<_>>();
-            self.tracker.record(
+            self.tracker.record_l1(
                 "reading_evidence",
                 self.name(),
                 format!("Read {} contextual L1 events", refs.len()),
@@ -389,6 +476,265 @@ impl Tool for ReadMemorySourceTool {
             })))
         })
     }
+}
+
+impl Tool for ListMemoryEntriesTool {
+    fn name(&self) -> &str {
+        "list_memory_entries"
+    }
+
+    fn description(&self) -> &str {
+        "List bounded L2 memory entry summaries from the source files allowed for this L3 target. Results are candidates; call read_memory_entry before citing one."
+    }
+
+    fn parameters_schema(&self) -> &Value {
+        static SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(|| l2_entry_page_schema(false))
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let paths = selected_l2_paths(&args, &self.allowed_paths)?;
+            let cursor = optional_string(&args, "cursor");
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
+            let page = self
+                .store
+                .query_l2_entries(&paths, None, cursor, limit)
+                .map_err(|err| ToolError::Execution(err.to_string()))?;
+            self.tracker.record_activity(
+                "discovering_l2_sources",
+                self.name(),
+                format!(
+                    "Listed {} of {} L2 memory entry candidates",
+                    page.entries.len(),
+                    page.total
+                ),
+                Vec::new(),
+            );
+            Ok(json_tool_result(json!({
+                "entries": l2_entry_summaries(&page.entries),
+                "next_cursor": page.next_cursor,
+                "total": page.total,
+            })))
+        })
+    }
+}
+
+impl Tool for SearchMemoryEntriesTool {
+    fn name(&self) -> &str {
+        "search_memory_entries"
+    }
+
+    fn description(&self) -> &str {
+        "Search L2 memory entry summaries within the source files allowed for this L3 target. Call read_memory_entry before citing a result."
+    }
+
+    fn parameters_schema(&self) -> &Value {
+        static SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(|| l2_entry_page_schema(true))
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let query = required_string(&args, "query")?;
+            let paths = selected_l2_paths(&args, &self.allowed_paths)?;
+            let cursor = optional_string(&args, "cursor");
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize;
+            let page = self
+                .store
+                .query_l2_entries(&paths, Some(query), cursor, limit)
+                .map_err(|err| ToolError::Execution(err.to_string()))?;
+            self.tracker.record_activity(
+                "discovering_l2_sources",
+                self.name(),
+                format!("Found {} L2 memory candidates for `{query}`", page.total),
+                Vec::new(),
+            );
+            Ok(json_tool_result(json!({
+                "entries": l2_entry_summaries(&page.entries),
+                "next_cursor": page.next_cursor,
+                "total": page.total,
+            })))
+        })
+    }
+}
+
+impl Tool for ReadMemoryEntryTool {
+    fn name(&self) -> &str {
+        "read_memory_entry"
+    }
+
+    fn description(&self) -> &str {
+        "Read one complete L2 memory entry by canonical memory:L2/path.md#m_id reference. A successful read makes that L2 reference citeable."
+    }
+
+    fn parameters_schema(&self) -> &Value {
+        static SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(l2_entry_read_schema)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let reference = required_string(&args, "reference")?;
+            let entry = self
+                .store
+                .read_l2_entry(reference)
+                .map_err(|err| ToolError::Execution(err.to_string()))?;
+            ensure_l2_path_allowed(&entry.path, &self.allowed_paths)?;
+            self.tracker.record_l2(
+                "reading_l2_evidence",
+                self.name(),
+                format!("Read {} L2 evidence", entry.reference),
+                vec![entry.reference.clone()],
+            );
+            Ok(json_tool_result(json!({ "memory": entry })))
+        })
+    }
+}
+
+impl Tool for ReadMemoryEntrySourcesTool {
+    fn name(&self) -> &str {
+        "read_memory_entry_sources"
+    }
+
+    fn description(&self) -> &str {
+        "Drill through one L2 memory entry to its complete L1 source events. Use this only when the L2 summary needs verification or more detail."
+    }
+
+    fn parameters_schema(&self) -> &Value {
+        static SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(l2_entry_read_schema)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        args: Value,
+        _ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+        Box::pin(async move {
+            let reference = required_string(&args, "reference")?;
+            let sources = self
+                .store
+                .read_l2_entry_sources(reference)
+                .map_err(|err| ToolError::Execution(err.to_string()))?;
+            ensure_l2_path_allowed(&sources.memory.path, &self.allowed_paths)?;
+            let l1_refs = sources
+                .sources
+                .iter()
+                .map(|source| event_reference(&source.event))
+                .collect::<Vec<_>>();
+            self.tracker.record_l2(
+                "verifying_l1_evidence",
+                self.name(),
+                format!(
+                    "Verified {} through {} L1 source events",
+                    sources.memory.reference,
+                    l1_refs.len()
+                ),
+                vec![sources.memory.reference.clone()],
+            );
+            self.tracker.record_l1(
+                "verifying_l1_evidence",
+                self.name(),
+                format!("Read {} supporting L1 source events", l1_refs.len()),
+                l1_refs.clone(),
+            );
+            Ok(json_tool_result(json!({
+                "memory": sources.memory,
+                "source_references": l1_refs,
+                "sources": sources.sources,
+            })))
+        })
+    }
+}
+
+fn l2_entry_page_schema(require_query: bool) -> Value {
+    let mut schema = json!({
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "paths": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+            "cursor": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+        }
+    });
+    if require_query {
+        schema["properties"]["query"] = json!({"type": "string"});
+        schema["required"] = json!(["query"]);
+    }
+    schema
+}
+
+fn l2_entry_read_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {"reference": {"type": "string"}},
+        "required": ["reference"]
+    })
+}
+
+fn selected_l2_paths(args: &Value, allowed_paths: &[String]) -> Result<Vec<String>, ToolError> {
+    let mut selected = args["paths"]
+        .as_array()
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let Some(path) = optional_string(args, "path") {
+        selected.push(path.to_string());
+    }
+    if selected.is_empty() {
+        return Ok(allowed_paths.to_vec());
+    }
+    selected.sort();
+    selected.dedup();
+    for path in &selected {
+        ensure_l2_path_allowed(path, allowed_paths)?;
+    }
+    Ok(selected)
+}
+
+fn ensure_l2_path_allowed(path: &str, allowed_paths: &[String]) -> Result<(), ToolError> {
+    if allowed_paths.iter().any(|allowed| allowed == path) {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidArguments(format!(
+            "L2 memory path `{path}` is not available for this target"
+        )))
+    }
+}
+
+fn l2_entry_summaries(entries: &[MemoryL2Entry]) -> Vec<Value> {
+    entries
+        .iter()
+        .map(|item| {
+            json!({
+                "reference": item.reference,
+                "path": item.path,
+                "revision": item.revision,
+                "section": item.entry.section,
+                "text": item.entry.text,
+            })
+        })
+        .collect()
 }
 
 fn event_page_schema(require_query: bool) -> Value {
@@ -579,5 +925,75 @@ mod tests {
         assert_eq!(result.details["canonical_reference"], canonical);
         assert_eq!(tracker.read_refs(), vec![canonical.clone()]);
         assert_eq!(tracker.canonical_reference(&alias), Some(canonical));
+    }
+
+    #[tokio::test]
+    async fn l2_listing_is_not_citeable_until_the_entry_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n## Topics\n\n- Learns vectors visually. <!--m_visual-->".into(),
+            )
+            .unwrap();
+        let tracker = MemoryEvidenceTracker::default();
+        let allowed = vec!["L2/chat.md".into()];
+        let list = ListMemoryEntriesTool::new(store.clone(), tracker.clone(), allowed.clone());
+
+        let listed = list
+            .execute(json!({ "path": "L2/chat.md" }), &make_ctx())
+            .await
+            .unwrap();
+        let reference = listed.details["entries"][0]["reference"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(tracker.read_l2_refs().is_empty());
+        assert_eq!(tracker.canonical_reference(&reference), None);
+
+        let read = ReadMemoryEntryTool::new(store, tracker.clone(), allowed);
+        read.execute(json!({ "reference": reference }), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(tracker.read_l2_refs().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn l2_source_drill_down_tracks_l2_and_l1_reads_separately() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
+        let event = store
+            .record_event(
+                crate::memory_store::MemoryEventCategory::Notebook,
+                "created",
+                "Saved a transformer note",
+                Some("note-1".into()),
+                json!({ "title": "Transformer" }),
+            )
+            .unwrap();
+        store
+            .write(
+                "L2/notebook.md",
+                format!(
+                    "# Notebook memory\n\n## Themes\n\n- Studies transformers. [^1] <!--m_transformer-->\n\n---\n\n[^1]: notebook:{}",
+                    event.id
+                ),
+            )
+            .unwrap();
+        let tracker = MemoryEvidenceTracker::default();
+        let reference = "memory:L2/notebook.md#m_transformer";
+        let tool =
+            ReadMemoryEntrySourcesTool::new(store, tracker.clone(), vec!["L2/notebook.md".into()]);
+
+        tool.execute(json!({ "reference": reference }), &make_ctx())
+            .await
+            .unwrap();
+
+        assert_eq!(tracker.read_l2_refs(), vec![reference.to_string()]);
+        assert_eq!(
+            tracker.read_l1_refs(),
+            vec![format!("notebook:{}", event.id)]
+        );
     }
 }

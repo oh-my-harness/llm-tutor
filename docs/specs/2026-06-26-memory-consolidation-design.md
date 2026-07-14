@@ -775,7 +775,12 @@ presented as factual proof about external domains.
 Current `llm-tutor` has Markdown memory files, event-level L1 references,
 bounded runtime evidence tools, a structured `MemoryChangeSet`, central diff
 review, atomic selected-change apply, history, undo, and in-process run rejoin
-after workspace navigation. The remaining hardening work should:
+after workspace navigation. As of 2026-07-14, L3 runs also use canonical L2
+entry references, cursor-paginated L2 discovery/read tools, target-specific L2
+source matrices, separate L2/L1 read tracking, and the explicit `recent.md` L1
+exception. Ordinary L3 runs are not mounted with direct L1 tools and their
+changes must cite an L2 entry read in the current run. The remaining hardening
+work should:
 
 - Preserve durable pointers to complete source artifacts instead of relying on
   truncated event summaries alone.
@@ -783,6 +788,9 @@ after workspace navigation. The remaining hardening work should:
 - Add retry/rebase controls for failed or stale runs.
 - Persist run envelopes so an in-progress Memory run can rejoin after a full
   application restart.
+- Add L2 freshness metadata and source-revision validation at apply time.
+- Complete the Teaching Strategy dependency DAG through accepted Profile,
+  Scope, and Preferences entries.
 - Keep L3 updates hedged and source-attributed.
 - Extend end-to-end tests to cover original-artifact resolution, cancellation,
   restart rejoin, and cross-surface expansion in a live model run.

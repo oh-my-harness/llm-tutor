@@ -117,6 +117,27 @@ pub struct MemoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryL2Entry {
+    pub reference: String,
+    pub path: String,
+    pub revision: String,
+    pub entry: MemoryEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryL2EntryPage {
+    pub entries: Vec<MemoryL2Entry>,
+    pub next_cursor: Option<String>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryL2EntrySources {
+    pub memory: MemoryL2Entry,
+    pub sources: Vec<ResolvedMemorySource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryTargetCatalog {
     pub title: String,
     #[serde(rename = "existingMarkdown")]
@@ -417,6 +438,93 @@ impl MemoryStore {
         Err(anyhow!("memory source ref `{reference}` was not found"))
     }
 
+    pub fn query_l2_entries(
+        &self,
+        paths: &[String],
+        query: Option<&str>,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<MemoryL2EntryPage> {
+        let selected_paths = if paths.is_empty() {
+            DEFAULT_FILES
+                .iter()
+                .map(|(path, _)| *path)
+                .filter(|path| path.starts_with("L2/"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        } else {
+            paths
+                .iter()
+                .map(|path| validate_l2_path(path))
+                .collect::<Result<Vec<_>>>()?
+        };
+        let query = query
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_lowercase);
+        let mut results = Vec::new();
+        for path in selected_paths {
+            let file = self.read(&path)?;
+            for entry in parse_memory_entries(&file.markdown) {
+                let matches = query.as_ref().is_none_or(|query| {
+                    entry.text.to_lowercase().contains(query)
+                        || entry
+                            .section
+                            .as_deref()
+                            .is_some_and(|section| section.to_lowercase().contains(query))
+                });
+                if matches {
+                    results.push(memory_l2_entry(&file, entry)?);
+                }
+            }
+        }
+        let total = results.len();
+        let offset = cursor
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|_| anyhow!("invalid L2 memory cursor"))
+            })
+            .transpose()?
+            .unwrap_or_default()
+            .min(total);
+        let limit = limit.clamp(1, 100);
+        let entries = results
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let next_offset = offset + entries.len();
+        Ok(MemoryL2EntryPage {
+            entries,
+            next_cursor: (next_offset < total).then(|| next_offset.to_string()),
+            total,
+        })
+    }
+
+    pub fn read_l2_entry(&self, reference: &str) -> Result<MemoryL2Entry> {
+        let (path, marker) = parse_l2_entry_reference(reference)?;
+        let file = self.read(&path)?;
+        let entry = parse_memory_entries(&file.markdown)
+            .into_iter()
+            .find(|entry| entry.marker == marker)
+            .ok_or_else(|| anyhow!("L2 memory entry `{reference}` was not found"))?;
+        memory_l2_entry(&file, entry)
+    }
+
+    pub fn read_l2_entry_sources(&self, reference: &str) -> Result<MemoryL2EntrySources> {
+        let memory = self.read_l2_entry(reference)?;
+        let sources = memory
+            .entry
+            .source_refs
+            .iter()
+            .map(|reference| self.resolve_source_ref(reference))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(MemoryL2EntrySources { memory, sources })
+    }
+
     pub fn apply_memory_changes(
         &self,
         target_path: &str,
@@ -451,7 +559,9 @@ impl MemoryStore {
         for change in selected {
             validate_memory_change(change, &allowed_sections)?;
             for reference in &change.refs {
-                if reference.contains(':') {
+                if reference.starts_with("memory:L2/") {
+                    self.read_l2_entry(reference)?;
+                } else if reference.contains(':') {
                     self.resolve_source_ref(reference)?;
                 }
             }
@@ -504,22 +614,50 @@ impl MemoryStore {
         let target_path = path_to_slash(&normalize_memory_path(target_path)?);
         let target = target_catalog(&target_path, current.to_string());
         let default_surface = target_surface(&target_path);
-        Ok(serde_json::json!({
+        let mut context = serde_json::json!({
             "target": {
-                "path": target_path,
+                "path": &target_path,
                 "title": target.title,
                 "focus": target.focus,
                 "allowedSections": target.allowed_sections,
                 "baseRevision": memory_revision(current),
                 "defaultSurface": default_surface,
             },
-            "l1Catalog": self.event_catalog()?,
-            "instructions": {
+        });
+        if target_path.starts_with("L3/") {
+            let allowed_paths = l3_source_paths(&target_path);
+            context["l2Catalog"] = serde_json::Value::Array(
+                allowed_paths
+                    .iter()
+                    .map(|path| {
+                        let file = self.read(path)?;
+                        Ok(serde_json::json!({
+                            "path": file.path,
+                            "revision": file.revision,
+                            "entryCount": parse_memory_entries(&file.markdown).len(),
+                        }))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            );
+            context["instructions"] = serde_json::json!({
+                "evidenceLayer": "L2",
+                "allowedL2Paths": allowed_paths,
+                "readBeforeCiting": true,
+                "boundedL1Exception": target_path == "L3/recent.md",
+            });
+            if target_path == "L3/recent.md" {
+                context["l1Catalog"] = serde_json::to_value(self.event_catalog()?)?;
+            }
+        } else {
+            context["l1Catalog"] = serde_json::to_value(self.event_catalog()?)?;
+            context["instructions"] = serde_json::json!({
+                "evidenceLayer": "L1",
                 "allL1Addressable": true,
                 "startWithTargetSurface": true,
                 "readBeforeCiting": true,
-            }
-        }))
+            });
+        }
+        Ok(context)
     }
 
     fn all_events(&self) -> Result<Vec<MemoryEvent>> {
@@ -603,6 +741,26 @@ pub fn parse_memory_entries(markdown: &str) -> Vec<MemoryEntry> {
         }
     }
     entries
+}
+
+pub fn l2_entry_reference(path: &str, marker: &str) -> Result<String> {
+    let path = validate_l2_path(path)?;
+    let marker = marker.trim();
+    serialize_memory_marker(marker)?;
+    Ok(format!("memory:{path}#{marker}"))
+}
+
+pub fn parse_l2_entry_reference(reference: &str) -> Result<(String, String)> {
+    let value = reference
+        .trim()
+        .strip_prefix("memory:")
+        .ok_or_else(|| anyhow!("L2 memory ref must start with `memory:`"))?;
+    let (path, marker) = value
+        .split_once('#')
+        .ok_or_else(|| anyhow!("L2 memory ref must look like memory:L2/path.md#m_id"))?;
+    let path = validate_l2_path(path)?;
+    serialize_memory_marker(marker)?;
+    Ok((path, marker.to_string()))
 }
 
 pub fn serialize_memory_entries(title: &str, entries: &[MemoryEntry]) -> Result<String> {
@@ -1064,6 +1222,25 @@ fn target_surface(target_path: &str) -> Option<&'static str> {
     }
 }
 
+fn l3_source_paths(target_path: &str) -> Vec<&'static str> {
+    match target_path {
+        "L3/profile.md" | "L3/scope.md" | "L3/recent.md" => vec![
+            "L2/chat.md",
+            "L2/quiz.md",
+            "L2/notebook.md",
+            "L2/knowledge.md",
+        ],
+        "L3/preferences.md" => vec!["L2/chat.md", "L2/notebook.md"],
+        "L3/teaching_strategy.md" => vec![
+            "L2/chat.md",
+            "L2/quiz.md",
+            "L2/notebook.md",
+            "L2/knowledge.md",
+        ],
+        _ => Vec::new(),
+    }
+}
+
 fn target_catalog(target_path: &str, existing_markdown: String) -> MemoryTargetCatalog {
     let (title, focus, sections) = match target_path {
         "L2/chat.md" => (
@@ -1147,6 +1324,23 @@ fn normalize_memory_path(path: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(normalized))
 }
 
+fn validate_l2_path(path: &str) -> Result<String> {
+    let path = path_to_slash(&normalize_memory_path(path)?);
+    if !path.starts_with("L2/") {
+        return Err(anyhow!("memory entry path must target an L2 file"));
+    }
+    Ok(path)
+}
+
+fn memory_l2_entry(file: &MemoryFile, entry: MemoryEntry) -> Result<MemoryL2Entry> {
+    Ok(MemoryL2Entry {
+        reference: l2_entry_reference(&file.path, &entry.marker)?,
+        path: file.path.clone(),
+        revision: file.revision.clone(),
+        entry,
+    })
+}
+
 fn path_to_slash(path: &Path) -> String {
     path.components()
         .map(|part| part.as_os_str().to_string_lossy())
@@ -1222,6 +1416,74 @@ mod tests {
             .unwrap(),
             "[^1]: quiz:session:q1"
         );
+    }
+
+    #[test]
+    fn l2_entry_references_round_trip_and_resolve_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let event = store
+            .record_event(
+                MemoryEventCategory::Chat,
+                "answered",
+                "Explained vectors visually",
+                Some("session-1".into()),
+                json!({ "answer": "complete evidence" }),
+            )
+            .unwrap();
+        store
+            .write(
+                "L2/chat.md",
+                format!(
+                    "# Chat memory\n\n## Topics\n\n- Learns vectors visually. [^1] <!--m_visual-->\n\n---\n\n[^1]: chat:{}",
+                    event.id
+                ),
+            )
+            .unwrap();
+
+        let reference = l2_entry_reference("L2/chat.md", "m_visual").unwrap();
+        assert_eq!(reference, "memory:L2/chat.md#m_visual");
+        assert_eq!(
+            parse_l2_entry_reference(&reference).unwrap(),
+            ("L2/chat.md".into(), "m_visual".into())
+        );
+        let matches = store
+            .query_l2_entries(&["L2/chat.md".into()], Some("vectors"), None, 10)
+            .unwrap();
+        assert_eq!(matches.entries[0].reference, reference);
+        let resolved = store.read_l2_entry_sources(&reference).unwrap();
+        assert_eq!(resolved.sources.len(), 1);
+        assert_eq!(resolved.sources[0].event.id, event.id);
+    }
+
+    #[test]
+    fn l3_context_uses_l2_catalog_except_for_recent_l1_exception() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+
+        let profile = store
+            .agent_context("L3/profile.md", "# Student profile")
+            .unwrap();
+        assert!(profile.get("l1Catalog").is_none());
+        assert_eq!(profile["instructions"]["evidenceLayer"], "L2");
+        assert_eq!(profile["l2Catalog"].as_array().unwrap().len(), 4);
+
+        let preferences = store
+            .agent_context("L3/preferences.md", "# Learning preferences")
+            .unwrap();
+        let paths = preferences["l2Catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["L2/chat.md", "L2/notebook.md"]);
+
+        let recent = store
+            .agent_context("L3/recent.md", "# Recent learning context")
+            .unwrap();
+        assert!(recent.get("l1Catalog").is_some());
+        assert_eq!(recent["instructions"]["boundedL1Exception"], true);
     }
 
     #[test]

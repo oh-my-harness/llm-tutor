@@ -286,8 +286,9 @@ structured change sets, and central diff review.
 
 ### L3 Layered Generation Redesign
 
-Status: designed on 2026-07-14; Phase 0 cleanup completed, layered runtime
-pending.
+Status: updated on 2026-07-14; Phase 0 cleanup and the Phase 1 L2 evidence
+boundary are complete. The first layer-specific routing slice is implemented;
+the dependency DAG, freshness checks, and remaining hardening stay pending.
 
 #### Phase 0: Remove the Competing Legacy Path
 
@@ -302,34 +303,34 @@ pending.
 
 #### Phase 1: L2 Entry Evidence Boundary
 
-- [ ] Add stable canonical references for L2 entries, for example
+- [x] Add stable canonical references for L2 entries, for example
   `memory:L2/chat.md#m_xxx`.
-- [ ] Add bounded list/search/read tools for L2 entries.
-- [ ] Add an L2-entry source drill-down tool that resolves the entry's L1 refs.
-- [ ] Track read L2 refs separately from candidate lists and L1 verification
+- [x] Add bounded, cursor-paginated list/search/read tools for L2 entries.
+- [x] Add an L2-entry source drill-down tool that resolves the entry's L1 refs.
+- [x] Track read L2 refs separately from candidate lists and L1 verification
   refs.
 
 #### Phase 2: Layer-Specific Runtime
 
-- [ ] Route L2 runs to L1 event tools and L3 runs to L2 entry tools.
-- [ ] Implement the L3 source matrix for Profile, Scope, Preferences, Recent,
-  and Teaching Strategy.
-- [ ] Treat `recent.md` as the explicit bounded-L1 chronology exception.
+- [x] Route L2 runs to L1 event tools and L3 runs to L2 entry tools.
+- [x] Implement the L2 portion of the L3 source matrix for Profile, Scope,
+  Preferences, Recent, and Teaching Strategy.
+- [x] Treat `recent.md` as the explicit bounded-L1 chronology exception.
 - [ ] Enforce the dependency DAG and generate Teaching Strategy only from
   accepted Profile, Scope, Preferences, and relevant L2 evidence.
 - [ ] Add L2 freshness metadata and warn before running L3 from stale inputs.
-- [ ] Expose L3-specific discovery, read, verification, and validation stages
+- [x] Expose L3-specific discovery, read, verification, and validation stages
   in the workbench flow.
 
 #### Phase 3: Validation and Tests
 
-- [ ] Require each ordinary L3 change to cite a stable L2 entry actually read
+- [x] Require each ordinary L3 change to cite a stable L2 entry actually read
   in the current run.
 - [ ] Reject bare surface refs, catalog-only refs, stale entry revisions, and
   circular L3 dependencies.
 - [ ] Verify that Research conversation reaches L3 through Chat L1/L2, saved
   reports through Notebook L1/L2, and workflow traces never enter Memory.
-- [ ] Add boundary tests proving ordinary L3 runs do not scan L1 directly.
+- [x] Add boundary tests proving ordinary L3 runs do not receive direct L1 tools.
 
 ## 7. Phase 5: `read_memory` Tool
 

@@ -310,15 +310,24 @@ fn validate_workflow_change(change: &MemoryWorkflowChange) -> Result<()> {
 }
 
 fn memory_prompt(input: &MemoryWorkflowInput) -> String {
+    let is_l3 = input.target_path.starts_with("L3/");
+    let is_recent = input.target_path == "L3/recent.md";
+    let evidence_rules = if is_recent {
+        "- Use list_memory_entries or search_memory_entries to discover L2 candidates within the allowed source matrix.\n- Use read_memory_entry before citing an L2 entry.\n- Prefer L2 evidence; use the L1 event tools only for bounded recent chronology or to verify an L2 source.\n- Cite canonical memory:L2/path.md#m_id refs for L2 evidence and canonical event refs only for the recent chronology exception."
+    } else if is_l3 {
+        "- Use list_memory_entries or search_memory_entries to discover candidates within target.instructions.allowedL2Paths.\n- Use read_memory_entry before citing an L2 entry.\n- Use read_memory_entry_sources only when an L2 summary needs verification or more detail.\n- Every finding and change must cite canonical memory:L2/path.md#m_id refs returned by a read tool.\n- Do not cite or scan L1 events directly."
+    } else {
+        "- Use list_memory_events or search_memory_events to discover candidates, starting with the target surface.\n- Use read_memory_event, read_memory_context, or read_memory_source before citing evidence.\n- Every finding and change must cite canonical event-level refs returned by a read tool."
+    };
     let action_rules = match input.action {
         MemoryWorkflowAction::Update => {
-            "- Use list_memory_events or search_memory_events to discover candidates, starting with the target surface.\n- Use read_memory_event, read_memory_context, or read_memory_source before citing evidence.\n- Return insert or evidence-backed replace changes.\n- Prefer durable learning-relevant observations over one-off chatter.\n- Every change must cite canonical event-level refs returned by a read tool.\n- Use only sections listed in target.allowedSections."
+            "- Return insert or evidence-backed replace changes.\n- Prefer durable learning-relevant observations over one-off chatter.\n- Use only sections listed in target.allowedSections."
         }
         MemoryWorkflowAction::Check => {
-            "- Resolve existing evidence with read_memory_source before judging supported claims.\n- Return compact findings for contradictions, stale facts, missing evidence, duplicates, unclear wording, and risky overgeneralizations.\n- If useful, include stable-entry-id changes.\n- Every change must cite canonical event-level refs returned by a read tool and include a short reason."
+            "- Resolve existing evidence with the appropriate read tool before judging supported claims.\n- Return compact findings for contradictions, stale facts, missing evidence, duplicates, unclear wording, and risky overgeneralizations.\n- If useful, include stable-entry-id changes.\n- Every change must include a short reason."
         }
         MemoryWorkflowAction::Dedupe => {
-            "- Return replace/delete changes against stable entry ids from the Markdown markers.\n- Merge duplicate or overlapping bullets.\n- Every change must cite canonical event-level refs returned by a read tool.\n- Do not insert new facts or delete unique useful memory.\n- Include a short reason for each change."
+            "- Return replace/delete changes against stable entry ids from the Markdown markers.\n- Merge duplicate or overlapping bullets.\n- Do not insert new facts or delete unique useful memory.\n- Include a short reason for each change."
         }
     };
     let source = if input.consolidation_input_json.trim().is_empty() {
@@ -329,19 +338,28 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
     let (language_rules, output_example) = match input.output_language {
         MemoryOutputLanguage::ZhCn => (
             "- Write summary, finding.message, change.text, and change.reason in Simplified Chinese.\n- Preserve code, API names, model names, paper titles, and other proper nouns when translation would reduce precision.\n- Do not translate or rewrite existing memory merely to change its language.\n- Keep schema values and section keys exactly as specified, even when they are English.",
-            r#"{"summary":"发现一项可审核的更新","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"这条记忆缺少充分证据","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"一条简洁的学习者记忆","refs":["chat:event-id"],"reason":"这项修改有助于后续个性化教学"}]}"#,
+            if is_l3 {
+                r#"{"summary":"发现一项可审核的更新","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"这条记忆缺少充分证据","refs":["memory:L2/chat.md#m_example"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"一条简洁的学习者记忆","refs":["memory:L2/chat.md#m_example"],"reason":"这项修改有助于后续个性化教学"}]}"#
+            } else {
+                r#"{"summary":"发现一项可审核的更新","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"这条记忆缺少充分证据","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"一条简洁的学习者记忆","refs":["chat:event-id"],"reason":"这项修改有助于后续个性化教学"}]}"#
+            },
         ),
         MemoryOutputLanguage::EnUs => (
             "- Write summary, finding.message, change.text, and change.reason in English.\n- Preserve code, API names, model names, paper titles, and other proper nouns when translation would reduce precision.\n- Do not translate or rewrite existing memory merely to change its language.\n- Keep schema values and section keys exactly as specified.",
-            r#"{"summary":"One reviewable update found","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"This memory lacks sufficient evidence","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"A concise learner memory","refs":["chat:event-id"],"reason":"This change supports future personalization"}]}"#,
+            if is_l3 {
+                r#"{"summary":"One reviewable update found","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"This memory lacks sufficient evidence","refs":["memory:L2/chat.md#m_example"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"A concise learner memory","refs":["memory:L2/chat.md#m_example"],"reason":"This change supports future personalization"}]}"#
+            } else {
+                r#"{"summary":"One reviewable update found","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"This memory lacks sufficient evidence","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"A concise learner memory","refs":["chat:event-id"],"reason":"This change supports future personalization"}]}"#
+            },
         ),
     };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\nOutput language: {output_language:?}\n\nLanguage contract:\n{language_rules}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and compact L1 catalog:\n```json\n{source}\n```\n\nAll L1 content is available through the read-only memory evidence tools. Do not assume a list/search summary is sufficient evidence.\n\nReturn JSON exactly like:\n{output_example}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
+        "Target memory file: {target_path}\nAction: {action:?}\nOutput language: {output_language:?}\n\nLanguage contract:\n{language_rules}\n\nEvidence contract:\n{evidence_rules}\n\nAction rules:\n{action_rules}\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and evidence catalog:\n```json\n{source}\n```\n\nA list/search result is only a candidate and is never sufficient evidence by itself.\n\nReturn JSON exactly like:\n{output_example}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
         target_path = input.target_path,
         action = input.action,
         output_language = input.output_language,
         language_rules = language_rules,
+        evidence_rules = evidence_rules,
         output_example = output_example,
         numbered_current = line_numbered_markdown(&input.current_markdown),
         source = source,
@@ -510,5 +528,34 @@ mod tests {
         assert!(prompt.contains("一条简洁的学习者记忆"));
         assert!(prompt.contains("Do not translate or rewrite existing memory"));
         assert!(prompt.contains("Keep schema values and section keys exactly as specified"));
+    }
+
+    #[test]
+    fn l3_memory_prompt_requires_read_l2_entry_evidence() {
+        let prompt = memory_prompt(&MemoryWorkflowInput {
+            target_path: "L3/profile.md".into(),
+            action: MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
+            current_markdown: "# Student profile".into(),
+            consolidation_input_json: r#"{"instructions":{"evidenceLayer":"L2"}}"#.into(),
+        });
+
+        assert!(prompt.contains("Use read_memory_entry before citing an L2 entry"));
+        assert!(prompt.contains("memory:L2/chat.md#m_example"));
+        assert!(prompt.contains("Do not cite or scan L1 events directly"));
+    }
+
+    #[test]
+    fn recent_memory_prompt_documents_the_bounded_l1_exception() {
+        let prompt = memory_prompt(&MemoryWorkflowInput {
+            target_path: "L3/recent.md".into(),
+            action: MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
+            current_markdown: "# Recent learning context".into(),
+            consolidation_input_json: "{}".into(),
+        });
+
+        assert!(prompt.contains("bounded recent chronology"));
+        assert!(prompt.contains("Prefer L2 evidence"));
     }
 }
