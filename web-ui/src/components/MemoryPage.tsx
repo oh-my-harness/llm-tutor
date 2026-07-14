@@ -3,7 +3,9 @@ import {
   ArrowLeft,
   Bot,
   Brain,
+  Check,
   CheckCircle2,
+  ChevronDown,
   FileText,
   GitBranch,
   Layers3,
@@ -579,22 +581,12 @@ function AgentWorkspace({
           <AssistModeButton icon={CheckCircle2} label="检查" active={assistAction === 'check'} disabled={loading} onClick={() => onAssistActionChange('check')} />
           <AssistModeButton icon={GitBranch} label="去重" active={assistAction === 'dedupe'} disabled={loading} onClick={() => onAssistActionChange('dedupe')} />
         </div>
-        <label className="block">
-          <span className="sr-only">运行模型</span>
-          <select
-            className="h-9 w-full rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-800 outline-none focus:border-blue-400"
-            value={selectedModelId}
-            disabled={loading}
-            onChange={(event) => onSelectedModelChange(event.target.value)}
-            title={selectedModel?.model ?? '选择模型'}
-          >
-            {modelOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label} · {option.model || '未配置'}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ModelPicker
+          options={modelOptions}
+          selectedId={selectedModelId}
+          disabled={loading}
+          onSelect={onSelectedModelChange}
+        />
         <button
           className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200"
           type="button"
@@ -641,6 +633,95 @@ function AgentWorkspace({
         )}
       </div>
     </aside>
+  )
+}
+
+function ModelPicker({
+  options,
+  selectedId,
+  disabled,
+  onSelect,
+}: {
+  options: MemoryModelOption[]
+  selectedId: string
+  disabled: boolean
+  onSelect: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = options.find((option) => option.id === selectedId) ?? options[0]
+
+  return (
+    <div
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setOpen(false)
+      }}
+    >
+      <button
+        className="flex min-h-11 w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-left outline-none transition hover:border-blue-300 hover:bg-blue-50/40 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600">
+          <Bot size={14} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-gray-900">
+            {selected?.label ?? '选择模型'}
+          </span>
+          <span className={`mt-0.5 block truncate text-[11px] ${selected?.configured ? 'text-gray-400' : 'text-red-600'}`}>
+            {selected?.configured ? selected.model : '配置不完整'}
+          </span>
+        </span>
+        <ChevronDown
+          size={15}
+          className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg"
+          role="listbox"
+          aria-label="运行模型"
+        >
+          {options.map((option) => {
+            const active = option.id === selectedId
+            return (
+              <button
+                key={option.id}
+                className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left ${
+                  active ? 'bg-blue-50' : 'hover:bg-gray-50'
+                }`}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                  onSelect(option.id)
+                  setOpen(false)
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className={`block truncate text-xs font-medium ${active ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {option.label}
+                  </span>
+                  <span className={`mt-0.5 block truncate text-[11px] ${option.configured ? 'text-gray-400' : 'text-red-600'}`}>
+                    {option.configured ? option.model : `${option.model || '未配置模型'} · 缺少 API Key`}
+                  </span>
+                </span>
+                {active && <Check size={14} className="shrink-0 text-blue-600" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
