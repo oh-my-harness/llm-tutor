@@ -72,7 +72,7 @@ Recommended event shape:
 MemoryEvent {
   id: string
   ts: string
-  surface: 'chat' | 'quiz' | 'notebook' | 'knowledge' | 'research'
+  surface: 'chat' | 'quiz' | 'notebook' | 'knowledge'
   kind: string
   title?: string
   content: string
@@ -99,10 +99,15 @@ memory/L2/notebook.md
 memory/L2/knowledge.md
 ```
 
-Research remains an L1 evidence surface but does not own an L2 document.
-Saved reports are Notebook artifacts, so stable research habits and report
-preferences are consolidated into `notebook.md`. Report bodies and external
-facts stay in Notebook reports rather than being duplicated into Memory.
+Research does not own an L1 category or an L2 document. Ordinary Research-mode
+clarification and planning conversation is recorded as Chat L1 with
+`capability = research`. After `create_research_report` starts, search, fetch,
+source-selection, progress, the structured report attachment, and the unsaved
+report body remain in Research runtime/session state and are not
+learner-memory evidence. Saving a report to Notebook is the explicit
+persistence boundary; the resulting Notebook event may inform `notebook.md`.
+Report bodies and external facts stay in Notebook reports rather than being
+duplicated into Memory.
 
 ### L3: Cross-Surface Learner Memory
 
@@ -428,12 +433,12 @@ Reference routing rules:
 chat:<session_id>[:message_id]              -> Chat session, optional message focus
 notebook:<entry_id>                         -> Space / Notebook entry
 quiz:<quiz_id>[:question_id]                -> Space / Quiz Bank item, optional question focus
-research:<notebook_entry_id>                -> Space / Notebook research report
 kb:<knowledge_base_id>:<doc_id>[:chunk_id]  -> Knowledge Base document/chunk view
 ```
 
-The retired `book:` reference form is removed rather than retained as a
-compatibility route.
+Saved Research reports use the ordinary `notebook:<entry_id>` route. The
+retired `research:` and `book:` reference forms are removed rather than
+retained as compatibility routes.
 
 The same source reference component should be reused by Memory, Student Profile,
 Research reports, Quiz review, and RAG answer citations where practical.
@@ -602,7 +607,7 @@ Required tool capabilities:
 
 ```ts
 list_memory_events({
-  surface?: 'chat' | 'quiz' | 'notebook' | 'knowledge' | 'research'
+  surface?: 'chat' | 'quiz' | 'notebook' | 'knowledge'
   from?: string
   to?: string
   cursor?: string

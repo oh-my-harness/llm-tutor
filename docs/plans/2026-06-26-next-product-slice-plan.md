@@ -132,7 +132,8 @@ Status: in progress.
 
 Tasks:
 
-- [x] Keep L1 raw events for chat, quiz, notebook, and research.
+- [ ] Keep L1 raw events for chat, quiz, notebook, and knowledge; fold
+  Research-mode conversation into Chat L1 and remove separate Research L1.
 - [x] Keep L3 Markdown files as the first agent-readable memory surface.
 - [x] Add manual consolidation preview and apply flow.
 - [x] Show recent events that will be used before consolidation.

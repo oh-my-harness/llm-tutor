@@ -154,7 +154,7 @@ memory/
     chat_events.jsonl
     quiz_events.jsonl
     notebook_events.jsonl
-    research_events.jsonl
+    knowledge_events.jsonl
 
   L2/
     chat.md
@@ -192,7 +192,8 @@ memory/
 - [x] Add Markdown file editor.
 - [x] Add stable entry id parser/serializer for memory bullets.
 - [x] Add source reference parser/serializer.
-- [x] Record L1 events for chat, quiz, notebook, and research.
+- [x] Record L1 events for chat, quiz, notebook, knowledge, and Research-mode
+  conversations.
 - [x] Add manual consolidation action.
 - [x] Show consolidation preview before applying changes.
 - [x] Keep L1 out of the main visualization while retaining it as workspace event storage.
@@ -202,7 +203,14 @@ memory/
   preferences while keeping report bodies in Notebook.
 - [ ] Delete the obsolete `research.md` target and skeleton without a legacy
   content migration.
-- [ ] Keep Research events available as L1 evidence for Notebook and L3 runs.
+- [ ] Reclassify Research-mode conversations as Chat L1 with
+  `capability = research` and remove the separate Research event category,
+  file, source filter, and routing.
+- [ ] Keep Research workflow traces and unsaved reports outside Memory; create
+  Notebook L1 evidence only after the user explicitly saves a report.
+- [ ] Exclude report-generation turns and structured report attachments from
+  Chat L1, and replace Research memory refs with ordinary Notebook refs after
+  save.
 
 ### Acceptance
 
@@ -231,7 +239,8 @@ structured change sets, and central diff review.
 - [x] Give every L1 event a stable event/turn reference instead of reusing a
   session-only reference for multiple events.
 - [ ] Preserve complete evidence through a bounded snapshot or durable source
-  pointer for Chat, Quiz, Notebook, Knowledge, and Research events.
+  pointer for Chat, Quiz, Notebook, and Knowledge events. Saved Research
+  reports use their Notebook artifact pointer.
 - [x] Add runtime-native, read-only tools to list/search L1 events, read an
   event, read surrounding context, and resolve a complete L1 event snapshot.
 - [ ] Resolve each event onward to its original product artifact when the

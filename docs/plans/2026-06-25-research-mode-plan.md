@@ -406,6 +406,10 @@ referenced, or used for later Quiz generation from Notebook.
 - [x] Add create/read Notebook entry APIs.
 - [x] Persist research report metadata in `NotebookEntry(type = research_report)`.
 - [x] Restore research reports from Notebook entries and session links.
+- [ ] Remove separate Research learner-memory events. Record Research-mode
+  clarification conversation as Chat L1 with capability metadata, exclude
+  report-generation turns and attachments, keep workflow evidence in
+  runtime/session trace, and create Notebook L1 evidence only after save.
 
 ### Phase 5: Book Save (Retired)
 

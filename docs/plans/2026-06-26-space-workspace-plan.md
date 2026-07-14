@@ -198,7 +198,7 @@ memory/
     chat_events.jsonl
     quiz_events.jsonl
     notebook_events.jsonl
-    research_events.jsonl
+    knowledge_events.jsonl
 
   L2/
     chat.md
@@ -237,9 +237,13 @@ L2 stores Markdown summaries per product surface:
   preferred note/report formats, and unresolved questions.
 - `knowledge.md`: document interests, frequent queries, and knowledge gaps.
 
-Research remains available as L1 evidence, including activity that has not yet
-been saved, but does not own a separate L2 document. Report bodies and external
-findings remain Notebook artifacts rather than learner-memory copies.
+Research does not own a separate L1 category or L2 document. Ordinary
+Research clarification and planning conversation is Chat L1 with
+`capability = research`; report-generation turns, workflow traces, structured
+report attachments, and unsaved reports remain outside Memory. Saving a report
+to Notebook creates the Notebook evidence that may inform `notebook.md`.
+Report bodies and external findings remain Notebook artifacts rather than
+learner-memory copies.
 
 ### L3: Cross-Surface Memory
 

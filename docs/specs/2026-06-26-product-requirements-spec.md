@@ -492,15 +492,19 @@ other generated learning records.
 - REQ-693: L1 shall include chat events. Status: planned.
 - REQ-694: L1 shall include quiz events. Status: planned.
 - REQ-695: L1 shall include notebook events. Status: planned.
-- REQ-696: L1 shall include research events. Status: planned.
+- REQ-696: The former separate Research L1 event category is retired. Ordinary
+  Research-mode clarification and planning conversation shall use Chat L1 with
+  `capability = research`;
+  workflow traces are not learner-memory evidence, and saved reports enter L1
+  through Notebook. Status: planned.
 - REQ-697: Memory shall support an L2 per-surface summary layer. Status: planned.
 - REQ-698: L2 shall include `chat.md`. Status: planned.
 - REQ-699: L2 shall include `quiz.md`. Status: planned.
 - REQ-700: L2 shall include `notebook.md`. Status: planned.
 - REQ-700A: L2 shall include `knowledge.md`. Status: planned.
 - REQ-701: The former requirement for a separate `research.md` L2 file is
-  retired. Research remains an L1 evidence surface, while durable report and
-  research-work habits are consolidated into `notebook.md`.
+  retired. Durable behavior from explicitly saved Research reports is
+  consolidated into `notebook.md`.
 - REQ-702: Memory shall support an L3 cross-surface memory layer. Status: planned.
 - REQ-703: L3 shall include `recent.md`. Status: planned.
 - REQ-704: L3 shall include `profile.md`. Status: planned.
@@ -626,12 +630,25 @@ other generated learning records.
   formats, report preferences, recurring research themes, and unresolved
   questions. It shall not copy report bodies or external factual findings into
   learner memory. Status: planned.
-- REQ-753: Research workflow events and unsaved report runs shall remain
-  addressable in L1 so the Memory agent can inspect research behavior even
-  though Research no longer owns an L2 document. Status: planned.
+- REQ-753: Research workflow searches, fetched sources, intermediate progress,
+  traces, and unsaved reports shall remain in Research runtime/session state
+  and shall not be treated as L1 learner-memory evidence. Status: planned.
 - REQ-754: Existing `L2/research.md` content shall not be migrated or retained.
   The obsolete file may be removed when the active L2 catalog is updated.
   Status: planned.
+- REQ-755: `MemoryEventCategory::Research`, `L1/research_events.jsonl`, and the
+  Research-specific memory source filter shall be removed without legacy data
+  migration. Ordinary Research-mode conversation events shall be recorded as
+  Chat L1 with their capability metadata preserved. Status: planned.
+- REQ-756: Saving a Research report to Notebook shall be the explicit boundary
+  that makes the report eligible for long-term memory consolidation. The saved
+  report shall produce or update Notebook L1 evidence and may inform
+  `notebook.md`; an unsaved report shall not. Status: planned.
+- REQ-757: Once `create_research_report` starts, its search/fetch trace,
+  structured report attachment, and report body shall be excluded from Chat L1
+  recording. A saved report shall use the normal Notebook event and
+  `notebook:` reference contract; no `research:` memory reference shall be
+  created. Status: planned.
 
 ## 21. Markdown Rendering
 
