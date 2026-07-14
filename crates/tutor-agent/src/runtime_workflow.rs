@@ -155,6 +155,20 @@ pub fn validate_quiz_generation_workflow() -> Result<()> {
 }
 
 pub fn memory_workflow() -> Workflow {
+    memory_workflow_with_allowed_tools(vec![
+        "list_memory_events".into(),
+        "search_memory_events".into(),
+        "read_memory_event".into(),
+        "read_memory_context".into(),
+        "read_memory_source".into(),
+        "list_memory_entries".into(),
+        "search_memory_entries".into(),
+        "read_memory_entry".into(),
+        "read_memory_entry_sources".into(),
+    ])
+}
+
+pub fn memory_workflow_with_allowed_tools(allowed_tools: Vec<String>) -> Workflow {
     Workflow {
         entry_step: "prepare_memory".into(),
         steps: vec![
@@ -169,17 +183,7 @@ pub fn memory_workflow() -> Workflow {
                 "Run memory workflow",
                 "Read the workflow Context. The `memory_prompt` variable contains the full memory maintenance instruction, including target file, action, current Markdown, normalized evidence, and output schema. \
                  Maintain learner memory according to that instruction. When done, call submit_step_result with the JSON object requested by `memory_prompt`.",
-                vec![
-                    "list_memory_events".into(),
-                    "search_memory_events".into(),
-                    "read_memory_event".into(),
-                    "read_memory_context".into(),
-                    "read_memory_source".into(),
-                    "list_memory_entries".into(),
-                    "search_memory_entries".into(),
-                    "read_memory_entry".into(),
-                    "read_memory_entry_sources".into(),
-                ],
+                allowed_tools,
             ),
         ],
         edges: vec![Edge {
@@ -462,5 +466,23 @@ mod tests {
         assert!(!search_tools.contains(&"web_fetch".to_string()));
         assert!(read_tools.contains(&"web_fetch".to_string()));
         assert!(!read_tools.contains(&SYNC_SPAWN_TOOL_NAME.to_string()));
+    }
+
+    #[test]
+    fn memory_workflow_declares_only_the_tools_mounted_for_the_run() {
+        let expected = vec![
+            "list_memory_events".to_string(),
+            "read_memory_event".to_string(),
+        ];
+        let workflow = memory_workflow_with_allowed_tools(expected.clone());
+        let tools = workflow
+            .steps
+            .iter()
+            .find(|step| step.id() == "run_memory")
+            .unwrap()
+            .allowed_tools();
+
+        assert_eq!(tools, expected);
+        assert!(!tools.contains(&"read_memory_entry".to_string()));
     }
 }

@@ -718,6 +718,13 @@ read_memory_entry({ reference: string })
 read_memory_entry_sources({ reference: string })
 ```
 
+Each Memory workflow run must declare exactly the tools mounted for that
+target. L2 runs declare only L1 event tools, ordinary L3 runs declare only L2
+entry tools, and `recent.md` declares both sets for its bounded chronology
+exception. A static union of all Memory tools is invalid because runtime tool
+gating may settle a step before the model turn when allowed tools are not
+actually registered.
+
 Listing and searching return candidates but do not make them citeable. Reading
 one stable L2 entry adds its canonical `memory:<path>#<entry_id>` reference to
 the run's read set. Source drill-down resolves the entry's L1 footnotes and

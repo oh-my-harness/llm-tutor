@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
 use crate::runtime_engine::RuntimeDeclarativeJudge;
-use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
+use crate::runtime_workflow::{memory_workflow_with_allowed_tools, validate_memory_workflow};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -107,7 +107,11 @@ pub async fn run_memory_workflow_with_tools(
     tools: Vec<Arc<dyn Tool>>,
 ) -> Result<MemoryWorkflowRun> {
     validate_memory_workflow()?;
-    let workflow = memory_workflow();
+    let allowed_tools = tools
+        .iter()
+        .map(|tool| tool.name().to_string())
+        .collect::<Vec<_>>();
+    let workflow = memory_workflow_with_allowed_tools(allowed_tools);
     let mut engine = WorkflowEngine::new(
         workflow.clone(),
         engine_config,
