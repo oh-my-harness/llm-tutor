@@ -520,6 +520,17 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
 - REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: planned.
 - REQ-722: Clicking a bottom memory reference item shall navigate to the related Chat, Notebook, Quiz, Research, Book, or Knowledge Base surface when possible. Status: planned.
 - REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: planned.
+- REQ-724: The Memory LLM workspace shall require an explicit maintenance mode
+  (`update`, `check`, or `dedupe`) and model selection before the user starts a
+  run; selecting either control shall not start the workflow by itself. Status:
+  implemented.
+- REQ-725: The selected Memory model shall be resolved from the user's saved LLM
+  configurations and passed to the existing `tutor.memory` workflow for that
+  run. Status: implemented.
+- REQ-726: The Memory document shall occupy the primary workspace area. The
+  memory-file rail and LLM workspace shall use compact controls and restrained
+  fixed widths so document reading and editing remain the visual priority.
+  Status: implemented.
 
 ## 21. Markdown Rendering
 

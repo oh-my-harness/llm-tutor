@@ -41,6 +41,12 @@ type TraceChunk = {
   citeableRefs?: string[]
   status: string
 }
+type MemoryModelOption = {
+  id: string
+  label: string
+  model: string
+  configured: boolean
+}
 
 interface MemoryFile {
   path: string
@@ -79,6 +85,10 @@ export function MemoryPage({
   const [activePath, setActivePath] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('rendered')
+  const [assistAction, setAssistAction] = useState<AssistAction>('update')
+  const [selectedModelId, setSelectedModelId] = useState(
+    settings.activeLlmConfigId ?? '__default__',
+  )
   const [assistResult, setAssistResult] = useState<AssistResult | null>(null)
   const [status, setStatus] = useState('Loading memory...')
   const [loading, setLoading] = useState(false)
@@ -89,6 +99,16 @@ export function MemoryPage({
   )
   const l2Files = useMemo(() => l2Paths.map((path) => files.find((file) => file.path === path)).filter(Boolean) as MemoryFile[], [files])
   const l3Files = useMemo(() => l3Paths.map((path) => files.find((file) => file.path === path)).filter(Boolean) as MemoryFile[], [files])
+  const modelOptions = useMemo(() => memoryModelOptions(settings), [settings])
+
+  useEffect(() => {
+    if (modelOptions.some((option) => option.id === selectedModelId)) return
+    const activeId = settings.activeLlmConfigId
+    const preferredId = activeId && modelOptions.some((option) => option.id === activeId)
+      ? activeId
+      : modelOptions[0]?.id ?? '__default__'
+    setSelectedModelId(preferredId)
+  }, [modelOptions, selectedModelId, settings.activeLlmConfigId])
 
   const loadFiles = useCallback(async () => {
     setLoading(true)
@@ -173,13 +193,15 @@ export function MemoryPage({
     }
   }
 
-  const runAssist = async (action: AssistAction) => {
+  const runAssist = async () => {
     if (!activeFile) return
-    const llm = settingsForSession(settings)
+    const configId = selectedModelId === '__default__' ? null : selectedModelId
+    const llm = settingsForSession(settings, configId)
     if (!llm.model || !llm.api_key) {
       setStatus('请先在设置中配置可用的 LLM，记忆维护需要模型参与。')
       return
     }
+    setStatus(`正在${assistActionLabel(assistAction)}记忆…`)
     setLoading(true)
     try {
       const res = await fetch('/api/memory/assist', {
@@ -187,7 +209,7 @@ export function MemoryPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target_path: activeFile.path,
-          action,
+          action: assistAction,
           markdown: draft,
           llm,
         }),
@@ -196,7 +218,7 @@ export function MemoryPage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const result = data.result as AssistResult
       setAssistResult(result)
-      setStatus(`${assistLabel(action)} complete`)
+      setStatus(`${assistActionLabel(assistAction)}记忆完成`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -225,13 +247,18 @@ export function MemoryPage({
             loading={loading}
             status={status}
             assistResult={assistResult}
+            assistAction={assistAction}
+            modelOptions={modelOptions}
+            selectedModelId={selectedModelId}
             onBack={() => setLayer('overview')}
             onSelectFile={setActivePath}
             onDraftChange={setDraft}
             onViewModeChange={setViewMode}
             onSave={() => void saveActiveFile()}
             onUndo={() => void undoActiveFile()}
-            onRunAssist={(action) => void runAssist(action)}
+            onAssistActionChange={setAssistAction}
+            onSelectedModelChange={setSelectedModelId}
+            onRunAssist={() => void runAssist()}
             onSourceNavigate={onSourceNavigate}
             onApplyProposal={(markdown) => {
               setDraft(markdown)
@@ -240,6 +267,8 @@ export function MemoryPage({
             onReset={() => {
               setDraft(activeFile?.markdown ?? '')
               setAssistResult(null)
+              setAssistAction('update')
+              setSelectedModelId(settings.activeLlmConfigId ?? modelOptions[0]?.id ?? '__default__')
             }}
           />
         )}
@@ -369,12 +398,17 @@ function LayerWorkspace({
   loading,
   status,
   assistResult,
+  assistAction,
+  modelOptions,
+  selectedModelId,
   onBack,
   onSelectFile,
   onDraftChange,
   onViewModeChange,
   onSave,
   onUndo,
+  onAssistActionChange,
+  onSelectedModelChange,
   onRunAssist,
   onSourceNavigate,
   onApplyProposal,
@@ -388,31 +422,36 @@ function LayerWorkspace({
   loading: boolean
   status: string
   assistResult: AssistResult | null
+  assistAction: AssistAction
+  modelOptions: MemoryModelOption[]
+  selectedModelId: string
   onBack: () => void
   onSelectFile: (path: string) => void
   onDraftChange: (value: string) => void
   onViewModeChange: (mode: ViewMode) => void
   onSave: () => void
   onUndo: () => void
-  onRunAssist: (action: AssistAction) => void
+  onAssistActionChange: (action: AssistAction) => void
+  onSelectedModelChange: (id: string) => void
+  onRunAssist: () => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
   onApplyProposal: (markdown: string) => void
   onReset: () => void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 px-8 py-5">
-        <button className="rounded p-2 text-gray-500 hover:bg-gray-100" type="button" onClick={onBack}>
+      <header className="flex items-center gap-2 px-5 py-3">
+        <button className="rounded p-1.5 text-gray-500 hover:bg-gray-100" type="button" onClick={onBack} aria-label="返回记忆概览" title="返回记忆概览">
           <ArrowLeft size={18} />
         </button>
         <div className="text-sm text-gray-500">记忆</div>
         <span className="text-gray-300">/</span>
         <div className="text-sm font-medium text-gray-900">{layer} · {layer === 'L2' ? '各模块摘要' : '跨模块知识'}</div>
-        <div className="ml-auto inline-flex rounded-full border border-gray-200 bg-white p-1">
+        <div className="ml-auto inline-flex rounded-md border border-gray-200 bg-white p-0.5">
           {(['L2', 'L3'] as const).map((item) => (
             <button
               key={item}
-              className={`rounded-full px-3 py-1.5 text-sm ${item === layer ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}
+              className={`rounded px-2.5 py-1 text-xs ${item === layer ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}
               type="button"
               disabled
             >
@@ -422,57 +461,55 @@ function LayerWorkspace({
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_360px] gap-6 px-8 pb-8">
-        <aside className="min-h-0 rounded-lg border border-gray-200 bg-white p-3">
-          <div className="space-y-1">
+      <div className="grid min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)_280px] gap-3 px-5 pb-5">
+        <aside className="min-h-0 overflow-y-auto rounded-md border border-gray-200 bg-white p-2">
+          <div className="space-y-0.5">
             {files.map((file) => (
               <button
                 key={file.path}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm ${
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${
                   activeFile?.path === file.path ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
                 }`}
                 type="button"
                 onClick={() => onSelectFile(file.path)}
               >
-                <FileText size={17} />
+                <FileText size={15} className="shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{memoryFileLabel(file.path)}</span>
-                  <span className="block truncate text-xs text-gray-400">{lineCount(file.markdown)} lines</span>
+                  <span className="block truncate text-[11px] text-gray-400">{lineCount(file.markdown)} 行</span>
                 </span>
-                {hasRealMemory(file.markdown) && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">on</span>}
+                {hasRealMemory(file.markdown) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" title="包含记忆内容" />}
               </button>
             ))}
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white">
-          <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-3">
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-gray-950">{activeFile ? memoryFileLabel(activeFile.path) : 'Memory file'}</h2>
+        <section className="flex min-h-0 flex-col rounded-md border border-gray-200 bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-2.5">
+            <div className="mr-auto min-w-36">
+              <h2 className="truncate text-base font-semibold text-gray-950">{activeFile ? memoryFileLabel(activeFile.path) : 'Memory file'}</h2>
               <p className="text-xs text-gray-500">{activeFile?.path ?? status}</p>
             </div>
-            <div className="ml-auto inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button className={modeButtonClassName(viewMode === 'rendered')} type="button" onClick={() => onViewModeChange('rendered')}>渲染视图</button>
               <button className={modeButtonClassName(viewMode === 'source')} type="button" onClick={() => onViewModeChange('source')}>带行号</button>
             </div>
-            <button className={secondaryButtonClassName} type="button" disabled={loading || !activeFile || draft === activeFile.markdown} onClick={onSave}>
+            <button className={compactIconButtonClassName} type="button" disabled={loading || !activeFile || draft === activeFile.markdown} onClick={onSave} aria-label="保存记忆" title="保存记忆">
               <Save size={16} />
-              保存
             </button>
-            <button className={secondaryButtonClassName} type="button" disabled={loading || !activeFile} onClick={onUndo}>
+            <button className={compactIconButtonClassName} type="button" disabled={loading || !activeFile} onClick={onUndo} aria-label="撤销上次保存" title="撤销上次保存">
               <RotateCcw size={16} />
-              撤销
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {viewMode === 'source' ? (
               <textarea
-                className="min-h-full w-full resize-none rounded-lg border border-gray-100 bg-gray-50 p-4 font-mono text-sm leading-7 text-gray-800 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-50"
+                className="min-h-full w-full resize-none rounded-md border border-gray-100 bg-gray-50 p-5 font-mono text-sm leading-7 text-gray-800 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-50"
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
               />
             ) : (
-              <article className="min-h-full rounded-lg border border-gray-100 bg-gray-50 p-5">
+              <article className="mx-auto min-h-full w-full max-w-5xl px-5 py-3">
                 <MarkdownMessage text={draft || ' '} onSourceNavigate={onSourceNavigate} />
               </article>
             )}
@@ -482,6 +519,13 @@ function LayerWorkspace({
         <AgentWorkspace
           loading={loading}
           assistResult={assistResult}
+          assistAction={assistAction}
+          modelOptions={modelOptions}
+          selectedModelId={selectedModelId}
+          canRun={Boolean(activeFile)}
+          status={status}
+          onAssistActionChange={onAssistActionChange}
+          onSelectedModelChange={onSelectedModelChange}
           onRunAssist={onRunAssist}
           onApplyProposal={onApplyProposal}
           onReset={onReset}
@@ -494,35 +538,79 @@ function LayerWorkspace({
 function AgentWorkspace({
   loading,
   assistResult,
+  assistAction,
+  modelOptions,
+  selectedModelId,
+  canRun,
+  status,
+  onAssistActionChange,
+  onSelectedModelChange,
   onRunAssist,
   onApplyProposal,
   onReset,
 }: {
   loading: boolean
   assistResult: AssistResult | null
-  onRunAssist: (action: AssistAction) => void
+  assistAction: AssistAction
+  modelOptions: MemoryModelOption[]
+  selectedModelId: string
+  canRun: boolean
+  status: string
+  onAssistActionChange: (action: AssistAction) => void
+  onSelectedModelChange: (id: string) => void
+  onRunAssist: () => void
   onApplyProposal: (markdown: string) => void
   onReset: () => void
 }) {
+  const selectedModel = modelOptions.find((option) => option.id === selectedModelId)
   return (
-    <aside className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white">
-      <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
-        <Bot size={18} className="text-blue-600" />
-        <div className="font-semibold text-gray-950">Agent 工作区</div>
-        <button className="ml-auto rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50" type="button" onClick={onReset}>
-          Reset
+    <aside className="flex min-h-0 flex-col rounded-md border border-gray-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2.5">
+        <Bot size={17} className="text-blue-600" />
+        <div className="text-sm font-semibold text-gray-950">LLM 工作区</div>
+        <button className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900" type="button" onClick={onReset} disabled={loading}>
+          <RotateCcw size={13} />
+          重置
         </button>
       </div>
-      <div className="border-b border-gray-100 p-4">
-        <div className="grid grid-cols-3 gap-2">
-          <AssistButton icon={Wand2} label="更新记忆" disabled={loading} onClick={() => onRunAssist('update')} />
-          <AssistButton icon={CheckCircle2} label="检查记忆" disabled={loading} onClick={() => onRunAssist('check')} />
-          <AssistButton icon={GitBranch} label="去重" disabled={loading} onClick={() => onRunAssist('dedupe')} />
+      <div className="space-y-2.5 border-b border-gray-100 p-3">
+        <div className="grid grid-cols-3 gap-1">
+          <AssistModeButton icon={Wand2} label="更新" active={assistAction === 'update'} disabled={loading} onClick={() => onAssistActionChange('update')} />
+          <AssistModeButton icon={CheckCircle2} label="检查" active={assistAction === 'check'} disabled={loading} onClick={() => onAssistActionChange('check')} />
+          <AssistModeButton icon={GitBranch} label="去重" active={assistAction === 'dedupe'} disabled={loading} onClick={() => onAssistActionChange('dedupe')} />
+        </div>
+        <label className="block">
+          <span className="sr-only">运行模型</span>
+          <select
+            className="h-9 w-full rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-800 outline-none focus:border-blue-400"
+            value={selectedModelId}
+            disabled={loading}
+            onChange={(event) => onSelectedModelChange(event.target.value)}
+            title={selectedModel?.model ?? '选择模型'}
+          >
+            {modelOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label} · {option.model || '未配置'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200"
+          type="button"
+          disabled={loading || !canRun || !selectedModel?.configured}
+          onClick={onRunAssist}
+        >
+          <Send size={15} />
+          {loading ? '运行中…' : `运行${assistActionLabel(assistAction)}`}
+        </button>
+        <div className="truncate text-[11px] text-gray-400" title={status} aria-live="polite">
+          {selectedModel?.configured ? status : '该模型缺少名称或 API Key，请先到设置中完善'}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {assistResult ? (
-          <article className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+          <article className="rounded-md border border-blue-100 bg-blue-50/40 p-3">
             <MarkdownMessage text={assistResult.report_markdown} />
             {assistResult.facts && assistResult.facts.length > 0 && (
               <FactPreview facts={assistResult.facts} />
@@ -547,16 +635,10 @@ function AgentWorkspace({
           </article>
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-center text-sm leading-6 text-gray-500">
-            <Sparkles size={30} className="mb-4 text-gray-300" />
-            选择一个模式并运行。报告会显示在这里；更新和去重会把草稿写入中间编辑区，保存前仍可手动检查。
+            <Sparkles size={24} className="mb-3 text-gray-300" />
+            选择模式和模型后运行。结果会显示在这里，变更保存前仍可检查。
           </div>
         )}
-      </div>
-      <div className="border-t border-gray-100 p-4">
-        <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-200" type="button" disabled={loading}>
-          <Send size={16} />
-          {loading ? '运行中' : '等待操作'}
-        </button>
       </div>
     </aside>
   )
@@ -663,13 +745,52 @@ function TraceBlock({ title, value }: { title: string; value: string }) {
   )
 }
 
-function AssistButton({ icon: Icon, label, disabled, onClick }: { icon: typeof Brain; label: string; disabled: boolean; onClick: () => void }) {
+function AssistModeButton({
+  icon: Icon,
+  label,
+  active,
+  disabled,
+  onClick,
+}: {
+  icon: typeof Brain
+  label: string
+  active: boolean
+  disabled: boolean
+  onClick: () => void
+}) {
   return (
-    <button className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50" disabled={disabled} type="button" onClick={onClick}>
-      <Icon size={15} />
+    <button
+      className={`inline-flex h-8 items-center justify-center gap-1 rounded-md border px-1 text-xs font-medium disabled:opacity-50 ${
+        active
+          ? 'border-blue-300 bg-blue-50 text-blue-700'
+          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+      }`}
+      disabled={disabled}
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <Icon size={13} />
       {label}
     </button>
   )
+}
+
+function memoryModelOptions(settings: LlmSettings): MemoryModelOption[] {
+  if (settings.llmConfigs.length > 0) {
+    return settings.llmConfigs.map((config) => ({
+      id: config.id,
+      label: config.name || config.model || '未命名模型',
+      model: config.model,
+      configured: Boolean(config.model.trim() && config.apiKey.trim()),
+    }))
+  }
+  return [{
+    id: '__default__',
+    label: settings.model || '默认模型',
+    model: settings.model,
+    configured: Boolean(settings.model.trim() && settings.apiKey.trim()),
+  }]
 }
 
 function formatEditRange(edit: MemoryEdit) {
@@ -709,13 +830,13 @@ function lineCount(markdown: string) {
 }
 
 function modeButtonClassName(active: boolean) {
-  return `rounded-md px-3 py-1.5 text-sm ${active ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`
+  return `rounded px-2 py-1 text-xs ${active ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`
 }
 
-function assistLabel(action: AssistAction) {
-  if (action === 'update') return 'Update memory'
-  if (action === 'check') return 'Check memory'
-  return 'Dedupe memory'
+function assistActionLabel(action: AssistAction) {
+  if (action === 'update') return '更新'
+  if (action === 'check') return '检查'
+  return '去重'
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {
@@ -731,3 +852,4 @@ function errorMessage(data: Record<string, unknown>, status: number) {
 }
 
 const secondaryButtonClassName = 'inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 px-3.5 text-sm font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-50'
+const compactIconButtonClassName = 'inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40'

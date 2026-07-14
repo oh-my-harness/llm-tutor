@@ -11,7 +11,12 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const module = { exports: {} }
 Function('module', 'exports', compiled)(module, module.exports)
-const { defaultLlmSettings, normalizeTheme, settingsRequireSessionReset } = module.exports
+const {
+  defaultLlmSettings,
+  normalizeTheme,
+  settingsForSession,
+  settingsRequireSessionReset,
+} = module.exports
 
 test('keeps supported appearance themes', () => {
   assert.equal(normalizeTheme('cool-light'), 'cool-light')
@@ -31,4 +36,39 @@ test('theme changes do not reset the active runtime session', () => {
     settingsRequireSessionReset(darkSettings, { ...darkSettings, model: 'another-model' }),
     true,
   )
+})
+
+test('builds runtime settings from an explicitly selected model config', () => {
+  const settings = {
+    ...defaultLlmSettings,
+    llmConfigs: [
+      {
+        id: 'model-a',
+        name: 'Model A',
+        provider: 'openai',
+        model: 'model-a-name',
+        apiKey: 'key-a',
+        baseUrl: 'https://a.example',
+        chatPath: '/v1/chat/completions',
+        contextWindowTokens: 64000,
+      },
+      {
+        id: 'model-b',
+        name: 'Model B',
+        provider: 'anthropic',
+        model: 'model-b-name',
+        apiKey: 'key-b',
+        baseUrl: 'https://b.example',
+        chatPath: '',
+        contextWindowTokens: 200000,
+      },
+    ],
+    activeLlmConfigId: 'model-a',
+  }
+
+  const selected = settingsForSession(settings, 'model-b')
+  assert.equal(selected.provider, 'anthropic')
+  assert.equal(selected.model, 'model-b-name')
+  assert.equal(selected.api_key, 'key-b')
+  assert.equal(selected.context_window_tokens, 200000)
 })

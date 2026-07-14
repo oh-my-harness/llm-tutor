@@ -126,8 +126,13 @@ export async function saveStoredLlmSettings(settings: LlmSettings): Promise<void
   }
 }
 
-export function settingsForSession(settings: LlmSettings) {
-  const config = activeLlmConfig(settings)
+export function settingsForSession(
+  settings: LlmSettings,
+  configId: string | null = settings.activeLlmConfigId,
+) {
+  const config = configId === null
+    ? null
+    : settings.llmConfigs.find((item) => item.id === configId) ?? null
   return {
     provider: config?.provider ?? settings.provider,
     model: (config?.model ?? settings.model).trim(),
