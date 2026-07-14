@@ -334,10 +334,10 @@ other generated learning records.
 - REQ-358: Product navigation and report/Notebook actions shall not expose Book
   creation, chapter creation, or save-to-Book workflows. Book UI, routes,
   stores, source targets, and compatibility code shall be removed. Status:
-  planned.
+  implemented.
 - REQ-359: Books retirement does not require migration or compatibility for
   previously stored Book data. Obsolete Book data may be deleted with the
-  retired storage implementation. Status: planned.
+  retired storage implementation. Status: implemented.
 
 ## 16. Space Workspace
 
@@ -370,8 +370,7 @@ other generated learning records.
 - REQ-634: Users shall be able to edit Notebook entries. Status: planned.
 - REQ-635: Users shall be able to delete Notebook entries. Status: planned.
 - REQ-636: Research reports shall be saved to Notebook; no secondary Book
-  destination shall be offered. Status: implemented for the current Research
-  report UI; stale Book references remain to be removed.
+  destination shall be offered. Status: implemented.
 - REQ-637: The former send-to-Books requirement is retired.
 - REQ-638: Notebook entries shall remain a Markdown/plain-text workspace and shall not be indexed into RAG or vector stores. Status: planned.
 - REQ-639: Users shall be able to `@` a Notebook entry in Chat and ask the agent to revise, expand, summarize, or reorganize it. Status: implemented.
@@ -496,7 +495,7 @@ other generated learning records.
   Research-mode clarification and planning conversation shall use Chat L1 with
   `capability = research`;
   workflow traces are not learner-memory evidence, and saved reports enter L1
-  through Notebook. Status: planned.
+  through Notebook. Status: implemented.
 - REQ-697: Memory shall support an L2 per-surface summary layer. Status: planned.
 - REQ-698: L2 shall include `chat.md`. Status: planned.
 - REQ-699: L2 shall include `quiz.md`. Status: planned.
@@ -526,8 +525,9 @@ other generated learning records.
 - REQ-720: Memory Markdown footnote refs shall render as clickable inline source chips. Status: planned.
 - REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: planned.
 - REQ-722: Clicking a bottom memory reference item shall navigate to the related
-  Chat, Notebook, Quiz, Research report, or Knowledge Base surface when
-  possible. Book references are no longer supported. Status: planned.
+  Chat, Notebook (including saved Research reports), Quiz, or Knowledge Base
+  surface when possible. Book and Research-specific references are no longer
+  supported. Status: implemented for current reference targets.
 - REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: planned.
 - REQ-724: The Memory LLM workspace shall require an explicit maintenance mode
   (`update`, `check`, or `dedupe`) and model selection before the user starts a
@@ -557,8 +557,9 @@ other generated learning records.
   citation identity. Status: implemented.
 - REQ-731: L1 events shall preserve either a complete evidence snapshot or a
   durable pointer that resolves to the complete source content. Status:
-  partially implemented; Chat and Research answer events preserve complete
-  exchanges, while remaining product surfaces require a full pointer audit.
+  partially implemented; Chat events, including Research clarification turns,
+  preserve complete exchanges, while remaining product surfaces require a full
+  pointer audit.
 - REQ-732: A Memory run shall begin with the target surface and may explicitly
   expand evidence discovery to other L1 surfaces. Cross-surface expansion shall
   be visible in the run flow. Status: implemented.
@@ -624,31 +625,31 @@ other generated learning records.
   run. Status: implemented.
 - REQ-751: Active L2 memory shall consist of `chat.md`, `quiz.md`,
   `notebook.md`, and `knowledge.md`; it shall not create or expose a separate
-  `research.md` target. Status: planned.
+  `research.md` target. Status: implemented.
 - REQ-752: `notebook.md` shall summarize durable behavior across ordinary
   notes and saved Research reports, including organization habits, preferred
   formats, report preferences, recurring research themes, and unresolved
   questions. It shall not copy report bodies or external factual findings into
-  learner memory. Status: planned.
+  learner memory. Status: implemented.
 - REQ-753: Research workflow searches, fetched sources, intermediate progress,
   traces, and unsaved reports shall remain in Research runtime/session state
-  and shall not be treated as L1 learner-memory evidence. Status: planned.
+  and shall not be treated as L1 learner-memory evidence. Status: implemented.
 - REQ-754: Existing `L2/research.md` content shall not be migrated or retained.
   The obsolete file may be removed when the active L2 catalog is updated.
-  Status: planned.
+  Status: implemented.
 - REQ-755: `MemoryEventCategory::Research`, `L1/research_events.jsonl`, and the
   Research-specific memory source filter shall be removed without legacy data
   migration. Ordinary Research-mode conversation events shall be recorded as
-  Chat L1 with their capability metadata preserved. Status: planned.
+  Chat L1 with their capability metadata preserved. Status: implemented.
 - REQ-756: Saving a Research report to Notebook shall be the explicit boundary
   that makes the report eligible for long-term memory consolidation. The saved
   report shall produce or update Notebook L1 evidence and may inform
-  `notebook.md`; an unsaved report shall not. Status: planned.
+  `notebook.md`; an unsaved report shall not. Status: implemented.
 - REQ-757: Once `create_research_report` starts, its search/fetch trace,
   structured report attachment, and report body shall be excluded from Chat L1
   recording. A saved report shall use the normal Notebook event and
   `notebook:` reference contract; no `research:` memory reference shall be
-  created. Status: planned.
+  created. Status: implemented.
 
 ## 21. Markdown Rendering
 

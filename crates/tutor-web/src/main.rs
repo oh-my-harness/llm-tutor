@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use axum::extract::DefaultBodyLimit;
 use tower_http::cors::{Any, CorsLayer};
 
-mod book_store;
 mod knowledge_store;
 mod memory_store;
 mod memory_tool;
@@ -30,9 +29,6 @@ async fn main() -> anyhow::Result<()> {
     );
     let quizzes = std::sync::Arc::new(quiz_store::QuizStore::new_with_path(
         config.data_dir.join("quizzes.json"),
-    ));
-    let books = std::sync::Arc::new(book_store::BookStore::new_with_path(
-        config.data_dir.join("books.json"),
     ));
     let notebook = std::sync::Arc::new(notebook_store::NotebookStore::new_with_path(
         config.data_dir.join("notebook"),
@@ -67,7 +63,6 @@ async fn main() -> anyhow::Result<()> {
             rag_root.clone(),
             config.data_dir.join("workflow-sessions").join("quiz"),
         ))
-        .merge(routes::books::books_router(books))
         .merge(routes::notebook::notebook_router(
             notebook.clone(),
             memory.clone(),

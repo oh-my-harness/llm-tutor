@@ -115,7 +115,7 @@ const allTabs = [notebookTab, ...spaceTabs]
 
 const profileMemoryPaths = ['L3/profile.md', 'L3/recent.md', 'L3/teaching_strategy.md']
 
-type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }>
+type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' }>
 
 export function SpacePage({
   focusTarget,
@@ -314,8 +314,8 @@ export function SpacePage({
 
   useEffect(() => {
     if (!focusTarget) return
-    if (focusTarget.type === 'notebook' || focusTarget.type === 'research') {
-      const entryId = focusTarget.type === 'notebook' ? focusTarget.entryId : focusTarget.notebookEntryId
+    if (focusTarget.type === 'notebook') {
+      const entryId = focusTarget.entryId
       setActiveTab('notebook')
       if (notebookEntries.some((entry) => entry.id === entryId)) {
         setActiveNotebookId(entryId)

@@ -85,14 +85,12 @@ export function MarkdownMessage({ text, onSourceNavigate, wikiLinkResolver, onWi
   )
 }
 
-type SourceSurface = 'chat' | 'notebook' | 'quiz' | 'research' | 'book' | 'kb' | 'web' | 'unknown'
+type SourceSurface = 'chat' | 'notebook' | 'quiz' | 'kb' | 'web' | 'unknown'
 
 export type SourceTarget =
   | { type: 'chat'; sessionId: string; messageId?: string }
   | { type: 'notebook'; entryId: string }
   | { type: 'quiz'; quizId: string; questionId?: string }
-  | { type: 'research'; notebookEntryId: string }
-  | { type: 'book'; bookId: string; chapterId?: string }
   | { type: 'kb'; knowledgeBaseId: string; documentId: string; chunkId?: string }
   | { type: 'web'; url: string }
 
@@ -370,8 +368,6 @@ function sourceSurfaceFromRaw(raw: string): SourceSurface {
   if (prefix === 'chat') return 'chat'
   if (prefix === 'notebook') return 'notebook'
   if (prefix === 'quiz') return 'quiz'
-  if (prefix === 'research') return 'research'
-  if (prefix === 'book') return 'book'
   if (prefix === 'kb') return 'kb'
   if (prefix === 'web' || raw.startsWith('http://') || raw.startsWith('https://')) return 'web'
   return 'unknown'
@@ -402,14 +398,6 @@ export function sourceTargetFromRaw(raw: string): SourceTarget | undefined {
     const [quizId, questionId] = parts
     return quizId ? { type: 'quiz', quizId, questionId } : undefined
   }
-  if (type === 'research') {
-    const [notebookEntryId] = parts
-    return notebookEntryId ? { type: 'research', notebookEntryId } : undefined
-  }
-  if (type === 'book') {
-    const [bookId, chapterId] = parts
-    return bookId ? { type: 'book', bookId, chapterId } : undefined
-  }
   if (type === 'kb') {
     const [knowledgeBaseId, documentId, chunkId] = parts
     return knowledgeBaseId && documentId ? { type: 'kb', knowledgeBaseId, documentId, chunkId } : undefined
@@ -422,8 +410,6 @@ export function sourceSurfaceLabel(surface: SourceSurface) {
   if (surface === 'chat') return 'Chat'
   if (surface === 'notebook') return 'Notebook'
   if (surface === 'quiz') return 'Quiz'
-  if (surface === 'research') return 'Research'
-  if (surface === 'book') return 'Book'
   if (surface === 'kb') return 'Knowledge Base'
   if (surface === 'web') return 'Web'
   return 'Source'

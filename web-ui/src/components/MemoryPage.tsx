@@ -99,7 +99,7 @@ interface MemoryRun {
   error?: string | null
 }
 
-const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/knowledge.md', 'L2/research.md']
+const l2Paths = ['L2/chat.md', 'L2/quiz.md', 'L2/notebook.md', 'L2/knowledge.md']
 const l3Paths = ['L3/recent.md', 'L3/profile.md', 'L3/scope.md', 'L3/preferences.md', 'L3/teaching_strategy.md']
 
 export function MemoryPage({
@@ -1158,7 +1158,6 @@ async function navigateMemorySource(
   if (event.category === 'chat') target = { type: 'chat', sessionId: sourceId }
   else if (event.category === 'quiz') target = { type: 'quiz', quizId: sourceId }
   else if (event.category === 'notebook') target = { type: 'notebook', entryId: sourceId }
-  else if (event.category === 'research') target = { type: 'research', notebookEntryId: sourceId }
   if (!target) return
   onSourceNavigate(target, {
     id: raw,
@@ -1175,7 +1174,7 @@ function memoryFileLabel(path: string) {
     'L2/chat.md': '聊天',
     'L2/quiz.md': '测验',
     'L2/notebook.md': '笔记本',
-    'L2/research.md': '研究',
+    'L2/knowledge.md': '知识库',
     'L3/recent.md': '近期状态',
     'L3/profile.md': '学生画像',
     'L3/scope.md': '学习范围',

@@ -31,11 +31,11 @@
 | Knowledge / RAG | 创建知识库、绑定 embedding、PDF/文本入库、LanceDB 检索、引用和来源导航。 |
 | Notebook | Markdown 文件树、文件夹、编辑、Wiki Link、反向链接、导入/导出、外部 Vault、生成内容保存。 |
 | Space | 题库、来源筛选、学生画像和跨模块学习资产入口。 |
-| Memory | L1/L2/L3 Markdown 记忆、模型/模式可选的维护 workflow、更新/检查/去重、来源引用和撤销。 |
+| Memory | L1 事件证据与 L2/L3 Markdown 记忆、模型/模式可选的维护 workflow、更新/检查/去重、来源引用和撤销。 |
 | Desktop | Tauri 原生窗口、托管 `tutor-web` sidecar、系统文件对话框、桌面剪贴板/右键菜单、外部链接。 |
 | Appearance | `cool-light` 与 `graphite-dark` 主题，中英文界面。 |
 
-“辅导机器人”独立页面目前仍是占位入口，后续定位为结合学习目标、记忆、资料和测验反馈的持久化个性化导师。Books 兼容后端存储仍存在，但不再是当前侧边栏中的主要用户工作区。
+“辅导机器人”独立页面目前仍是占位入口，后续定位为结合学习目标、记忆、资料和测验反馈的持久化个性化导师。原 Books 能力已经移除，Research 报告只保存到 Notebook。
 
 ## 快速开始
 
@@ -170,7 +170,6 @@ settings.json
 sessions/
 knowledge-bases.json
 quizzes.json
-books.json
 notebook/
 memory/
 rag/

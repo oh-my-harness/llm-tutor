@@ -68,7 +68,7 @@ Tasks:
 - [x] Keep Space as a tabbed workspace with Notebook, Quiz Bank, and Student Profile.
 - [x] Ensure Notebook list/detail/edit/delete flows are stable.
 - [x] Ensure Research "save" action writes a Notebook entry by default.
-- [ ] Remove retired Book UI, routes, stores, source targets, and actions.
+- [x] Remove retired Book UI, routes, stores, source targets, and actions.
 - [x] Ensure Quiz Bank lists completed quiz records from chat-generated quizzes.
 - [x] Ensure Quiz Bank can show questions, selected answers, correct answers, explanations, and citations.
 - [x] Ensure Notebook and Quiz Bank expose stable artifact IDs, titles, types, and metadata for Chat `@` references.
@@ -132,13 +132,13 @@ Status: in progress.
 
 Tasks:
 
-- [ ] Keep L1 raw events for chat, quiz, notebook, and knowledge; fold
+- [x] Keep L1 raw events for chat, quiz, notebook, and knowledge; fold
   Research-mode conversation into Chat L1 and remove separate Research L1.
 - [x] Keep L3 Markdown files as the first agent-readable memory surface.
 - [x] Add manual consolidation preview and apply flow.
 - [x] Show recent events that will be used before consolidation.
 - [x] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
-- [ ] Add source references from memory claims back to quiz, notebook, research, or chat evidence where possible.
+- [ ] Add source references from memory claims back to quiz, notebook (including saved Research reports), knowledge, or chat evidence where possible.
 - [x] Keep profile editing as Markdown editing.
 - [x] Defer automatic consolidation until manual consolidation is reliable.
 
@@ -161,7 +161,7 @@ Tasks:
 - [x] Save Research reports to Notebook as `type = research_report`.
 - [x] Preserve query, sources, session id, and tool trace ids in Notebook metadata.
 - [x] Support Chat follow-up flows where the user asks to generate a Quiz from a saved report.
-- [ ] Remove stale "Send to Book" references and compatibility paths.
+- [x] Remove stale "Send to Book" references and compatibility paths.
 
 Acceptance:
 

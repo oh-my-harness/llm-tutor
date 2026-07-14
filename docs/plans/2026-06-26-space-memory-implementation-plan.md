@@ -95,7 +95,7 @@ NotebookEntry {
 - [x] Add manual note creation.
 - [x] Save Research reports as `type = research_report`.
 - [x] Change Research primary save action from "save to book" to "save to notebook".
-- [ ] Remove the retired secondary "send to book" path and its backend support.
+- [x] Remove the retired secondary "send to book" path and its backend support.
 - [x] Add edit UI for existing Notebook entries.
 
 ### Acceptance
@@ -192,23 +192,23 @@ memory/
 - [x] Add Markdown file editor.
 - [x] Add stable entry id parser/serializer for memory bullets.
 - [x] Add source reference parser/serializer.
-- [x] Record L1 events for chat, quiz, notebook, knowledge, and Research-mode
-  conversations.
+- [x] Record L1 events for chat, quiz, notebook, and knowledge; record ordinary
+  Research-mode conversations as Chat L1 with capability metadata.
 - [x] Add manual consolidation action.
 - [x] Show consolidation preview before applying changes.
 - [x] Keep L1 out of the main visualization while retaining it as workspace event storage.
 - [x] Add L2/L3 memory workbench with update, check, and dedupe assist actions.
-- [ ] Remove `research.md` from the active L2 catalog and file rail.
-- [ ] Expand `notebook.md` to cover saved Research report habits and
+- [x] Remove `research.md` from the active L2 catalog and file rail.
+- [x] Expand `notebook.md` to cover saved Research report habits and
   preferences while keeping report bodies in Notebook.
-- [ ] Delete the obsolete `research.md` target and skeleton without a legacy
+- [x] Delete the obsolete `research.md` target and skeleton without a legacy
   content migration.
-- [ ] Reclassify Research-mode conversations as Chat L1 with
+- [x] Reclassify Research-mode conversations as Chat L1 with
   `capability = research` and remove the separate Research event category,
   file, source filter, and routing.
-- [ ] Keep Research workflow traces and unsaved reports outside Memory; create
+- [x] Keep Research workflow traces and unsaved reports outside Memory; create
   Notebook L1 evidence only after the user explicitly saves a report.
-- [ ] Exclude report-generation turns and structured report attachments from
+- [x] Exclude report-generation turns and structured report attachments from
   Chat L1, and replace Research memory refs with ordinary Notebook refs after
   save.
 

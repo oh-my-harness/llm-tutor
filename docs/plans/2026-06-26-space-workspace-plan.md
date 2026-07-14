@@ -1,6 +1,6 @@
 # Space Workspace Plan
 
-> Status: implemented with Book-removal follow-up | Date: 2026-06-26 | Last updated: 2026-07-14 | Scope: define Space as the project-level learning workspace that contains Notebook, Quiz Bank, and Student Profile.
+> Status: implemented | Date: 2026-06-26 | Last updated: 2026-07-14 | Scope: define Space as the project-level learning workspace that contains Notebook, Quiz Bank, and Student Profile.
 
 ## 1. Core Positioning
 
@@ -504,7 +504,7 @@ Do not rush this simplification until Space is useful enough.
 - [x] Add Notebook tab list/detail UI.
 - [x] Save Research reports to Notebook as `type = research_report`.
 - [x] Move current "Save to book" primary action to "Save to notebook".
-- [ ] Remove any remaining "Send to book" action and Book compatibility path.
+- [x] Remove any remaining "Send to book" action and Book compatibility path.
 
 ### Phase 3: Quiz Bank
 
@@ -551,11 +551,11 @@ Do not rush this simplification until Space is useful enough.
 
 ### Phase 5: Book Removal
 
-- [ ] Remove Book navigation and page components.
-- [ ] Remove Book routes, stores, source targets, and tests that only support
+- [x] Remove Book navigation and page components.
+- [x] Remove Book routes, stores, source targets, and tests that only support
   the retired capability.
-- [ ] Remove Book persistence without migrating old data.
-- [ ] Remove stale Book requirements and user-facing documentation.
+- [x] Remove Book persistence without migrating old data.
+- [x] Remove stale Book requirements and user-facing documentation.
 
 ## 8. Open Questions
 

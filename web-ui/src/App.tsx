@@ -218,7 +218,7 @@ export default function App() {
   const [selectedNotebookEnabled, setSelectedNotebookEnabled] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [traceCollapsed, setTraceCollapsed] = useState(true)
-  const [spaceFocusTarget, setSpaceFocusTarget] = useState<Extract<SourceTarget, { type: 'notebook' | 'quiz' | 'research' }> | null>(null)
+  const [spaceFocusTarget, setSpaceFocusTarget] = useState<Extract<SourceTarget, { type: 'notebook' | 'quiz' }> | null>(null)
   const [knowledgeFocusTarget, setKnowledgeFocusTarget] = useState<Extract<SourceTarget, { type: 'kb' }> | null>(null)
   const [latestUsage, setLatestUsage] = useState<TokenUsagePayload | null>(null)
   const contextStats = useMemo<ContextStats>(() => {
@@ -1244,7 +1244,7 @@ export default function App() {
       return
     }
 
-    if (target.type === 'notebook' || target.type === 'research') {
+    if (target.type === 'notebook') {
       setSpaceFocusTarget(target)
       setView('notebook')
       pushStatus({
@@ -2068,8 +2068,6 @@ function isCapability(value: string): value is Capability {
 function sourceTargetDetail(target: SourceTarget, reference: SourceReference) {
   if (target.type === 'notebook') return `Notebook ${target.entryId}`
   if (target.type === 'quiz') return target.questionId ? `Quiz ${target.quizId}, question ${target.questionId}` : `Quiz ${target.quizId}`
-  if (target.type === 'research') return `Research report ${target.notebookEntryId}`
-  if (target.type === 'book') return target.chapterId ? `Book ${target.bookId}, chapter ${target.chapterId}` : `Book ${target.bookId}`
   if (target.type === 'kb') return target.chunkId ? `Knowledge ${target.documentId}, chunk ${target.chunkId}` : `Knowledge ${target.documentId}`
   return reference.raw
 }

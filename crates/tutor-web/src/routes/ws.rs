@@ -50,11 +50,15 @@ struct PersistedEventSink {
     session_id: String,
     stream: crate::stream::TutorStream,
     streamed_content: Arc<AtomicBool>,
+    research_report_started: Arc<AtomicBool>,
     run_id: String,
 }
 
 impl EventSink for PersistedEventSink {
     fn trace(&self, kind: String, mut data: serde_json::Value) -> BoxFuture<'static, ()> {
+        if trace_invokes_research_report(&kind, &data) {
+            self.research_report_started.store(true, Ordering::SeqCst);
+        }
         let pool = self.pool.clone();
         let session_id = self.session_id.clone();
         let stream = self.stream.clone();
@@ -98,6 +102,11 @@ impl EventSink for PersistedEventSink {
             stream.progress_content(&text, chunk).await;
         })
     }
+}
+
+fn trace_invokes_research_report(kind: &str, data: &serde_json::Value) -> bool {
+    matches!(kind, "tool_call" | "tool_result")
+        && data.get("tool").and_then(serde_json::Value::as_str) == Some("create_research_report")
 }
 
 fn run_stage_from_trace(kind: &str, data: &serde_json::Value) -> Option<String> {
@@ -417,6 +426,7 @@ async fn run_tutor_message(
         )
         .await;
 
+    let research_report_started = Arc::new(AtomicBool::new(false));
     let work = async {
         let capability: Capability = entry.capability.parse()?;
         let repaired_context = pool
@@ -461,6 +471,7 @@ async fn run_tutor_message(
             session_id: entry.id.clone(),
             stream: entry.stream.clone(),
             streamed_content: streamed_content.clone(),
+            research_report_started: research_report_started.clone(),
             run_id: run_id.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance)
@@ -552,14 +563,12 @@ async fn run_tutor_message(
 
     match result {
         Ok((answer, streamed)) => {
-            if matches!(entry.capability.as_str(), "chat" | "research" | "organize") {
-                let category = if entry.capability == "research" {
-                    MemoryEventCategory::Research
-                } else {
-                    MemoryEventCategory::Chat
-                };
+            if should_record_chat_memory(
+                &entry.capability,
+                research_report_started.load(Ordering::SeqCst),
+            ) {
                 let _ = memory.record_event(
-                    category,
+                    MemoryEventCategory::Chat,
                     "answered",
                     summarize_exchange(&content, &answer),
                     Some(entry.id.clone()),
@@ -622,6 +631,11 @@ async fn run_tutor_message(
             "failed"
         }
     }
+}
+
+fn should_record_chat_memory(capability: &str, research_report_started: bool) -> bool {
+    matches!(capability, "chat" | "organize")
+        || (capability == "research" && !research_report_started)
 }
 
 async fn next_user_message_index(pool: &SessionPool, session_id: &str) -> usize {
@@ -844,5 +858,26 @@ mod tests {
         assert_eq!(artifact["artifact_store"], "runtime_trace");
         assert_eq!(artifact["artifact_id"], "run-123");
         assert_eq!(artifact["title"], "Transformer Architecture");
+    }
+
+    #[test]
+    fn research_memory_only_records_conversation_before_report_workflow() {
+        assert!(should_record_chat_memory("research", false));
+        assert!(!should_record_chat_memory("research", true));
+        assert!(should_record_chat_memory("chat", true));
+        assert!(should_record_chat_memory("organize", true));
+        assert!(!should_record_chat_memory("quiz", false));
+    }
+
+    #[test]
+    fn research_report_boundary_is_detected_from_tool_trace() {
+        let call = serde_json::json!({ "tool": "create_research_report" });
+        assert!(trace_invokes_research_report("tool_call", &call));
+        assert!(trace_invokes_research_report("tool_result", &call));
+        assert!(!trace_invokes_research_report("content", &call));
+        assert!(!trace_invokes_research_report(
+            "tool_call",
+            &serde_json::json!({ "tool": "propose_research_plan" })
+        ));
     }
 }

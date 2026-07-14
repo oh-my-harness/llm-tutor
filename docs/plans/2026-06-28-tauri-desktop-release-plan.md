@@ -41,7 +41,7 @@ llm-tutor desktop app
       -> serves REST API on 127.0.0.1:<port>
       -> serves WebSocket on 127.0.0.1:<port>
       -> reads/writes local app data
-      -> runs agent, tools, RAG, quiz, memory, notebook, books
+      -> runs agent, tools, RAG, quiz, memory, and notebook
 ```
 
 Do not rewrite `tutor-web` as Tauri commands for v0.1. The existing Axum
@@ -323,7 +323,7 @@ Tasks:
 - [x] Resolve Tauri app data directory.
 - [x] Pass app data directory to sidecar with `--data-dir <path>`.
 - [x] Move backend product stores under the configured data root: sessions,
-      knowledge bases, quizzes, memory, notebooks, books, uploaded documents,
+      knowledge bases, quizzes, memory, notebooks, uploaded documents,
       and LanceDB/RAG data.
 - [x] Add settings/status UI display for current data directory.
 - [x] Add "open data directory" desktop command.
@@ -439,7 +439,7 @@ The follow-up should cover these areas at a product level:
   pickers, opening external links in the system browser, revealing local files,
   and future app-level shortcuts or command palette behavior;
 - define product-specific context menu capability areas for Notebook, Chat,
-  Knowledge, Research, Books, and other work surfaces in later detailed design;
+  Knowledge, Research, Notebook, and other work surfaces in later detailed design;
 - preserve the existing local-first architecture and avoid rewriting backend
   routes as Tauri commands unless a native capability genuinely requires it.
 
@@ -500,7 +500,7 @@ Tasks:
 - [x] Add an app-owned context menu framework that can replace the browser
       context menu in desktop mode.
 - [x] Define high-level context menu capability areas for Notebook, Chat,
-      Knowledge, Research, Books, Settings, and source references without
+      Knowledge, Research, Notebook, Settings, and source references without
       finalizing individual menu items yet.
 - [x] Implement the first context menu slice with generic Copy/Open Link/Copy
       Link actions, editable-field Cut/Copy/Paste/Select All actions, and

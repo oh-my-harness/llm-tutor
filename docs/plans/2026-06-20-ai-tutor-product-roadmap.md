@@ -236,7 +236,7 @@ Goal: make learning outputs reusable.
 - [ ] Save chat answers to Notebook.
 - [ ] Save quiz summaries to Notebook.
 - [ ] Save source snippets.
-- [ ] Remove the retired Book implementation and stale save-to-Book paths.
+- [x] Remove the retired Book implementation and stale save-to-Book paths.
 
 Acceptance:
 
@@ -253,7 +253,7 @@ Goal: make the app feel like a learning product, not only a developer demo.
 - [x] Add upload progress and indexing status.
 - [ ] Add model/provider health checks.
 - [x] Add error recovery for missing API keys and failed embeddings.
-- [ ] Add export for chat and book entries.
+- [ ] Add export for chat entries and Notebook reports.
 
 Acceptance:
 

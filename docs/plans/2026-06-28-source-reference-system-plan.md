@@ -1,6 +1,6 @@
 # Source Reference System Plan
 
-> Status: proposed | Date: 2026-06-28 | Scope: unify citations, memory footnotes, RAG sources, quiz references, and research sources into one product-level reference system.
+> Status: implemented for active source targets | Date: 2026-06-28 | Last updated: 2026-07-14 | Scope: unify citations, memory footnotes, RAG sources, quiz references, and saved research sources into one product-level reference system.
 
 ## 1. Goal
 
@@ -45,8 +45,6 @@ type SourceSurface =
   | 'chat'
   | 'notebook'
   | 'quiz'
-  | 'research'
-  | 'book'
   | 'kb'
   | 'web'
   | 'unknown'
@@ -65,8 +63,6 @@ type SourceTarget =
   | { type: 'chat'; sessionId: string; messageId?: string }
   | { type: 'notebook'; entryId: string }
   | { type: 'quiz'; quizId: string; questionId?: string }
-  | { type: 'research'; notebookEntryId: string }
-  | { type: 'book'; bookId: string; chapterId?: string }
   | { type: 'kb'; knowledgeBaseId: string; documentId: string; chunkId?: string }
   | { type: 'web'; url: string }
 ```
@@ -77,8 +73,6 @@ Supported raw reference patterns:
 chat:<session_id>[:message_id]
 notebook:<entry_id>
 quiz:<quiz_id>[:question_id]
-research:<notebook_entry_id>
-book:<book_id>[:chapter_id]
 kb:<knowledge_base_id>:<doc_id>[:chunk_id]
 web:<url>
 ```
@@ -132,7 +126,9 @@ Status: completed for first exact-focus slice on 2026-06-28.
 
 Tasks:
 
-- [x] Add source target parsing for `chat`, `notebook`, `quiz`, `research`, `book`, `kb`, and `web`.
+- [x] Add source target parsing for `chat`, `notebook`, `quiz`, `kb`, and `web`.
+- [x] Route saved Research reports through `notebook:<entry_id>` and remove the
+  retired `research:` and `book:` target forms.
 - [x] Add a shared navigation callback or router helper.
 - [x] Implement chat session navigation first.
 - [x] Implement Notebook entry navigation with exact entry focus.

@@ -10,7 +10,6 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
     ("L2/quiz.md", "# Quiz memory\n\n"),
     ("L2/notebook.md", "# Notebook memory\n\n"),
     ("L2/knowledge.md", "# Knowledge memory\n\n"),
-    ("L2/research.md", "# Research memory\n\n"),
     ("L3/recent.md", "# Recent learning context\n\n"),
     (
         "L3/profile.md",
@@ -93,7 +92,6 @@ pub enum MemoryEventCategory {
     Quiz,
     Notebook,
     Knowledge,
-    Research,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -832,7 +830,6 @@ impl MemoryStore {
             ("quiz", "L2/quiz.md"),
             ("notebook", "L2/notebook.md"),
             ("knowledge", "L2/knowledge.md"),
-            ("research", "L2/research.md"),
         ] {
             let markdown = self.read(path)?.markdown;
             if !has_memory_content(&markdown) {
@@ -867,7 +864,6 @@ impl MemoryStore {
             ("quiz", "L2/quiz.md"),
             ("notebook", "L2/notebook.md"),
             ("knowledge", "L2/knowledge.md"),
-            ("research", "L2/research.md"),
         ] {
             let markdown = self.read(path)?.markdown;
             if !has_memory_content(&markdown) {
@@ -1043,6 +1039,13 @@ impl MemoryStore {
             let full_path = self.root.join(path);
             if !full_path.exists() {
                 fs::write(full_path, default_markdown)?;
+            }
+        }
+        for obsolete_path in ["L1/research_events.jsonl", "L2/research.md"] {
+            match fs::remove_file(self.root.join(obsolete_path)) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
             }
         }
         Ok(())
@@ -1558,17 +1561,15 @@ fn event_file(category: MemoryEventCategory) -> &'static str {
         MemoryEventCategory::Quiz => "L1/quiz_events.jsonl",
         MemoryEventCategory::Notebook => "L1/notebook_events.jsonl",
         MemoryEventCategory::Knowledge => "L1/knowledge_events.jsonl",
-        MemoryEventCategory::Research => "L1/research_events.jsonl",
     }
 }
 
-fn all_event_categories() -> [MemoryEventCategory; 5] {
+fn all_event_categories() -> [MemoryEventCategory; 4] {
     [
         MemoryEventCategory::Chat,
         MemoryEventCategory::Quiz,
         MemoryEventCategory::Notebook,
         MemoryEventCategory::Knowledge,
-        MemoryEventCategory::Research,
     ]
 }
 
@@ -1578,7 +1579,6 @@ fn event_kind_label(category: MemoryEventCategory, action: &str) -> String {
         MemoryEventCategory::Quiz => "quiz",
         MemoryEventCategory::Notebook => "notebook",
         MemoryEventCategory::Knowledge => "knowledge",
-        MemoryEventCategory::Research => "research",
     };
     format!("{category}/{action}")
 }
@@ -1589,7 +1589,6 @@ fn event_surface(category: MemoryEventCategory) -> &'static str {
         MemoryEventCategory::Quiz => "quiz",
         MemoryEventCategory::Notebook => "notebook",
         MemoryEventCategory::Knowledge => "knowledge",
-        MemoryEventCategory::Research => "research",
     }
 }
 
@@ -1599,7 +1598,6 @@ fn category_for_surface(surface: &str) -> Option<MemoryEventCategory> {
         "quiz" => Some(MemoryEventCategory::Quiz),
         "notebook" => Some(MemoryEventCategory::Notebook),
         "knowledge" => Some(MemoryEventCategory::Knowledge),
-        "research" => Some(MemoryEventCategory::Research),
         _ => None,
     }
 }
@@ -1718,8 +1716,6 @@ fn recent_events_for_target(events: Vec<MemoryEvent>, target_path: &str) -> Vec<
         Some(MemoryEventCategory::Notebook)
     } else if target_path.contains("knowledge") {
         Some(MemoryEventCategory::Knowledge)
-    } else if target_path.contains("research") {
-        Some(MemoryEventCategory::Research)
     } else {
         None
     };
@@ -1742,8 +1738,6 @@ fn target_surface(target_path: &str) -> Option<&'static str> {
         Some("notebook")
     } else if target_path.contains("knowledge") {
         Some("knowledge")
-    } else if target_path.contains("research") {
-        Some("research")
     } else {
         None
     }
@@ -1763,18 +1757,19 @@ fn target_catalog(target_path: &str, existing_markdown: String) -> Consolidation
         ),
         "L2/notebook.md" => (
             "Notebook memory",
-            "Recurring note themes, preferred formats, and open questions.",
-            vec!["Themes", "Formats", "Open questions"],
+            "Recurring note and saved research themes, organization habits, preferred formats, report preferences, and open questions.",
+            vec![
+                "Themes",
+                "Organization",
+                "Formats",
+                "Report preferences",
+                "Open questions",
+            ],
         ),
         "L2/knowledge.md" => (
             "Knowledge memory",
             "Document interests, frequent queries, and knowledge gaps.",
             vec!["Interests", "Frequent queries", "Gaps"],
-        ),
-        "L2/research.md" => (
-            "Research memory",
-            "Research topics, preferred report shape, and unresolved questions.",
-            vec!["Topics", "Report preferences", "Open questions"],
         ),
         "L3/recent.md" => (
             "Recent learning context",
@@ -1937,7 +1932,6 @@ fn l2_path_for_surface(surface: &str) -> Option<&'static str> {
         "quiz" => Some("L2/quiz.md"),
         "notebook" => Some("L2/notebook.md"),
         "knowledge" => Some("L2/knowledge.md"),
-        "research" => Some("L2/research.md"),
         _ => None,
     }
 }
@@ -2207,6 +2201,7 @@ mod tests {
         let store = MemoryStore::new_with_root(dir.path().join("memory"));
         let files = store.list().unwrap();
         assert!(files.iter().any(|file| file.path == "L3/profile.md"));
+        assert!(!files.iter().any(|file| file.path == "L2/research.md"));
 
         let updated = store
             .write(
@@ -2216,6 +2211,22 @@ mod tests {
             .unwrap();
         assert_eq!(updated.path, "L3/profile.md");
         assert!(updated.markdown.contains("Needs review"));
+    }
+
+    #[test]
+    fn memory_store_removes_retired_research_memory_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("memory");
+        fs::create_dir_all(root.join("L1")).unwrap();
+        fs::create_dir_all(root.join("L2")).unwrap();
+        fs::write(root.join("L1/research_events.jsonl"), "legacy").unwrap();
+        fs::write(root.join("L2/research.md"), "legacy").unwrap();
+
+        let store = MemoryStore::new_with_root(root.clone());
+
+        assert!(!root.join("L1/research_events.jsonl").exists());
+        assert!(!root.join("L2/research.md").exists());
+        assert_eq!(store.event_catalog().unwrap().len(), 4);
     }
 
     #[test]
