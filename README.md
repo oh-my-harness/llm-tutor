@@ -1,290 +1,263 @@
-# llm-tutor
+# llm-tutor / Tutor Agent
 
 `llm-tutor` 是一个基于
-[llm-harness-runtime](https://github.com/oh-my-harness/llm-harness-runtime)
-构建的 AI 学习工作区。
+[`llm-harness-runtime`](https://github.com/oh-my-harness/llm-harness-runtime)
+构建的本地优先 AI 学习工作区。桌面产品名为 **Tutor Agent**。
 
-它把聊天、RAG 知识库、分步骤解题、测验生成、联网研究，以及轻量级书籍/报告沉淀组合在一起，目标是形成一个可持续积累知识、练习和学习画像的本地 Tutor Agent。
+它把多轮聊天、复杂问题求解、联网研究、测验、RAG 知识库、Markdown Notebook 和学习记忆组合在一个可持久化的桌面应用中。
 
-## 使用方式
+> 当前版本：`0.1.3`
+>
+> 当前阶段：单用户本地产品原型；核心闭环可用，桌面发布仍在持续人工 QA。
 
-### 环境要求
+## 文档
 
-- Rust 2024 edition，建议先执行 `rustup update stable`
-- Node.js 20+
-- 至少一个可用的 LLM Provider API Key
-- 可选：Embedding Provider API Key，用于知识库/RAG 入库与检索
-- 可选：Web Search API Key，用于更稳定的联网研究
-- LanceDB 依赖 Protobuf 编译器 `protoc`
-  - Windows 可执行：`winget install --id Google.Protobuf`
+- [使用手册](./MANUAL.md)：安装、配置和全部用户功能
+- [产品需求规格](./docs/specs/2026-06-26-product-requirements-spec.md)
+- [桌面发布计划](./docs/plans/2026-06-28-tauri-desktop-release-plan.md)
+- [桌面 QA 清单](./docs/qa/desktop-v0.1.md)
+- [框架反馈](./docs/framework-feedback.md)
+- [开发原则](./AGENTS.md)
+- [更新记录](./CHANGELOG.md)
 
-### 安装
+## 当前功能
+
+| 模块 | 当前能力 |
+| --- | --- |
+| Chat | runtime session、多轮历史、流式输出、附件、模型/模式/来源选择、`@` 空间引用、消息操作栏、trace。 |
+| Deep Solve | 分步骤复杂问题求解、计划与状态、证据和代码验证。 |
+| Research | 普通对话确认需求后，通过 `create_research_report` 启动独立 workflow；报告、来源和运行状态可恢复。 |
+| Quiz | 普通对话确认要求后，通过 `create_quiz` 启动独立 workflow；生成可恢复、可继续答题的 Quiz 卡片。 |
+| Knowledge / RAG | 创建知识库、绑定 embedding、PDF/文本入库、LanceDB 检索、引用和来源导航。 |
+| Notebook | Markdown 文件树、文件夹、编辑、Wiki Link、反向链接、导入/导出、外部 Vault、生成内容保存。 |
+| Space | 题库、来源筛选、学生画像和跨模块学习资产入口。 |
+| Memory | L1/L2/L3 Markdown 记忆、模型/模式可选的维护 workflow、更新/检查/去重、来源引用和撤销。 |
+| Desktop | Tauri 原生窗口、托管 `tutor-web` sidecar、系统文件对话框、桌面剪贴板/右键菜单、外部链接。 |
+| Appearance | `cool-light` 与 `graphite-dark` 主题，中英文界面。 |
+
+“辅导机器人”独立页面目前仍是占位入口。Books 兼容后端存储仍存在，但不再是当前侧边栏中的主要用户工作区。
+
+## 快速开始
+
+### 桌面安装包
+
+发布产物由 [GitHub Actions](./.github/workflows/release-desktop.yml) 构建：
+
+- `Tutor-Agent-v<version>-windows-x64-setup.exe`
+- `Tutor-Agent-v<version>-windows-x64.msi`
+- `Tutor-Agent-v<version>-macos-x64.dmg`
+- `Tutor-Agent-v<version>-macos-arm64.dmg`
+
+版本标签发布后可从项目的
+[GitHub Releases](https://github.com/oh-my-harness/llm-tutor/releases)
+获取对应产物。桌面应用会自动启动本地后端，无需另行运行服务。
+
+### 开发环境
+
+推荐环境：
+
+- Rust stable，Rust 2024 edition
+- Node.js 22
+- Tauri CLI 2.x
+- Protobuf 编译器 `protoc`
+- 至少一个可用的 LLM API Key
+
+Windows 可通过 Chocolatey 安装 Protobuf：
 
 ```powershell
-# 首次安装前端依赖
-cd web-ui
-npm install
-cd ..
-
-# 可选：后端基础测试
-cargo test -p tutor-web --lib
+choco install protoc -y
 ```
 
-### 启动
-
-启动后端：
+安装前端依赖：
 
 ```powershell
-cargo run -p tutor-web
+npm ci --prefix web-ui
 ```
 
-后端默认监听：
-
-```text
-http://127.0.0.1:8080
-```
-
-另开一个终端启动前端：
-
-```powershell
-cd web-ui
-npm run dev
-```
-
-然后打开：
-
-```text
-http://localhost:5173
-```
-
-桌面版开发模式可以直接在项目根目录运行：
+### 启动桌面开发模式
 
 ```powershell
 cargo tauri dev
 ```
 
-该命令会启动前端 Vite dev server、Tauri 桌面窗口，并拉起本地
-`tutor-web` sidecar。开发桌面版时优先使用这个命令。
+该命令会构建后端、启动 Vite，并由 Tauri 拉起 `tutor-web` sidecar。
 
-### Web 端配置
+### 启动浏览器开发模式
 
-打开 Web UI 左侧的 **设置** 页面，至少配置一个 LLM。
+终端一：
 
-1. **LLM**
-   - 新增一个模型配置。
-   - 选择接口模式，例如 OpenAI-compatible、Anthropic、DeepSeek 等。
-   - 填写 `base_url`、API Key、模型名、可选 chat path、上下文窗口。
-   - 使用测试按钮验证模型是否可用。
+```powershell
+cargo run -p tutor-web
+```
 
-2. **嵌入模型**
-   - 创建知识库和 RAG 入库时需要。
-   - 新增 OpenAI-compatible embedding 配置。
-   - 填写 `base_url`、API Key、模型名、可选 `/v1/embeddings` path、向量维度，以及是否发送 `dimensions` 参数。
-   - 使用测试按钮确认返回的向量维度。
+终端二：
 
-3. **搜索**
-   - 普通聊天不是必须，但 Research 模式建议配置。
-   - DuckDuckGo 可作为免费兜底，但质量和可用性不稳定。
-   - 也可以配置 Bing、Brave、Tavily、Serper、SerpAPI、Exa 等付费搜索服务。
+```powershell
+npm run dev --prefix web-ui
+```
 
-4. **知识库**
-   - 进入 **知识库** 页面。
-   - 创建知识库，并选择嵌入模型配置。
-   - 上传 PDF 或文本文件。
-   - 等待解析、切分、嵌入、写入 LanceDB 完成。
-   - 在聊天输入框中选择知识库后，Agent 才会按需使用 RAG 检索。
+访问 `http://127.0.0.1:5173`。后端默认监听 `127.0.0.1:8080`。
 
-本地产品数据默认存储在项目根目录的 `.llm-tutor/` 下。
+## 首次配置
 
-### 桌面应用打包
+进入应用左侧“设置”：
 
-Windows 桌面版使用 Tauri 打包，脚本会构建 `web-ui`、release 版
-`tutor-web` sidecar，并生成桌面安装/打包产物：
+1. 在“LLM”中添加 OpenAI-compatible 或 Anthropic Messages 配置，并运行连接测试。
+2. 如需知识库，在“嵌入模型”中配置并测试 embedding 服务。
+3. 如需稳定联网研究，在“搜索”中配置搜索服务。
+4. 在“笔记本”中决定使用应用本地 Notebook，还是绑定外部 Markdown Vault。
+5. 在“能力”中设置会话预算和工具审批策略。
+6. 在“外观”中选择界面语言和浅色/深色主题。
+
+详细字段和操作流程见 [MANUAL.md](./MANUAL.md)。
+
+## 架构
+
+```text
+Tutor Agent desktop
+  -> Tauri shell
+      -> React / Vite UI
+      -> managed tutor-web sidecar
+          -> REST + WebSocket
+          -> runtime sessions
+          -> tutor-agent
+              -> chat / deep solve
+              -> quiz / research / memory workflows
+              -> llm-harness-runtime / llm-harness-agent
+          -> tutor-tools
+              -> rag_search / web_search / web_fetch
+              -> code_exec / read_memory / write_memory
+          -> tutor-rag
+              -> LanceDB + embedding retrieval
+          -> local product stores
+              -> Notebook / Quiz / Memory / Settings / Knowledge
+```
+
+### 工作区结构
+
+```text
+crates/tutor-agent   Agent 能力路由、提示词及 Quiz/Research/Memory workflow。
+crates/tutor-tools   RAG、搜索、抓取、代码执行和记忆工具。
+crates/tutor-rag     LanceDB 入库、检索和 embedding 集成。
+crates/tutor-web     Axum API、WebSocket、session 映射和产品数据存储。
+src-tauri            Tauri 桌面壳和 sidecar 生命周期管理。
+web-ui               React 19、Vite 8、Tailwind CSS 前端。
+docs                 产品规格、计划、QA 和框架反馈。
+scripts              开发、版本、桌面构建和 QA 脚本。
+```
+
+## 数据存储
+
+浏览器/源码开发模式默认使用：
+
+```text
+<repo>/.llm-tutor/
+```
+
+可通过环境变量或后端参数覆盖：
+
+```powershell
+$env:LLM_TUTOR_HOME="D:\TutorData"
+cargo run -p tutor-web -- --data-dir "D:\TutorData"
+```
+
+桌面发布版使用操作系统应用数据目录，Tauri 启动时把该路径传给 sidecar。应用内可在“设置 > 能力”查看并打开准确目录。
+
+主要数据：
+
+```text
+settings.json
+sessions/
+knowledge-bases.json
+quizzes.json
+books.json
+notebook/
+memory/
+rag/
+workflow-sessions/
+```
+
+当前 API Key 保存在本地 `settings.json`，尚未接入系统钥匙串。不要提交或共享 `.llm-tutor/` 和桌面应用数据目录。
+
+## 测试
+
+Rust workspace：
+
+```powershell
+cargo test --workspace -j 1
+```
+
+Agent mock integration：
+
+```powershell
+cargo test -p tutor-agent --test mock_integration -j 1
+```
+
+后端 API/store：
+
+```powershell
+cargo test -p tutor-web --lib -j 1
+```
+
+前端：
+
+```powershell
+npm test --prefix web-ui
+npm run build --prefix web-ui
+```
+
+真实 Provider 集成测试需要 API Key，默认可能被忽略。
+
+## 桌面构建与发布
+
+本地 Windows 构建：
 
 ```powershell
 .\scripts\build-desktop.ps1
 ```
 
-常用选项：
+只构建 release 可执行文件：
 
 ```powershell
-# 只构建 release 可执行文件，不生成安装包
 .\scripts\build-desktop.ps1 -NoBundle
+```
 
-# 指定 Tauri bundle 类型，例如 NSIS
+指定 bundle：
+
+```powershell
 .\scripts\build-desktop.ps1 -Bundles nsis
 ```
 
-构建完成后可以运行自动化 smoke QA：
+自动化 smoke QA：
 
 ```powershell
 .\scripts\qa-desktop.ps1
 ```
 
-打包后的桌面应用会自动启动本地 `tutor-web` sidecar，并把数据写入系统
-app data 目录；Web 开发模式仍默认使用项目根目录下的 `.llm-tutor/`。
-LLM、Embedding、Search、预算和审批等设置会写入数据目录里的
-`settings.json`，前端 localStorage 仅作为兼容缓存。
-
-### 版本管理
-
-发布前使用脚本同步 Cargo、Tauri 和前端包版本：
+版本同步：
 
 ```powershell
-.\scripts\bump-version.ps1 0.1.0
+.\scripts\bump-version.ps1 0.1.4
 ```
 
-建议发布节奏：
+GitHub 发布工作流在 `v*` 标签和手动 `workflow_dispatch` 下构建 Windows x64、macOS x64 和 macOS arm64 产物。CI 需要 `PRIVATE_DEPS_TOKEN` 读取私有 Git 依赖。
 
-- 桌面安装包版本必须使用纯数字三段格式，例如 `0.1.0`。
-- 内部测试版、外部试用版和正式版用 Git tag、Release 标题或构建产物文件名区分，例如 `v0.1.0-alpha.1`。
-- Windows MSI 不接受 `0.1.0-alpha.1` 这样的预发布版本号。
+## 当前限制
 
-## 当前功能
+- 单用户、本地优先；没有账号、权限、云同步或协作。
+- 辅导机器人独立页面仍是占位页。
+- 运行中的 workflow 在应用进程重启后尚不能保证从中断点续跑。
+- API Key 暂存于本地 JSON，系统钥匙串尚未实现。
+- Linux 安装包和自动更新尚未实现。
+- RAG 切分、引用验证和桌面安装包 QA 仍需持续完善。
 
-| 模块 | 支持能力 |
-| --- | --- |
-| 聊天 | 多轮对话、流式输出、历史会话、附件、可选 RAG、网页搜索/抓取、代码执行、trace 事件。 |
-| 知识库 / RAG | 创建知识库、上传文档、PDF/文本解析、LanceDB 索引、chunk 检索、在真正调用 `rag_search` 时展示引用来源。 |
-| Deep Solve | 面向复杂问题的结构化解题流程，包含计划、步骤、证据、引用、最终答案和状态事件。 |
-| Quiz | 可从知识库或对话材料生成测验，并支持答题流程；有来源材料时会尽量生成带证据的问题。 |
-| Research | 联网搜索、读取网页、综合生成 Markdown 研究报告，并可把报告保存到书籍/笔记流程。 |
-| 空间 | 承载笔记本、题库、学生画像等学习资产入口。 |
-| 记忆 | L1/L2/L3 Markdown 记忆、手动更新/检查/去重工作台、来源引用、候选事实/编辑预览，以及 `read_memory` / `write_memory` 工具。 |
-| 书籍 | 轻量级书籍和章节存储，用于保存整理后的报告和输出。 |
-
-## 可选 CLI
-
-```powershell
-# 普通聊天
-cargo run -p tutor-agent -- "What is integration by parts?"
-
-# Deep Solve
-cargo run -p tutor-agent -- --capability deep_solve "Evaluate the integral of x^2 from 0 to 2"
-```
-
-CLI 或环境变量驱动运行时，常用变量如下：
-
-```powershell
-$env:LLM_PROVIDER="openai"
-$env:OPENAI_API_KEY="sk-..."
-$env:LLM_MODEL="gpt-4o-mini"
-$env:OPENAI_BASE_URL="https://api.openai.com"
-$env:OPENAI_CHAT_PATH="/v1/chat/completions"
-```
-
-DeepSeek 或其他 OpenAI-compatible 网关可以使用 OpenAI-compatible 模式，并配置自己的 base URL 和模型名。
-
-Bash/Zsh 中请使用 `export NAME=value`。
-
-## 当前状态
-
-`llm-tutor` 目前是一个单用户本地产品原型。核心学习闭环已经可用，但部分模块仍处于 MVP 阶段，需要继续打磨质量和体验。
-
-已经实现：
-
-- 基于 runtime session 的聊天和历史会话。
-- WebSocket 流式输出。
-- 工具和长流程的 trace/status 事件。
-- UI 中配置 LLM、嵌入模型、Web 搜索。
-- 知识库创建、文档上传、PDF/文本解析、LanceDB 入库和检索。
-- RAG 引用来源和 source chunk 展示。
-- 聊天附件，包括当前轮 PDF/文本解析。
-- Deep Solve 结构化解题体验。
-- 代码执行工具。
-- Quiz 生成与答题流程。
-- Web 搜索和网页抓取工具。
-- Research 模式，可搜索、阅读并生成 Markdown 报告。
-- 研究报告保存到书籍章节。
-- 空间、笔记本、题库、学生画像和记忆页面。
-- L1/L2/L3 Markdown 记忆凝练，支持结构化更新、检查和去重。
-- 基础书籍/章节浏览。
-
-仍处于早期：
-
-- Research Report 还不是完整的一等数据结构。
-- 书籍编辑目前只是简单章节查看，不是富文本编辑器。
-- RAG chunk 策略仍比较基础，后续应升级为段落/token-aware。
-- 引用质量和来源校验还需要继续增强。
-- 本地持久化主要是 JSON 加 runtime session 存储，后续可能需要 SQLite。
-- 多用户、鉴权、权限、部署和协作暂不在当前范围内。
-
-## 架构
-
-```text
-web-ui (React + Vite + Tailwind)
-  -> REST / WebSocket
-tutor-web (Axum)
-  -> SessionPool / runtime sessions
-  -> tutor-agent
-      |-- CapabilityRouter
-      |-- Chat / Research harness runs
-      |-- Deep Solve orchestrator
-      |-- Quiz generation helpers
-      `-- Governance / budget / audit hooks
-  -> tutor-tools
-      |-- rag_search
-      |-- web_search
-      |-- web_fetch
-      `-- code_exec
-  -> tutor-rag
-      `-- LanceDB + embedding-backed retrieval
-  -> llm-harness-runtime / llm-harness-agent
-```
-
-### Crates
-
-```text
-crates/tutor-agent   Agent 能力、提示词、能力路由、Deep Solve、Quiz 生成。
-crates/tutor-tools   暴露给 Agent 的工具：RAG、网页搜索/抓取、代码执行。
-crates/tutor-rag     LanceDB 入库/检索与 embedding 集成。
-crates/tutor-web     Axum 服务、WebSocket、session API、知识库、Quiz、书籍。
-web-ui               React 前端。
-docs                 路线图、规格文档、框架反馈和功能计划。
-```
-
-## 本地数据
-
-runtime 和产品数据默认存储在项目根目录的 `.llm-tutor/` 下。
-
-常见文件包括：
-
-```text
-.llm-tutor/knowledge-bases.json
-.llm-tutor/quizzes.json
-.llm-tutor/books.json
-```
-
-向量数据由 LanceDB 管理，存放在配置的 RAG 根目录下。
-
-## 测试
-
-```bash
-# Rust 测试
-cargo test --workspace -j 1
-
-# Agent mock integration tests
-cargo test -p tutor-agent --test mock_integration -j 1
-
-# 后端 API / store 测试
-cargo test -p tutor-web --lib -j 1
-
-# 前端构建
-cd web-ui
-npm run build
-```
-
-真实 provider 集成测试通常需要 API Key，默认一般会被忽略。
+更多用户侧说明见 [使用手册](./MANUAL.md)。
 
 ## 开发原则
 
-见 [AGENTS.md](./AGENTS.md)。
+项目优先使用 `llm-harness-runtime` / `llm-harness-agent` 提供的 session、上下文、工具编排、hook、trace、compaction 和 provider 行为。`llm-tutor` 聚焦产品数据与 UI，不在仓库内建立平行 runtime。
 
-简短版本：
-
-- 优先使用 `llm-harness-runtime` / `llm-harness-agent`。
-- 不要在本仓库重复实现 runtime session、上下文构建、工具编排、trace、压缩或 provider 行为。
-- 本仓库聚焦产品数据和 UI：知识库、文档、空间、书籍、测验、设置、研究报告，以及它们到 runtime session 的映射。
+完整原则见 [AGENTS.md](./AGENTS.md)。框架缺口记录在 [docs/framework-feedback.md](./docs/framework-feedback.md)。
 
 ## License
 
