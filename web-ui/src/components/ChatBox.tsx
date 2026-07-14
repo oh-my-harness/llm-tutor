@@ -652,7 +652,7 @@ export function ChatBox({
                 ) : (
                   <>
                     {editingMessageIndex === i ? (
-                      <div className="w-full max-w-[85%] space-y-2 rounded-lg bg-gray-100 p-3">
+                      <div className="w-full max-w-[85%] space-y-2 rounded-lg border border-gray-300 bg-gray-200 p-3">
                         <textarea
                           className="min-h-24 w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-400"
                           value={editingMessageText}
@@ -678,7 +678,7 @@ export function ChatBox({
                         </div>
                       </div>
                     ) : (
-                      <div className="w-fit max-w-[85%] rounded-lg bg-gray-100 px-4 py-3 text-gray-900">
+                      <div className="w-fit max-w-[85%] rounded-lg border border-gray-300 bg-gray-200 px-4 py-3 text-gray-950">
                         <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
                         {msg.attachments && msg.attachments.length > 0 && (
                           <AttachmentSummary attachments={msg.attachments} />
