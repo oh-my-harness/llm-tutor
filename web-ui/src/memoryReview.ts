@@ -24,3 +24,13 @@ export function newestRestorableMemoryRun<T extends { status: string; started_at
     .filter((run) => run.status === 'running' || run.status === 'awaiting_review')
     .sort((left, right) => (right.started_at ?? '').localeCompare(left.started_at ?? ''))[0] ?? null
 }
+
+export function reconcileRestorableMemoryRun<T extends { run_id: string; status: string }>(
+  runs: readonly T[],
+  nextRun: T,
+): T[] {
+  const remaining = runs.filter((run) => run.run_id !== nextRun.run_id)
+  return nextRun.status === 'running' || nextRun.status === 'awaiting_review'
+    ? [nextRun, ...remaining]
+    : remaining
+}

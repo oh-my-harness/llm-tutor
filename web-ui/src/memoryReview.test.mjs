@@ -15,6 +15,7 @@ const {
   areAllMemoryChangesSelected,
   memoryChangeIds,
   newestRestorableMemoryRun,
+  reconcileRestorableMemoryRun,
   toggleMemoryChange,
 } = module.exports
 
@@ -42,4 +43,14 @@ test('restores the newest running or reviewable memory run', () => {
   ])
   assert.equal(restored?.run_id, 'review')
   assert.equal(newestRestorableMemoryRun([{ run_id: 'done', status: 'completed' }]), null)
+})
+
+test('keeps only running and reviewable runs in the module indicator projection', () => {
+  const running = { run_id: 'run-1', status: 'running', current_stage: 'reading' }
+  const review = { ...running, status: 'awaiting_review', current_stage: 'review' }
+  const completed = { ...running, status: 'completed', current_stage: 'completed' }
+
+  assert.deepEqual(reconcileRestorableMemoryRun([], running), [running])
+  assert.deepEqual(reconcileRestorableMemoryRun([running], review), [review])
+  assert.deepEqual(reconcileRestorableMemoryRun([review], completed), [])
 })

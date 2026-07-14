@@ -601,6 +601,11 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   active or reviewable Memory run without starting a duplicate run. The UI
   shall restore its target file, flow state, and pending change review. Status:
   implemented.
+- REQ-749: The left Memory file rail shall project the state of every active or
+  reviewable Memory run onto its target module. Running work shall use an
+  animated progress indicator, pending changes shall use a distinct review
+  indicator, and both shall be restored after workspace navigation. Status:
+  implemented.
 
 ## 21. Markdown Rendering
 

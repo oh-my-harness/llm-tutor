@@ -28,6 +28,7 @@ import {
   areAllMemoryChangesSelected,
   memoryChangeIds,
   newestRestorableMemoryRun,
+  reconcileRestorableMemoryRun,
   toggleMemoryChange,
 } from '../memoryReview'
 
@@ -117,6 +118,7 @@ export function MemoryPage({
     settings.activeLlmConfigId ?? '__default__',
   )
   const [memoryRun, setMemoryRun] = useState<MemoryRun | null>(null)
+  const [activeRuns, setActiveRuns] = useState<MemoryRun[]>([])
   const [selectedChangeIds, setSelectedChangeIds] = useState<string[]>([])
   const [status, setStatus] = useState('Loading memory...')
   const [loading, setLoading] = useState(false)
@@ -160,7 +162,9 @@ export function MemoryPage({
       const res = await fetch('/api/memory/runs?active_only=true')
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const run = newestRestorableMemoryRun((data.runs ?? []) as MemoryRun[])
+      const runs = (data.runs ?? []) as MemoryRun[]
+      setActiveRuns(runs)
+      const run = newestRestorableMemoryRun(runs)
       if (!run) return
       setMemoryRun(run)
       setAssistAction(run.action)
@@ -191,19 +195,30 @@ export function MemoryPage({
   useEffect(() => {
     if (!activeFile) return
     setDraft(activeFile.markdown)
-    if (memoryRun && memoryRun.target_path !== activeFile.path) {
+    const runForFile = newestRestorableMemoryRun(
+      activeRuns.filter((run) => run.target_path === activeFile.path),
+    )
+    if (runForFile && runForFile.run_id !== memoryRun?.run_id) {
+      setMemoryRun(runForFile)
+      setAssistAction(runForFile.action)
+      setLoading(runForFile.status === 'running')
+      if (runForFile.change_set) {
+        setSelectedChangeIds(memoryChangeIds(runForFile.change_set.changes))
+        setViewMode('review')
+        setStatus(runForFile.change_set.summary)
+      }
+    } else if (!runForFile && memoryRun && memoryRun.target_path !== activeFile.path) {
       setMemoryRun(null)
       setSelectedChangeIds([])
       setViewMode('rendered')
+      setLoading(false)
     }
-  }, [activeFile?.path, activeFile?.markdown])
+  }, [activeFile?.path, activeFile?.markdown, activeRuns])
 
   const openLayer = (nextLayer: 'L2' | 'L3') => {
     const firstPath = (nextLayer === 'L2' ? l2Paths[0] : l3Paths[0]) ?? null
     setLayer(nextLayer)
     setActivePath((current) => current && current.startsWith(`${nextLayer}/`) ? current : firstPath)
-    setMemoryRun(null)
-    setSelectedChangeIds([])
   }
 
   const saveActiveFile = async () => {
@@ -284,6 +299,7 @@ export function MemoryPage({
       if (!res.ok) throw new Error(errorMessage(data, res.status))
       const run = data.run as MemoryRun
       setMemoryRun(run)
+      setActiveRuns((current) => reconcileRestorableMemoryRun(current, run))
       setSelectedChangeIds([])
       setStatus(`${assistActionLabel(assistAction)}记忆运行中`)
     } catch (err) {
@@ -300,7 +316,9 @@ export function MemoryPage({
       })
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorMessage(data, res.status))
-      setMemoryRun(data.run as MemoryRun)
+      const run = data.run as MemoryRun
+      setMemoryRun(run)
+      setActiveRuns((current) => reconcileRestorableMemoryRun(current, run))
       setLoading(false)
       setStatus('记忆工作流已取消')
     } catch (err) {
@@ -317,6 +335,7 @@ export function MemoryPage({
         if (!res.ok) throw new Error(errorMessage(data, res.status))
         const run = data.run as MemoryRun
         setMemoryRun(run)
+        setActiveRuns((current) => reconcileRestorableMemoryRun(current, run))
         if (run.change_set) {
           setSelectedChangeIds(memoryChangeIds(run.change_set.changes))
           setViewMode('review')
@@ -336,6 +355,29 @@ export function MemoryPage({
     return () => window.clearTimeout(timeout)
   }, [memoryRun])
 
+  useEffect(() => {
+    const backgroundRuns = activeRuns.filter(
+      (run) => run.status === 'running' && run.run_id !== memoryRun?.run_id,
+    )
+    if (backgroundRuns.length === 0) return
+    const timeout = window.setTimeout(async () => {
+      const updates = await Promise.all(backgroundRuns.map(async (run) => {
+        try {
+          const res = await fetch(`/api/memory/runs/${encodeURIComponent(run.run_id)}`)
+          const data = await safeJson(res)
+          return res.ok ? data.run as MemoryRun : null
+        } catch {
+          return null
+        }
+      }))
+      setActiveRuns((current) => updates.reduce(
+        (runs, run) => run ? reconcileRestorableMemoryRun(runs, run) : runs,
+        current,
+      ))
+    }, 750)
+    return () => window.clearTimeout(timeout)
+  }, [activeRuns, memoryRun?.run_id])
+
   const applySelectedChanges = async () => {
     if (!memoryRun?.change_set || selectedChangeIds.length === 0) return
     setLoading(true)
@@ -352,6 +394,7 @@ export function MemoryPage({
       setFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
       setDraft(updated.markdown)
       setMemoryRun((current) => current ? { ...current, status: 'completed', current_stage: 'completed' } : current)
+      setActiveRuns((current) => current.filter((run) => run.run_id !== memoryRun.run_id))
       setSelectedChangeIds([])
       setViewMode('rendered')
       setStatus('已应用选中的记忆变更')
@@ -383,6 +426,7 @@ export function MemoryPage({
             loading={loading}
             status={status}
             memoryRun={memoryRun}
+            activeRuns={activeRuns}
             selectedChangeIds={selectedChangeIds}
             assistAction={assistAction}
             modelOptions={modelOptions}
@@ -405,9 +449,8 @@ export function MemoryPage({
             onApplySelectedChanges={() => void applySelectedChanges()}
             onReset={() => {
               setDraft(activeFile?.markdown ?? '')
-              setMemoryRun(null)
-              setSelectedChangeIds([])
-              setViewMode('rendered')
+              setSelectedChangeIds(memoryChangeIds(memoryRun?.change_set?.changes ?? []))
+              setViewMode(memoryRun?.change_set ? 'review' : 'rendered')
               setAssistAction('update')
               setSelectedModelId(settings.activeLlmConfigId ?? modelOptions[0]?.id ?? '__default__')
             }}
@@ -539,6 +582,7 @@ function LayerWorkspace({
   loading,
   status,
   memoryRun,
+  activeRuns,
   selectedChangeIds,
   assistAction,
   modelOptions,
@@ -567,6 +611,7 @@ function LayerWorkspace({
   loading: boolean
   status: string
   memoryRun: MemoryRun | null
+  activeRuns: MemoryRun[]
   selectedChangeIds: string[]
   assistAction: AssistAction
   modelOptions: MemoryModelOption[]
@@ -614,21 +659,13 @@ function LayerWorkspace({
         <aside className="min-h-0 overflow-y-auto rounded-md border border-gray-200 bg-white p-2">
           <div className="space-y-0.5">
             {files.map((file) => (
-              <button
+              <MemoryFileButton
                 key={file.path}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${
-                  activeFile?.path === file.path ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                type="button"
+                file={file}
+                active={activeFile?.path === file.path}
+                run={newestRestorableMemoryRun(activeRuns.filter((run) => run.target_path === file.path))}
                 onClick={() => onSelectFile(file.path)}
-              >
-                <FileText size={15} className="shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{memoryFileLabel(file.path)}</span>
-                  <span className="block truncate text-[11px] text-gray-400">{lineCount(file.markdown)} 行</span>
-                </span>
-                {hasRealMemory(file.markdown) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" title="包含记忆内容" />}
-              </button>
+              />
             ))}
           </div>
         </aside>
@@ -692,6 +729,50 @@ function LayerWorkspace({
         />
       </div>
     </div>
+  )
+}
+
+function MemoryFileButton({
+  file,
+  active,
+  run,
+  onClick,
+}: {
+  file: MemoryFile
+  active: boolean
+  run: MemoryRun | null
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+        active ? 'bg-blue-50 font-medium text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      <FileText size={15} className={active ? 'text-blue-600' : 'text-gray-400'} />
+      <span className="min-w-0 flex-1 truncate">{memoryFileLabel(file.path)}</span>
+      {run?.status === 'running' ? (
+        <span
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-blue-600"
+          title="记忆任务运行中"
+          aria-label="记忆任务运行中"
+        >
+          <LoaderCircle size={13} className="animate-spin" />
+        </span>
+      ) : run?.status === 'awaiting_review' ? (
+        <span
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
+          title="记忆变更等待审核"
+          aria-label="记忆变更等待审核"
+        >
+          <Circle size={9} className="fill-amber-400 text-amber-400" />
+        </span>
+      ) : hasRealMemory(file.markdown) ? (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" title="已有记忆内容" aria-label="已有记忆内容" />
+      ) : null}
+    </button>
   )
 }
 
@@ -1106,10 +1187,6 @@ function hasRealMemory(markdown: string) {
   return markdown
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith('- '))
-}
-
-function lineCount(markdown: string) {
-  return markdown.split(/\r?\n/).length
 }
 
 function modeButtonClassName(active: boolean) {

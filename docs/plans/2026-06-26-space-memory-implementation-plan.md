@@ -247,6 +247,8 @@ structured change sets, and central diff review.
 - [x] Apply accepted changes atomically, record history, and support undo.
 - [x] Expose active Memory runs and automatically restore the target file,
   progress flow, and review result after navigating away and returning.
+- [x] Project all active Memory runs into the left file rail, with distinct
+  running and awaiting-review indicators that survive workspace navigation.
 - [x] Add boundary and UI tests for pagination, source expansion, duplicate or
   unread refs, stale revisions, partial acceptance, atomic apply, and undo.
 
