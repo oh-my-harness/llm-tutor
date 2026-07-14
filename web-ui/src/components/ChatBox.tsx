@@ -1,13 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ReactNode } from 'react'
+import type { ChangeEvent, ReactNode, RefObject } from 'react'
 import {
   AlertCircle,
   ArrowUp,
   AtSign,
+  BookOpen,
   Brain,
+  Check,
   CheckCircle2,
   ChevronDown,
   Code2,
+  Copy,
   Database,
   Edit3,
   FileText,
@@ -15,12 +18,15 @@ import {
   SearchCheck,
   MessageSquare,
   Paperclip,
+  Quote,
+  RefreshCw,
   Sparkles,
   Circle,
   Square,
   X,
 } from 'lucide-react'
-import { chooseDesktopSavePath, isDesktopApp } from '../api'
+import { chooseDesktopSavePath, isDesktopApp, writeClipboardText } from '../api'
+import { appendMessageQuote, previousUserMessageIndex } from '../messageActions'
 import {
   desktopDefaultSavePath,
   folderFromNotebookPath,
@@ -284,7 +290,10 @@ export function ChatBox({
   const [saveNotebookEntryType, setSaveNotebookEntryType] = useState<'research_report' | 'chat_excerpt'>('chat_excerpt')
   const [saveNotebookResult, setSaveNotebookResult] = useState<SaveToNotebookResult | null>(null)
   const [saveNotebookError, setSaveNotebookError] = useState('')
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  const copyFeedbackTimerRef = useRef<number | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
 
@@ -312,6 +321,39 @@ export function ChatBox({
     if (editingMessageIndex === null || !editingMessageText.trim() || !onEditUserMessage || running) return
     onEditUserMessage(editingMessageIndex, editingMessageText.trim())
     cancelEditUserMessage()
+  }
+
+  const copyMessage = async (index: number, text: string) => {
+    const copiedNatively = await writeClipboardText(text).catch(() => false)
+    if (!copiedNatively) copyTextWithDocumentFallback(text)
+    setCopiedMessageIndex(index)
+    if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
+    copyFeedbackTimerRef.current = window.setTimeout(() => setCopiedMessageIndex(null), 1600)
+  }
+
+  const quoteMessage = (role: 'user' | 'assistant', text: string) => {
+    setInput((current) => appendMessageQuote(current, role, text))
+    window.requestAnimationFrame(() => {
+      const composer = composerInputRef.current
+      if (!composer) return
+      composer.focus()
+      composer.setSelectionRange(composer.value.length, composer.value.length)
+    })
+  }
+
+  const regenerateAssistantMessage = (messageIndex: number) => {
+    if (!onEditUserMessage || running) return
+    const userMessageIndex = previousUserMessageIndex(messages, messageIndex)
+    const userMessage = messages[userMessageIndex]
+    if (userMessageIndex < 0 || userMessage?.role !== 'user' || !userMessage.text.trim()) return
+    onEditUserMessage(userMessageIndex, userMessage.text)
+  }
+
+  const focusMessageSources = (messageIndex: number) => {
+    const sourceSurface = document.getElementById(`message-sources-${messageIndex}`)
+    const toggle = sourceSurface?.querySelector<HTMLButtonElement>('button')
+    toggle?.focus()
+    toggle?.click()
   }
 
   const handleAddAttachments = (items: ChatAttachment[]) => {
@@ -437,6 +479,10 @@ export function ChatBox({
     el.scrollTop = el.scrollHeight
   }, [messages, streamingText])
 
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
+  }, [])
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {saveNotebookMarkdown && (
@@ -486,6 +532,7 @@ export function ChatBox({
               <h2 className="text-4xl font-semibold text-gray-900">{t('chat.empty.title')}</h2>
             </div>
             <Composer
+              inputRef={composerInputRef}
               input={input}
               setInput={setInput}
               capability={capability}
@@ -515,9 +562,13 @@ export function ChatBox({
       ) : (
         <>
           <ContextCapacity stats={contextStats} />
-          <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.map((msg, i) => (
-              <div key={i} className={messageClassName(msg)}>
+          <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="mx-auto w-full max-w-6xl space-y-3">
+            {messages.map((msg, i) => {
+              const structuredAssistant = isStructuredAssistantMessage(msg, capability)
+              const previousUserIndex = msg.role === 'assistant' ? previousUserMessageIndex(messages, i) : -1
+              return (
+              <div key={i} className={messageClassName(msg, structuredAssistant)}>
                 {msg.role === 'status' ? (
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     {(msg.kind === 'thinking' || msg.kind === 'tool') && (
@@ -565,22 +616,12 @@ export function ChatBox({
                   ) : (
                     <>
                       <MarkdownMessage text={msg.text} onSourceNavigate={onSourceNavigate} />
-                      {(capability === 'research' || capability === 'chat') && msg.text.trim() && onSaveToNotebook && (
-                        <div className="mt-3 flex justify-end">
-                          <button
-                            className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50"
-                            type="button"
-                            onClick={() => {
-                              void openSaveNotebookDialog(msg.text)
-                            }}
-                          >
-                            <FileText size={16} />
-                            保存到笔记本
-                          </button>
-                        </div>
-                      )}
                       {msg.citations && msg.citations.length > 0 && (
-                        <CitationList citations={msg.citations} onSourceNavigate={onSourceNavigate} />
+                        <CitationList
+                          id={`message-sources-${i}`}
+                          citations={msg.citations}
+                          onSourceNavigate={onSourceNavigate}
+                        />
                       )}
                       {msg.notebookEditProposal && onApplyNotebookEdit && (
                         <NotebookEditProposalCard
@@ -588,12 +629,30 @@ export function ChatBox({
                           onApply={onApplyNotebookEdit}
                         />
                       )}
+                      <MessageActionToolbar
+                        align="left"
+                        copied={copiedMessageIndex === i}
+                        onCopy={() => void copyMessage(i, msg.text)}
+                        onQuote={() => quoteMessage('assistant', msg.text)}
+                        onSaveToNotebook={
+                          capability === 'research' && msg.text.trim() && onSaveToNotebook
+                            ? () => void openSaveNotebookDialog(msg.text)
+                            : undefined
+                        }
+                        onRegenerate={
+                          previousUserIndex >= 0 && onEditUserMessage && !running
+                            ? () => regenerateAssistantMessage(i)
+                            : undefined
+                        }
+                        sourceCount={msg.citations?.length ?? 0}
+                        onShowSources={msg.citations?.length ? () => focusMessageSources(i) : undefined}
+                      />
                     </>
                   )
                 ) : (
                   <>
                     {editingMessageIndex === i ? (
-                      <div className="space-y-2">
+                      <div className="w-full max-w-[85%] space-y-2 rounded-lg bg-gray-100 p-3">
                         <textarea
                           className="min-h-24 w-full resize-y rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-400"
                           value={editingMessageText}
@@ -619,39 +678,41 @@ export function ChatBox({
                         </div>
                       </div>
                     ) : (
-                      <div className="group/user-message relative">
-                        <pre className="whitespace-pre-wrap pr-8 font-sans text-sm">{msg.text}</pre>
-                        {onEditUserMessage && !running && (
-                          <button
-                            className="absolute right-0 top-0 hidden h-7 w-7 items-center justify-center rounded-md text-blue-700 hover:bg-blue-100 group-hover/user-message:flex"
-                            type="button"
-                            title="Edit and regenerate"
-                            onClick={() => startEditUserMessage(i, msg.text)}
-                          >
-                            <Edit3 size={15} />
-                          </button>
+                      <div className="w-fit max-w-[85%] rounded-lg bg-gray-100 px-4 py-3 text-gray-900">
+                        <pre className="whitespace-pre-wrap font-sans text-sm">{msg.text}</pre>
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <AttachmentSummary attachments={msg.attachments} />
+                        )}
+                        {msg.mentions && msg.mentions.length > 0 && (
+                          <MentionSummary mentions={msg.mentions} />
                         )}
                       </div>
                     )}
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <AttachmentSummary attachments={msg.attachments} />
-                    )}
-                    {msg.mentions && msg.mentions.length > 0 && (
-                      <MentionSummary mentions={msg.mentions} />
+                    {editingMessageIndex !== i && (
+                      <MessageActionToolbar
+                        align="right"
+                        copied={copiedMessageIndex === i}
+                        onCopy={() => void copyMessage(i, msg.text)}
+                        onQuote={() => quoteMessage('user', msg.text)}
+                        onEdit={onEditUserMessage && !running ? () => startEditUserMessage(i, msg.text) : undefined}
+                      />
                     )}
                   </>
                 )}
               </div>
-            ))}
+              )
+            })}
             {streamingText && (
-              <div className="max-w-3xl rounded-lg bg-gray-100 p-3">
+              <div className="w-full min-w-0 py-2 text-gray-900" aria-live="polite">
                 <MarkdownMessage text={streamingText} onSourceNavigate={onSourceNavigate} />
-                <span className="animate-pulse">|</span>
+                <span className="inline-block h-4 w-0.5 animate-pulse bg-gray-700 align-text-bottom" />
               </div>
             )}
+            </div>
           </div>
           <div className="bg-gray-50 p-4">
             <Composer
+              inputRef={composerInputRef}
               input={input}
               setInput={setInput}
               capability={capability}
@@ -805,9 +866,11 @@ function ProposalDetailList({ title, items }: { title: string; items: string[] }
 }
 
 function CitationList({
+  id,
   citations,
   onSourceNavigate,
 }: {
+  id?: string
   citations: Citation[]
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
 }) {
@@ -815,7 +878,7 @@ function CitationList({
   const hasWeb = citations.some((citation) => citation.kind === 'web' || citation.url)
   const references = citations.map(citationToSourceReference)
   return (
-    <div className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
+    <div id={id} className="mt-3 border-t border-gray-200 pt-3" data-source-kind={hasWeb ? 'web' : 'rag'}>
       <div className="mb-2 text-xs font-medium text-gray-500">{hasWeb ? '网页来源' : '引用来源'}</div>
       <SourceReferences
         id={`chat-citations-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`}
@@ -1247,6 +1310,7 @@ function quizCitationRawTarget(citation: QuizSession['questions'][number]['citat
 }
 
 function Composer({
+  inputRef,
   input,
   setInput,
   capability,
@@ -1271,6 +1335,7 @@ function Composer({
   running,
   variant,
 }: {
+  inputRef?: RefObject<HTMLTextAreaElement | null>
   input: string
   setInput: (value: string) => void
   capability: Capability
@@ -1398,6 +1463,7 @@ function Composer({
       }`}
     >
       <textarea
+        ref={inputRef}
         className={`${
           variant === 'center' ? 'min-h-36 text-base' : 'min-h-16 text-sm'
         } w-full resize-none rounded-t-3xl px-5 py-4 outline-none placeholder:text-gray-400 disabled:bg-white`}
@@ -1926,9 +1992,97 @@ function DropdownOption({
   )
 }
 
-function messageClassName(msg: Message) {
-  if (msg.role === 'user') return 'ml-auto max-w-3xl rounded-lg bg-blue-100 p-3'
-  if (msg.role === 'assistant') return 'max-w-3xl rounded-lg bg-gray-100 p-3'
+function MessageActionToolbar({
+  align,
+  copied,
+  onCopy,
+  onQuote,
+  onEdit,
+  onSaveToNotebook,
+  onRegenerate,
+  sourceCount = 0,
+  onShowSources,
+}: {
+  align: 'left' | 'right'
+  copied: boolean
+  onCopy: () => void
+  onQuote: () => void
+  onEdit?: () => void
+  onSaveToNotebook?: () => void
+  onRegenerate?: () => void
+  sourceCount?: number
+  onShowSources?: () => void
+}) {
+  const buttonClassName = 'inline-flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-gray-500 outline-none hover:bg-gray-100 hover:text-gray-900 focus-visible:bg-blue-50 focus-visible:text-blue-700'
+  return (
+    <div className="relative h-8 w-full" role="toolbar" aria-label="Message actions">
+      <div
+        className={`pointer-events-none absolute top-1 z-10 flex items-center gap-0.5 rounded-md border border-gray-200 bg-white p-0.5 opacity-0 shadow-sm transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
+          align === 'right' ? 'right-0' : 'left-0'
+        }`}
+      >
+        <button className={buttonClassName} type="button" title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'} onClick={onCopy}>
+          {copied ? <Check size={15} /> : <Copy size={15} />}
+        </button>
+        <button className={buttonClassName} type="button" title="Quote" aria-label="Quote message" onClick={onQuote}>
+          <Quote size={15} />
+        </button>
+        {onEdit && (
+          <button className={buttonClassName} type="button" title="Edit and regenerate" aria-label="Edit and regenerate message" onClick={onEdit}>
+            <Edit3 size={15} />
+          </button>
+        )}
+        {onSaveToNotebook && (
+          <button className={buttonClassName} type="button" title="Save to Notebook" aria-label="Save message to Notebook" onClick={onSaveToNotebook}>
+            <FileText size={15} />
+          </button>
+        )}
+        {onRegenerate && (
+          <button className={buttonClassName} type="button" title="Regenerate" aria-label="Regenerate answer" onClick={onRegenerate}>
+            <RefreshCw size={15} />
+          </button>
+        )}
+        {onShowSources && sourceCount > 0 && (
+          <button className={`${buttonClassName} gap-1 px-2 text-xs font-medium`} type="button" title="Show sources" onClick={onShowSources}>
+            <BookOpen size={14} />
+            Sources {sourceCount}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function isStructuredAssistantMessage(msg: Message, capability: Capability) {
+  if (msg.role !== 'assistant') return false
+  return Boolean(
+    msg.quiz
+    || msg.quizPlan
+    || msg.researchPlan
+    || (msg.deepSolve && msg.deepSolve.length > 0)
+    || (capability === 'research' && (looksLikeResearchReport(msg.text) || msg.researchUnavailable)),
+  )
+}
+
+function copyTextWithDocumentFallback(text: string) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
+}
+
+function messageClassName(msg: Message, structuredAssistant = false) {
+  if (msg.role === 'user') return 'group/message ml-auto flex w-full max-w-3xl flex-col items-end'
+  if (msg.role === 'assistant') {
+    return structuredAssistant
+      ? 'w-full min-w-0 py-2'
+      : 'group/message w-full min-w-0 py-2 text-gray-900'
+  }
 
   const tones: Record<NonNullable<Message['kind']>, string> = {
     idle: 'bg-gray-50',

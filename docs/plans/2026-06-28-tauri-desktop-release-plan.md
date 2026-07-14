@@ -502,15 +502,15 @@ Tasks:
 - [x] Mark the currently open Chat session in the recent-session list with a
       restrained selected state that remains distinct from hover, pinned, and
       running indicators without changing list order.
-- [ ] Replace always-visible ordinary-message commands with a role-aware hover
+- [x] Replace always-visible ordinary-message commands with a role-aware hover
       and keyboard-focus action toolbar using icon buttons and tooltips.
-- [ ] Move ordinary assistant Copy, Quote, Save to Notebook, Regenerate, and
+- [x] Move ordinary assistant Copy, Quote, Save to Notebook, Regenerate, and
       Sources actions into the message toolbar where each action is supported.
-- [ ] Move ordinary user Copy, Quote, and Edit actions into the same toolbar
+- [x] Move ordinary user Copy, Quote, and Edit actions into the same toolbar
       pattern without exposing assistant-only commands.
-- [ ] Render ordinary assistant answers with transparent full-lane presentation
+- [x] Render ordinary assistant answers with transparent full-lane presentation
       and ordinary user messages as bounded right-aligned light-gray bubbles.
-- [ ] Preserve dedicated rendering for Research reports, Quiz cards, approvals,
+- [x] Preserve dedicated rendering for Research reports, Quiz cards, approvals,
       Notebook proposals, progress/status surfaces, citations, tables, and code.
 - [ ] Verify toolbar discovery by pointer and keyboard, no message overlap or
       layout shift, readable line length, and responsive behavior at common

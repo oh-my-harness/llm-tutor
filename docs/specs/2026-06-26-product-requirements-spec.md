@@ -78,17 +78,19 @@
   Assistant actions shall include Copy, Quote, Save to Notebook, and Regenerate
   where supported; user actions shall include Copy, Quote, and Edit. Quoting a
   message shall add a structured or clearly delimited reference to the composer.
-  Status: planned.
+  Status: implemented for Copy, Quote, Research-mode Save to Notebook,
+  Regenerate, Sources, and user Edit actions.
 - REQ-088: Ordinary assistant text shall use a transparent, document-like
   presentation that blends into the Chat background and may use the full Chat
   content lane. Ordinary user messages shall remain visually distinct as
-  right-aligned light-gray bubbles with a bounded maximum width. Status: planned.
+  right-aligned light-gray bubbles with a bounded maximum width. Status: implemented.
 - REQ-089: Structured product results such as Research reports, Quiz cards,
   approval requests, Notebook edit proposals, and workflow status surfaces
   shall retain purpose-built card or status presentation instead of inheriting
   ordinary message bubble styling. Citation sources shall remain a separate,
   expandable surface reached through a compact `Sources N` message action when
-  appropriate. Status: planned.
+  appropriate. Status: implemented; structured results retain their dedicated
+  components and ordinary citation lists remain separate from the toolbar.
 
 ## 6. Attachments
 

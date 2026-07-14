@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --test src/quizSource.test.mjs src/quizRestore.test.mjs src/notebookSave.test.mjs src/researchRestore.test.mjs src/sessionResilience.test.mjs",
+    "test": "node --test src/quizSource.test.mjs src/quizRestore.test.mjs src/notebookSave.test.mjs src/researchRestore.test.mjs src/sessionResilience.test.mjs src/messageActions.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
