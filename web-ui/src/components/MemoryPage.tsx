@@ -247,31 +247,6 @@ export function MemoryPage({
     }
   }
 
-  const undoActiveFile = async () => {
-    if (!activeFile) return
-    setLoading(true)
-    try {
-      const res = await fetch('/api/memory/undo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_path: activeFile.path }),
-      })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorMessage(data, res.status))
-      const updated = (data.result as { file?: MemoryFile }).file
-      if (!updated) throw new Error('Undo response did not include a memory file')
-      setFiles((items) => items.map((item) => item.path === updated.path ? updated : item))
-      setDraft(updated.markdown)
-      setMemoryRun(null)
-      setSelectedChangeIds([])
-      setStatus('Memory restored from latest snapshot')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const runAssist = async () => {
     if (!activeFile) return
     if (draft !== activeFile.markdown) {
@@ -438,7 +413,6 @@ export function MemoryPage({
             onDraftChange={setDraft}
             onViewModeChange={setViewMode}
             onSave={() => void saveActiveFile()}
-            onUndo={() => void undoActiveFile()}
             onAssistActionChange={setAssistAction}
             onSelectedModelChange={setSelectedModelId}
             onRunAssist={() => void runAssist()}
@@ -594,7 +568,6 @@ function LayerWorkspace({
   onDraftChange,
   onViewModeChange,
   onSave,
-  onUndo,
   onAssistActionChange,
   onSelectedModelChange,
   onRunAssist,
@@ -623,7 +596,6 @@ function LayerWorkspace({
   onDraftChange: (value: string) => void
   onViewModeChange: (mode: ViewMode) => void
   onSave: () => void
-  onUndo: () => void
   onAssistActionChange: (action: AssistAction) => void
   onSelectedModelChange: (id: string) => void
   onRunAssist: () => void
@@ -685,9 +657,6 @@ function LayerWorkspace({
             </div>
             <button className={compactIconButtonClassName} type="button" disabled={loading || !activeFile || draft === activeFile.markdown} onClick={onSave} aria-label="保存记忆" title="保存记忆">
               <Save size={16} />
-            </button>
-            <button className={compactIconButtonClassName} type="button" disabled={loading || !activeFile} onClick={onUndo} aria-label="撤销上次保存" title="撤销上次保存">
-              <RotateCcw size={16} />
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
