@@ -606,6 +606,13 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   animated progress indicator, pending changes shall use a distinct review
   indicator, and both shall be restored after workspace navigation. Status:
   implemented.
+- REQ-750: A Memory run shall capture the global interface language when the
+  run starts and use it as the output language for newly generated summaries,
+  findings, reasons, and inserted or replaced memory text across L2 and L3.
+  Existing memory shall not be translated merely because the global language
+  changes, and technical terms or proper nouns may remain in their source
+  language. The captured language shall remain fixed for the lifetime of the
+  run. Status: implemented.
 
 ## 21. Markdown Rendering
 

@@ -249,6 +249,9 @@ structured change sets, and central diff review.
   progress flow, and review result after navigating away and returning.
 - [x] Project all active Memory runs into the left file rail, with distinct
   running and awaiting-review indicators that survive workspace navigation.
+- [x] Capture the global UI language at Memory-run creation and require all new
+  L2/L3 summaries, findings, reasons, and memory text to use that language
+  without translating existing documents.
 - [x] Add boundary and UI tests for pagination, source expansion, duplicate or
   unread refs, stale revisions, partial acceptance, atomic apply, and undo.
 

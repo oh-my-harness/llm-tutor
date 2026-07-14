@@ -13,6 +13,7 @@ use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::ExecutionEnv;
 use serde::{Deserialize, Serialize};
 use tutor_agent::llm_provider::{LlmConfig, LlmProviderKind};
+use tutor_agent::memory::MemoryOutputLanguage;
 
 use crate::memory_store::{
     MemoryAssistAction, MemoryChange, MemoryChangeOp, MemoryChangeSet, MemoryFile, MemoryFinding,
@@ -60,6 +61,8 @@ struct AssistMemoryRequest {
     action: MemoryAssistAction,
     markdown: Option<String>,
     llm: Option<MemoryLlmConfig>,
+    #[serde(default)]
+    output_language: MemoryOutputLanguage,
 }
 
 #[derive(Clone, Deserialize)]
@@ -76,6 +79,8 @@ struct MemoryLlmConfig {
 struct StartMemoryRunRequest {
     target_path: String,
     action: MemoryAssistAction,
+    #[serde(default)]
+    output_language: MemoryOutputLanguage,
     llm: MemoryLlmConfig,
 }
 
@@ -101,6 +106,7 @@ struct MemoryRunSnapshot {
     run_id: String,
     target_path: String,
     action: MemoryAssistAction,
+    output_language: MemoryOutputLanguage,
     started_at: chrono::DateTime<chrono::Utc>,
     status: String,
     current_stage: String,
@@ -134,6 +140,7 @@ async fn start_memory_run(
         run_id: run_id.clone(),
         target_path: file.path.clone(),
         action: req.action,
+        output_language: req.output_language,
         started_at: chrono::Utc::now(),
         status: "running".into(),
         current_stage: "queued".into(),
@@ -179,6 +186,7 @@ async fn start_memory_run(
             &task_state.workflow_root,
             file,
             req.action,
+            req.output_language,
             &llm,
             tracker,
             task_run_id.clone(),
@@ -399,6 +407,7 @@ async fn run_memory_change_set(
     workflow_root: &PathBuf,
     file: MemoryFile,
     action: MemoryAssistAction,
+    output_language: MemoryOutputLanguage,
     llm: &LlmConfig,
     tracker: MemoryEvidenceTracker,
     run_id: String,
@@ -409,6 +418,7 @@ async fn run_memory_change_set(
     let workflow_input = tutor_agent::memory::MemoryWorkflowInput {
         target_path: file.path.clone(),
         action: workflow_action(action),
+        output_language,
         current_markdown: file.markdown.clone(),
         consolidation_input_json: serde_json::to_string_pretty(&context)
             .map_err(|err| err.to_string())?,
@@ -632,6 +642,7 @@ async fn assist_memory(
             req.action,
             req.markdown,
             llm,
+            req.output_language,
         )
         .await
         {
@@ -663,6 +674,7 @@ async fn assist_memory_with_llm(
     action: MemoryAssistAction,
     markdown: Option<String>,
     llm: MemoryLlmConfig,
+    output_language: MemoryOutputLanguage,
 ) -> Result<crate::memory_store::MemoryAssistResult, String> {
     let llm = build_llm_config(llm)?;
     let mut file = store.read(&target_path).map_err(|err| err.to_string())?;
@@ -675,6 +687,7 @@ async fn assist_memory_with_llm(
         workflow_root,
         file,
         action,
+        output_language,
         &llm,
         MemoryEvidenceTracker::default(),
         uuid::Uuid::new_v4().to_string(),
@@ -791,6 +804,32 @@ mod tests {
     use axum::http::{Method, Request};
     use tower::ServiceExt;
 
+    #[test]
+    fn memory_run_request_captures_output_language_with_legacy_default() {
+        let request = serde_json::from_value::<StartMemoryRunRequest>(serde_json::json!({
+            "target_path": "L2/chat.md",
+            "action": "update",
+            "output_language": "zh-CN",
+            "llm": {
+                "provider": "openai",
+                "model": "test-model"
+            }
+        }))
+        .unwrap();
+        assert_eq!(request.output_language, MemoryOutputLanguage::ZhCn);
+
+        let legacy = serde_json::from_value::<StartMemoryRunRequest>(serde_json::json!({
+            "target_path": "L2/chat.md",
+            "action": "update",
+            "llm": {
+                "provider": "openai",
+                "model": "test-model"
+            }
+        }))
+        .unwrap();
+        assert_eq!(legacy.output_language, MemoryOutputLanguage::EnUs);
+    }
+
     #[tokio::test]
     async fn cancellation_aborts_and_records_the_memory_run_state() {
         let dir = tempfile::tempdir().unwrap();
@@ -804,6 +843,7 @@ mod tests {
                     run_id: run_id.clone(),
                     target_path: "L2/chat.md".into(),
                     action: MemoryAssistAction::Update,
+                    output_language: MemoryOutputLanguage::EnUs,
                     started_at: chrono::Utc::now(),
                     status: "running".into(),
                     current_stage: "discovering_sources".into(),
@@ -841,6 +881,7 @@ mod tests {
             run_id: run_id.into(),
             target_path: "L2/chat.md".into(),
             action: MemoryAssistAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
             started_at,
             status: status.into(),
             current_stage: status.into(),

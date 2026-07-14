@@ -22,10 +22,20 @@ pub enum MemoryWorkflowAction {
     Dedupe,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MemoryOutputLanguage {
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+    #[default]
+    #[serde(rename = "en-US")]
+    EnUs,
+}
+
 #[derive(Debug, Clone)]
 pub struct MemoryWorkflowInput {
     pub target_path: String,
     pub action: MemoryWorkflowAction,
+    pub output_language: MemoryOutputLanguage,
     pub current_markdown: String,
     pub consolidation_input_json: String,
 }
@@ -316,10 +326,23 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
     } else {
         input.consolidation_input_json.clone()
     };
+    let (language_rules, output_example) = match input.output_language {
+        MemoryOutputLanguage::ZhCn => (
+            "- Write summary, finding.message, change.text, and change.reason in Simplified Chinese.\n- Preserve code, API names, model names, paper titles, and other proper nouns when translation would reduce precision.\n- Do not translate or rewrite existing memory merely to change its language.\n- Keep schema values and section keys exactly as specified, even when they are English.",
+            r#"{"summary":"发现一项可审核的更新","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"这条记忆缺少充分证据","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"一条简洁的学习者记忆","refs":["chat:event-id"],"reason":"这项修改有助于后续个性化教学"}]}"#,
+        ),
+        MemoryOutputLanguage::EnUs => (
+            "- Write summary, finding.message, change.text, and change.reason in English.\n- Preserve code, API names, model names, paper titles, and other proper nouns when translation would reduce precision.\n- Do not translate or rewrite existing memory merely to change its language.\n- Keep schema values and section keys exactly as specified.",
+            r#"{"summary":"One reviewable update found","findings":[{"id":"finding_1","entry_id":"m_existing","severity":"warning","kind":"unsupported","message":"This memory lacks sufficient evidence","refs":["chat:event-id"]}],"changes":[{"id":"change_1","op":"insert","section":"one allowed section key","entry_id":null,"after_entry_id":null,"text":"A concise learner memory","refs":["chat:event-id"],"reason":"This change supports future personalization"}]}"#,
+        ),
+    };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and compact L1 catalog:\n```json\n{source}\n```\n\nAll L1 content is available through the read-only memory evidence tools. Do not assume a list/search summary is sufficient evidence.\n\nReturn JSON exactly like:\n{{\"summary\":\"compact result summary\",\"findings\":[{{\"id\":\"finding_1\",\"entry_id\":\"m_existing\",\"severity\":\"warning\",\"kind\":\"unsupported\",\"message\":\"short explanation\",\"refs\":[\"chat:event-id\"]}}],\"changes\":[{{\"id\":\"change_1\",\"op\":\"insert\",\"section\":\"one allowed section\",\"entry_id\":null,\"after_entry_id\":null,\"text\":\"concise learner fact\",\"refs\":[\"chat:event-id\"],\"reason\":\"why this change is useful\"}}]}}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
+        "Target memory file: {target_path}\nAction: {action:?}\nOutput language: {output_language:?}\n\nLanguage contract:\n{language_rules}\n\nRules:\n{action_rules}\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and compact L1 catalog:\n```json\n{source}\n```\n\nAll L1 content is available through the read-only memory evidence tools. Do not assume a list/search summary is sufficient evidence.\n\nReturn JSON exactly like:\n{output_example}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
         target_path = input.target_path,
         action = input.action,
+        output_language = input.output_language,
+        language_rules = language_rules,
+        output_example = output_example,
         numbered_current = line_numbered_markdown(&input.current_markdown),
         source = source,
     )
@@ -447,6 +470,7 @@ mod tests {
         let input = MemoryWorkflowInput {
             target_path: "L2/quiz.md".into(),
             action: MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
             current_markdown: "# Quiz memory\n\n".into(),
             consolidation_input_json:
                 r#"{"chunk":{"citeableRefs":["quiz:q1"]},"target":{"allowedSections":["Weak topics"]}}"#
@@ -469,5 +493,22 @@ mod tests {
         assert_eq!(run.cost.total_input_tokens, 0);
         let output = run.output;
         assert_eq!(output.changes[0].refs, vec!["quiz:event-1"]);
+    }
+
+    #[test]
+    fn memory_prompt_pins_generated_fields_to_simplified_chinese() {
+        let prompt = memory_prompt(&MemoryWorkflowInput {
+            target_path: "L2/chat.md".into(),
+            action: MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::ZhCn,
+            current_markdown: "# Chat memory\n\n- Existing English fact. <!--m_1-->".into(),
+            consolidation_input_json: r#"{"target":{"allowedSections":["Topics"]}}"#.into(),
+        });
+
+        assert!(prompt.contains("Output language: ZhCn"));
+        assert!(prompt.contains("change.text, and change.reason in Simplified Chinese"));
+        assert!(prompt.contains("一条简洁的学习者记忆"));
+        assert!(prompt.contains("Do not translate or rewrite existing memory"));
+        assert!(prompt.contains("Keep schema values and section keys exactly as specified"));
     }
 }

@@ -90,6 +90,7 @@ interface MemoryRun {
   run_id: string
   target_path: string
   action: AssistAction
+  output_language?: 'zh-CN' | 'en-US'
   started_at?: string
   status: string
   current_stage: string
@@ -292,6 +293,7 @@ export function MemoryPage({
         body: JSON.stringify({
           target_path: activeFile.path,
           action: assistAction,
+          output_language: settings.language,
           llm,
         }),
       })

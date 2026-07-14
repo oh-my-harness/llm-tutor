@@ -46,6 +46,8 @@ formatting, entry ids, reference validation, deduplication, and file writes.
 - Keep L1 access read-only and make every evidence read visible in the run flow.
 - Return structured changes, not a complete Markdown draft.
 - Require user review before any agent-produced change is written.
+- Capture the global UI language when a run starts and use it for newly
+  generated user-facing Memory content without translating existing entries.
 
 ## 3. Layers
 
@@ -236,6 +238,17 @@ slots:
 
 Chinese UI can localize section labels, but internal tests are easier if the
 stored section keys are stable. A display-name map can translate them.
+
+### 5.1 Output Language Contract
+
+Each run captures `zh-CN` or `en-US` from the global interface settings at
+creation time. That value remains fixed until the run completes. The workflow
+uses it for `summary`, finding messages, change reasons, and inserted or
+replacement memory text in both L2 and L3. Existing Markdown is not rewritten
+only to change its language. Stable schema values and section keys remain
+unchanged, while code, API names, model names, paper titles, and other proper
+nouns may remain in their original language when translation would reduce
+precision.
 
 ## 6. Update Prompt Contract
 
