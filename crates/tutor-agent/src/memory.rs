@@ -12,8 +12,6 @@ use crate::error::{Result, TutorError};
 use crate::runtime_engine::RuntimeDeclarativeJudge;
 use crate::runtime_workflow::{memory_workflow, validate_memory_workflow};
 
-const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryWorkflowAction {
@@ -297,21 +295,13 @@ fn validate_workflow_change(change: &MemoryWorkflowChange) -> Result<()> {
             }
         }
     }
-    if change
-        .text
-        .as_deref()
-        .is_some_and(|text| text.chars().count() > MAX_MEMORY_FACT_TEXT_CHARS)
-    {
-        return Err(TutorError::Internal(
-            "memory change text is too long".into(),
-        ));
-    }
     Ok(())
 }
 
 fn memory_prompt(input: &MemoryWorkflowInput) -> String {
     let is_l3 = input.target_path.starts_with("L3/");
     let is_recent = input.target_path == "L3/recent.md";
+    let entry_text_limit = if is_l3 { 1_200 } else { 500 };
     let evidence_rules = if is_recent {
         "- Use list_memory_entries or search_memory_entries to discover L2 candidates within the allowed source matrix.\n- Use read_memory_entry before citing an L2 entry.\n- Prefer L2 evidence; use the L1 event tools only for bounded recent chronology or to verify an L2 source.\n- Cite canonical memory:L2/path.md#m_id refs for L2 evidence and canonical event refs only for the recent chronology exception."
     } else if is_l3 {
@@ -354,12 +344,13 @@ fn memory_prompt(input: &MemoryWorkflowInput) -> String {
         ),
     };
     format!(
-        "Target memory file: {target_path}\nAction: {action:?}\nOutput language: {output_language:?}\n\nLanguage contract:\n{language_rules}\n\nEvidence contract:\n{evidence_rules}\n\nAction rules:\n{action_rules}\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and evidence catalog:\n```json\n{source}\n```\n\nA list/search result is only a candidate and is never sufficient evidence by itself.\n\nReturn JSON exactly like:\n{output_example}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
+        "Target memory file: {target_path}\nAction: {action:?}\nOutput language: {output_language:?}\n\nLanguage contract:\n{language_rules}\n\nEvidence contract:\n{evidence_rules}\n\nAction rules:\n{action_rules}\n- Keep each change.text at or below {entry_text_limit} characters. Each change must contain one coherent memory entry; split unrelated or longer synthesis into multiple evidence-bound changes.\n\nCurrent Markdown with line numbers and stable <!--m_...--> entry ids:\n```text\n{numbered_current}\n```\n\nTarget schema and evidence catalog:\n```json\n{source}\n```\n\nA list/search result is only a candidate and is never sufficient evidence by itself.\n\nReturn JSON exactly like:\n{output_example}\n\nReturn findings and changes as arrays, even when empty. Never return complete Markdown or line-number edits.",
         target_path = input.target_path,
         action = input.action,
         output_language = input.output_language,
         language_rules = language_rules,
         evidence_rules = evidence_rules,
+        entry_text_limit = entry_text_limit,
         output_example = output_example,
         numbered_current = line_numbered_markdown(&input.current_markdown),
         source = source,
@@ -450,8 +441,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_overlong_change_text() {
-        let text = "x".repeat(MAX_MEMORY_FACT_TEXT_CHARS + 1);
+    fn leaves_layer_specific_change_length_validation_to_the_product_boundary() {
+        let text = "x".repeat(1_201);
         let payload = serde_json::json!({
             "summary": "Too long.",
             "findings": [],
@@ -461,9 +452,10 @@ mod tests {
                 "refs": ["quiz:event-1"], "reason": "durable evidence"
             }]
         });
-        let err = parse_memory_workflow_output(&payload.to_string(), MemoryWorkflowAction::Update)
-            .unwrap_err();
-        assert!(err.to_string().contains("too long"));
+        let output =
+            parse_memory_workflow_output(&payload.to_string(), MemoryWorkflowAction::Update)
+                .unwrap();
+        assert_eq!(output.changes[0].text.as_deref().unwrap().len(), 1_201);
     }
 
     #[test]
@@ -543,6 +535,7 @@ mod tests {
         assert!(prompt.contains("Use read_memory_entry before citing an L2 entry"));
         assert!(prompt.contains("memory:L2/chat.md#m_example"));
         assert!(prompt.contains("Do not cite or scan L1 events directly"));
+        assert!(prompt.contains("at or below 1200 characters"));
     }
 
     #[test]

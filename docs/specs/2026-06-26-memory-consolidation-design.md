@@ -743,6 +743,13 @@ replacement, rejects catalog-only and bare-surface refs, resolves entry ids and
 revisions again before apply, and rejects circular dependencies. `recent.md`
 uses a separately declared chronology rule for bounded direct L1 refs.
 
+Memory entry length is layer-aware. L2 entries remain compact atomic facts;
+L3 entries may contain a longer coherent synthesis, but must not become an
+essay or contain multiple unrelated claims. An oversized model change enters
+the same bounded repair pass as unread evidence and must be shortened or split
+into multiple evidence-bound changes. The second invalid result fails with the
+change id, actual character count, target layer limit, and remediation hint.
+
 L1- and L2-backed runs perform a post-generation read-evidence audit before a
 change set is accepted. If a draft cites an item that was only listed, searched,
 or inferred but not read, the workflow gets one bounded repair pass containing

@@ -24,7 +24,8 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
 ];
 
 const DEFAULT_DIRS: &[&str] = &["L1", "L2", "L3"];
-const MAX_MEMORY_FACT_TEXT_CHARS: usize = 500;
+const MAX_L2_MEMORY_ENTRY_TEXT_CHARS: usize = 500;
+const MAX_L3_MEMORY_ENTRY_TEXT_CHARS: usize = 1_200;
 
 #[derive(Clone)]
 pub struct MemoryStore {
@@ -557,7 +558,7 @@ impl MemoryStore {
             .collect::<std::collections::BTreeSet<_>>();
         let mut entries = parse_memory_entries(&current.markdown);
         for change in selected {
-            validate_memory_change(change, &allowed_sections)?;
+            validate_memory_change(target_path, change, &allowed_sections)?;
             for reference in &change.refs {
                 if reference.starts_with("memory:L2/") {
                     self.read_l2_entry(reference)?;
@@ -1124,6 +1125,7 @@ pub fn memory_revision(markdown: &str) -> String {
 }
 
 fn validate_memory_change(
+    target_path: &str,
     change: &MemoryChange,
     allowed_sections: &std::collections::BTreeSet<&str>,
 ) -> Result<()> {
@@ -1139,7 +1141,7 @@ fn validate_memory_change(
             if !allowed_sections.contains(section) {
                 return Err(anyhow!("memory insert uses unknown section `{section}`"));
             }
-            validate_change_text(change)?;
+            validate_change_text(target_path, change)?;
             if change.refs.is_empty() {
                 return Err(anyhow!("memory insert requires evidence refs"));
             }
@@ -1159,7 +1161,7 @@ fn validate_memory_change(
             {
                 return Err(anyhow!("memory replace uses unknown section `{section}`"));
             }
-            validate_change_text(change)?;
+            validate_change_text(target_path, change)?;
         }
         MemoryChangeOp::Delete => {
             if change
@@ -1179,15 +1181,28 @@ fn validate_memory_change(
     Ok(())
 }
 
-fn validate_change_text(change: &MemoryChange) -> Result<()> {
+fn validate_change_text(target_path: &str, change: &MemoryChange) -> Result<()> {
     let text = change.text.as_deref().unwrap_or_default().trim();
     if text.is_empty() {
         return Err(anyhow!("memory change text is empty"));
     }
-    if text.chars().count() > MAX_MEMORY_FACT_TEXT_CHARS {
-        return Err(anyhow!("memory change text is too long"));
+    let count = text.chars().count();
+    let limit = memory_entry_text_limit(target_path);
+    if count > limit {
+        return Err(anyhow!(
+            "memory change `{}` has {count} characters, exceeding the {limit}-character limit for {target_path}; shorten it or split it into multiple changes",
+            change.id
+        ));
     }
     Ok(())
+}
+
+pub fn memory_entry_text_limit(target_path: &str) -> usize {
+    if target_path.starts_with("L3/") {
+        MAX_L3_MEMORY_ENTRY_TEXT_CHARS
+    } else {
+        MAX_L2_MEMORY_ENTRY_TEXT_CHARS
+    }
 }
 
 fn memory_entry_from_change(change: &MemoryChange) -> Result<MemoryEntry> {
@@ -1375,6 +1390,12 @@ mod tests {
             .unwrap();
         assert_eq!(updated.path, "L3/profile.md");
         assert!(updated.markdown.contains("Needs review"));
+    }
+
+    #[test]
+    fn memory_entry_text_limits_are_layer_specific() {
+        assert_eq!(memory_entry_text_limit("L2/chat.md"), 500);
+        assert_eq!(memory_entry_text_limit("L3/profile.md"), 1_200);
     }
 
     #[test]

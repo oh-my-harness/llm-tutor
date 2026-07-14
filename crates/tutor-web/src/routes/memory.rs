@@ -17,7 +17,7 @@ use tutor_agent::memory::MemoryOutputLanguage;
 
 use crate::memory_store::{
     MemoryAssistAction, MemoryChange, MemoryChangeOp, MemoryChangeSet, MemoryFile, MemoryFinding,
-    MemoryStore, parse_memory_entries,
+    MemoryStore, memory_entry_text_limit, parse_memory_entries,
 };
 use crate::memory_tool::{
     ListMemoryEntriesTool, ListMemoryEventsTool, MemoryEvidenceActivity, MemoryEvidenceTracker,
@@ -417,17 +417,20 @@ async fn run_memory_change_set(
     .await
     .map_err(|err| err.to_string())?;
     let unread_refs = unread_workflow_refs(&run.output, &tracker);
-    let output = if unread_refs.is_empty() {
+    let oversized_changes = oversized_workflow_changes(&run.output, &file.path);
+    let output = if unread_refs.is_empty() && oversized_changes.is_empty() {
         run.output
     } else {
         tracker.record_stage(
-            "validating_evidence",
+            "validating_changes",
             format!(
-                "Found {} unread citations; requesting one evidence repair pass",
-                unread_refs.len()
+                "Found {} unread citations and {} oversized changes; requesting one repair pass",
+                unread_refs.len(),
+                oversized_changes.len()
             ),
         );
-        let repair_input = evidence_repair_input(&workflow_input, &unread_refs)?;
+        let repair_input =
+            workflow_repair_input(&workflow_input, &unread_refs, &oversized_changes)?;
         run_memory_runtime_workflow_with_tools(
             llm,
             workflow_root,
@@ -439,6 +442,27 @@ async fn run_memory_change_set(
         .output
     };
     workflow_output_to_change_set(run_id, &file, output, &tracker)
+}
+
+fn oversized_workflow_changes(
+    output: &tutor_agent::memory::MemoryWorkflowOutput,
+    target_path: &str,
+) -> Vec<serde_json::Value> {
+    let limit = memory_entry_text_limit(target_path);
+    output
+        .changes
+        .iter()
+        .filter_map(|change| {
+            let count = change.text.as_deref()?.chars().count();
+            (count > limit).then(|| {
+                serde_json::json!({
+                    "changeId": change.id,
+                    "characters": count,
+                    "limit": limit,
+                })
+            })
+        })
+        .collect()
 }
 
 fn memory_evidence_tools(
@@ -515,21 +539,40 @@ fn unread_workflow_refs(
         .collect()
 }
 
+#[cfg(test)]
 fn evidence_repair_input(
     input: &tutor_agent::memory::MemoryWorkflowInput,
     unread_refs: &[String],
 ) -> Result<tutor_agent::memory::MemoryWorkflowInput, String> {
+    workflow_repair_input(input, unread_refs, &[])
+}
+
+fn workflow_repair_input(
+    input: &tutor_agent::memory::MemoryWorkflowInput,
+    unread_refs: &[String],
+    oversized_changes: &[serde_json::Value],
+) -> Result<tutor_agent::memory::MemoryWorkflowInput, String> {
     let mut context = serde_json::from_str::<serde_json::Value>(&input.consolidation_input_json)
         .map_err(|err| format!("invalid memory workflow context: {err}"))?;
-    let required_action = if input.target_path.starts_with("L3/") {
+    let evidence_action = if input.target_path.starts_with("L3/") {
         "Call read_memory_entry for every retained L2 reference below. Use read_memory_entry_sources only when source verification is needed, then resubmit the full result. Remove any claim whose evidence you do not read or that the full entry does not support."
     } else {
         "Call read_memory_event or read_memory_source for every retained reference below, inspect the complete event, then resubmit the full result. Remove any claim whose evidence you do not read or that the full event does not support."
     };
+    let mut required_actions = Vec::new();
+    if !unread_refs.is_empty() {
+        required_actions.push(evidence_action);
+    }
+    if !oversized_changes.is_empty() {
+        required_actions.push(
+            "Shorten every oversized change or split it into multiple coherent evidence-bound changes. Do not truncate claims mechanically, merge unrelated claims, or omit their evidence references.",
+        );
+    }
     context["validationFeedback"] = serde_json::json!({
-        "reason": "The previous draft cited evidence that was listed or inferred but not read.",
+        "reason": "The previous draft failed the Memory change-set validation contract.",
         "unreadRefs": unread_refs,
-        "requiredAction": required_action,
+        "oversizedChanges": oversized_changes,
+        "requiredAction": required_actions.join(" "),
         "repairAttempt": 1,
     });
     let mut repair_input = input.clone();
@@ -549,6 +592,17 @@ fn workflow_output_to_change_set(
     for change in output.changes {
         let refs = canonicalize_run_refs(&change.refs, tracker, true)?;
         validate_target_refs(&file.path, &refs)?;
+        let text = change.text.map(|value| normalize_change_text(&value));
+        if let Some(text) = text.as_deref() {
+            let count = text.chars().count();
+            let limit = memory_entry_text_limit(&file.path);
+            if count > limit {
+                return Err(format!(
+                    "memory change `{}` has {count} characters, exceeding the {limit}-character limit for {}; shorten it or split it into multiple changes",
+                    change.id, file.path
+                ));
+            }
+        }
         let op = match change.op {
             tutor_agent::memory::MemoryWorkflowChangeOp::Insert => MemoryChangeOp::Insert,
             tutor_agent::memory::MemoryWorkflowChangeOp::Replace => MemoryChangeOp::Replace,
@@ -572,7 +626,7 @@ fn workflow_output_to_change_set(
             section: change.section,
             entry_id: change.entry_id,
             after_entry_id: change.after_entry_id,
-            text: change.text.map(|value| normalize_change_text(&value)),
+            text,
             refs,
             reason: change.reason,
             before_text,
@@ -921,6 +975,42 @@ mod tests {
             !repair
                 .consolidation_input_json
                 .contains("read_memory_event")
+        );
+    }
+
+    #[test]
+    fn oversized_l3_change_requests_one_split_repair_pass() {
+        let input = tutor_agent::memory::MemoryWorkflowInput {
+            target_path: "L3/profile.md".into(),
+            action: tutor_agent::memory::MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::EnUs,
+            current_markdown: "# Student profile".into(),
+            consolidation_input_json: "{}".into(),
+        };
+        let output = tutor_agent::memory::MemoryWorkflowOutput {
+            summary: "Profile synthesis".into(),
+            findings: vec![],
+            changes: vec![tutor_agent::memory::MemoryWorkflowChange {
+                id: "change_long".into(),
+                op: tutor_agent::memory::MemoryWorkflowChangeOp::Insert,
+                section: Some("Strengths".into()),
+                entry_id: None,
+                after_entry_id: None,
+                text: Some("x".repeat(1_201)),
+                refs: vec!["memory:L2/chat.md#m_source".into()],
+                reason: "Evidence-backed synthesis".into(),
+            }],
+        };
+
+        let oversized = oversized_workflow_changes(&output, &input.target_path);
+        let repair = workflow_repair_input(&input, &[], &oversized).unwrap();
+
+        assert_eq!(oversized[0]["changeId"], "change_long");
+        assert_eq!(oversized[0]["limit"], 1_200);
+        assert!(
+            repair
+                .consolidation_input_json
+                .contains("split it into multiple")
         );
     }
 
