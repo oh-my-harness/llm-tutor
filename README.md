@@ -6,7 +6,7 @@
 
 它把多轮聊天、复杂问题求解、联网研究、测验、RAG 知识库、Markdown Notebook 和学习记忆组合在一个可持久化的桌面应用中。
 
-> 当前版本：`0.1.3`
+> 当前版本：`0.2.1`
 >
 > 当前阶段：单用户本地产品原型；核心闭环可用，桌面发布仍在持续人工 QA。
 >
@@ -238,7 +238,7 @@ npm run build --prefix web-ui
 版本同步：
 
 ```powershell
-.\scripts\bump-version.ps1 0.1.4
+.\scripts\bump-version.ps1 0.2.2
 ```
 
 GitHub 发布工作流在 `v*` 标签和手动 `workflow_dispatch` 下构建 Windows x64、macOS x64 和 macOS arm64 产物。CI 需要 `PRIVATE_DEPS_TOKEN` 读取私有 Git 依赖。

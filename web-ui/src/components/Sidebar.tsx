@@ -311,7 +311,7 @@ export function Sidebar({
           <Settings size={19} />
           {!collapsed && <span>{t('nav.settings')}</span>}
         </button>
-        {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v0.1.3</div>}
+        {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v0.2.1</div>}
       </div>
     </aside>
   )
