@@ -743,6 +743,13 @@ replacement, rejects catalog-only and bare-surface refs, resolves entry ids and
 revisions again before apply, and rejects circular dependencies. `recent.md`
 uses a separately declared chronology rule for bounded direct L1 refs.
 
+L1- and L2-backed runs perform a post-generation read-evidence audit before a
+change set is accepted. If a draft cites an item that was only listed, searched,
+or inferred but not read, the workflow gets one bounded repair pass containing
+the unread references. The agent must read and re-evaluate each retained source
+or remove the unsupported claim. A second invalid result fails validation; list
+results never become citeable merely because they appeared in model context.
+
 ### 13.3 Product Agent Memory Tools
 
 `read_memory`:

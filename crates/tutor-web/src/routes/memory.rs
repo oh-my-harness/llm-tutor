@@ -407,17 +407,89 @@ async fn run_memory_change_set(
         consolidation_input_json: serde_json::to_string_pretty(&context)
             .map_err(|err| err.to_string())?,
     };
-    let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
+    let run = run_memory_runtime_workflow_with_tools(
+        llm,
+        workflow_root,
+        &workflow_input,
+        memory_evidence_tools(store.clone(), tracker.clone()),
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    let unread_refs = unread_workflow_refs(&run.output, &tracker);
+    let output = if unread_refs.is_empty() {
+        run.output
+    } else {
+        tracker.record_stage(
+            "validating_evidence",
+            format!(
+                "Found {} unread citations; requesting one evidence repair pass",
+                unread_refs.len()
+            ),
+        );
+        let repair_input = evidence_repair_input(&workflow_input, &unread_refs)?;
+        run_memory_runtime_workflow_with_tools(
+            llm,
+            workflow_root,
+            &repair_input,
+            memory_evidence_tools(store, tracker.clone()),
+        )
+        .await
+        .map_err(|err| err.to_string())?
+        .output
+    };
+    workflow_output_to_change_set(run_id, &file, output, &tracker)
+}
+
+fn memory_evidence_tools(
+    store: Arc<MemoryStore>,
+    tracker: MemoryEvidenceTracker,
+) -> Vec<Arc<dyn llm_harness_types::Tool>> {
+    vec![
         Arc::new(ListMemoryEventsTool::new(store.clone(), tracker.clone())),
         Arc::new(SearchMemoryEventsTool::new(store.clone(), tracker.clone())),
         Arc::new(ReadMemoryEventTool::new(store.clone(), tracker.clone())),
         Arc::new(ReadMemoryContextTool::new(store.clone(), tracker.clone())),
-        Arc::new(ReadMemorySourceTool::new(store, tracker.clone())),
-    ];
-    let run = run_memory_runtime_workflow_with_tools(llm, workflow_root, &workflow_input, tools)
-        .await
-        .map_err(|err| err.to_string())?;
-    workflow_output_to_change_set(run_id, &file, run.output, &tracker)
+        Arc::new(ReadMemorySourceTool::new(store, tracker)),
+    ]
+}
+
+fn unread_workflow_refs(
+    output: &tutor_agent::memory::MemoryWorkflowOutput,
+    tracker: &MemoryEvidenceTracker,
+) -> Vec<String> {
+    output
+        .changes
+        .iter()
+        .flat_map(|change| change.refs.iter())
+        .chain(
+            output
+                .findings
+                .iter()
+                .flat_map(|finding| finding.refs.iter()),
+        )
+        .filter(|reference| tracker.canonical_reference(reference).is_none())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn evidence_repair_input(
+    input: &tutor_agent::memory::MemoryWorkflowInput,
+    unread_refs: &[String],
+) -> Result<tutor_agent::memory::MemoryWorkflowInput, String> {
+    let mut context = serde_json::from_str::<serde_json::Value>(&input.consolidation_input_json)
+        .map_err(|err| format!("invalid memory workflow context: {err}"))?;
+    context["validationFeedback"] = serde_json::json!({
+        "reason": "The previous draft cited evidence that was listed or inferred but not read.",
+        "unreadRefs": unread_refs,
+        "requiredAction": "Call read_memory_event or read_memory_source for every retained reference below, inspect the complete event, then resubmit the full result. Remove any claim whose evidence you do not read or that the full event does not support.",
+        "repairAttempt": 1,
+    });
+    let mut repair_input = input.clone();
+    repair_input.consolidation_input_json =
+        serde_json::to_string_pretty(&context).map_err(|err| err.to_string())?;
+    Ok(repair_input)
 }
 
 fn workflow_output_to_change_set(
@@ -726,6 +798,72 @@ mod tests {
         );
         let error = canonicalize_run_refs(&["notebook:unread".into()], &tracker, true).unwrap_err();
         assert!(error.contains("cites unread evidence `notebook:unread`"));
+    }
+
+    #[test]
+    fn collects_unread_workflow_refs_once_for_evidence_repair() {
+        let tracker = MemoryEvidenceTracker::default();
+        tracker.record_resolution(
+            "reading_evidence",
+            "read_memory_event",
+            "Read quiz evidence".into(),
+            "quiz:read",
+            "quiz:read",
+        );
+        let output = serde_json::from_value::<tutor_agent::memory::MemoryWorkflowOutput>(
+            serde_json::json!({
+                "summary": "draft",
+                "changes": [{
+                    "id": "change_1",
+                    "op": "insert",
+                    "section": "Topics",
+                    "entry_id": null,
+                    "after_entry_id": null,
+                    "text": "RAG",
+                    "refs": ["quiz:read", "quiz:unread"],
+                    "reason": "test"
+                }],
+                "findings": [{
+                    "id": "finding_1",
+                    "entry_id": null,
+                    "severity": "warning",
+                    "kind": "evidence",
+                    "message": "needs repair",
+                    "refs": ["quiz:unread"]
+                }]
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(unread_workflow_refs(&output, &tracker), vec!["quiz:unread"]);
+    }
+
+    #[test]
+    fn repair_input_requires_missing_refs_to_be_read_or_removed() {
+        let input = tutor_agent::memory::MemoryWorkflowInput {
+            target_path: "L2/quiz.md".into(),
+            action: tutor_agent::memory::MemoryWorkflowAction::Update,
+            output_language: MemoryOutputLanguage::ZhCn,
+            current_markdown: "# Quiz memory".into(),
+            consolidation_input_json: serde_json::json!({ "target": { "path": "L2/quiz.md" } })
+                .to_string(),
+        };
+
+        let repaired = evidence_repair_input(&input, &["quiz:unread".into()]).unwrap();
+        let context =
+            serde_json::from_str::<serde_json::Value>(&repaired.consolidation_input_json).unwrap();
+
+        assert_eq!(context["validationFeedback"]["repairAttempt"], 1);
+        assert_eq!(
+            context["validationFeedback"]["unreadRefs"],
+            serde_json::json!(["quiz:unread"])
+        );
+        assert!(
+            context["validationFeedback"]["requiredAction"]
+                .as_str()
+                .unwrap()
+                .contains("read_memory_event")
+        );
     }
 
     #[tokio::test]

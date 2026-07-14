@@ -91,6 +91,10 @@ impl MemoryEvidenceTracker {
         }
         self.record(stage, tool, summary, vec![canonical_reference.to_string()]);
     }
+
+    pub(crate) fn record_stage(&self, stage: &str, summary: String) {
+        self.record(stage, "memory_workflow", summary, Vec::new());
+    }
 }
 
 #[derive(Clone)]

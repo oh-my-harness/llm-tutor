@@ -249,6 +249,8 @@ structured change sets, and central diff review.
   explicitly to other L1 surfaces.
 - [x] Emit product-level flow events for discovery, reads, analysis, proposal,
   validation, review, apply, completion, failure, and cancellation.
+- [x] Audit generated refs against evidence actually read in the run and allow
+  one bounded read-or-remove repair pass before failing validation.
 - [x] Replace full `proposed_markdown` and report-oriented output with a
   versioned `MemoryChangeSet` containing findings and evidence-bound changes.
 - [x] Keep the right workbench limited to controls, flow status, counts, errors,
