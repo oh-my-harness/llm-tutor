@@ -2000,8 +2000,8 @@ function DropdownOption({
         selected ? 'text-blue-700' : 'text-gray-500'
       }`}>{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium text-gray-900">{title}</span>
-        <span className="mt-0.5 block truncate text-[11px] text-gray-500">{description}</span>
+        <span className="block truncate text-sm font-semibold text-gray-950">{title}</span>
+        <span className="mt-0.5 block truncate text-xs text-gray-500">{description}</span>
       </span>
       {selected ? (
         <Check size={14} className="shrink-0 text-blue-600" />
