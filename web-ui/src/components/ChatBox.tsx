@@ -1372,6 +1372,7 @@ function Composer({
   const [spaceMentions, setSpaceMentions] = useState<SpaceMention[]>([])
   const [loadingSpaceMentions, setLoadingSpaceMentions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const activeMode = modeOptions.find((mode) => mode.value === capability) ?? modeOptions[0]!
   const activeKnowledge = selectedNotebookEnabled
     ? { id: '__notebook__', name: 'Notebook' }
@@ -1414,6 +1415,15 @@ function Composer({
     if (disabled || running) return
     setOpenMenu((current) => (current === menu ? null : menu))
   }
+
+  useEffect(() => {
+    if (!openMenu) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setOpenMenu(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true)
+  }, [openMenu])
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
@@ -1462,9 +1472,13 @@ function Composer({
 
   return (
     <div
+      ref={composerRef}
       className={`relative rounded-3xl border border-blue-100 bg-white shadow-sm ${
         variant === 'center' ? 'shadow-xl shadow-blue-950/5' : ''
       }`}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setOpenMenu(null)
+      }}
     >
       <textarea
         ref={inputRef}
@@ -1504,7 +1518,7 @@ function Composer({
             onClick={() => toggleMenu('mode')}
           />
           {openMenu === 'mode' && (
-            <DropdownPanel widthClassName="w-[22rem]">
+            <DropdownPanel widthClassName="w-[18rem] max-w-[calc(100vw-1.5rem)]">
               {visibleModeOptions.map((mode) => (
                 <DropdownOption
                   key={mode.value}
@@ -1547,7 +1561,7 @@ function Composer({
             onClick={() => toggleMenu('knowledge')}
           />
           {openMenu === 'knowledge' && (
-            <DropdownPanel widthClassName="w-[19rem]">
+            <DropdownPanel widthClassName="w-[17rem] max-w-[calc(100vw-1.5rem)]">
               {sourceOptions.map((item) => (
                 <DropdownOption
                   key={item.id || 'none'}
@@ -1584,7 +1598,7 @@ function Composer({
           />
           {openMenu === 'space' && (
             <DropdownPanel
-              widthClassName="w-[20rem] max-w-[calc(100vw-1.5rem)]"
+              widthClassName="w-[18rem] max-w-[calc(100vw-1.5rem)]"
               className="flex max-h-[min(19rem,calc(100vh-7rem))] flex-col"
             >
               <div className="shrink-0 space-y-1.5 border-b border-blue-50 bg-white px-3 pb-1.5 pt-1">
@@ -1649,7 +1663,7 @@ function Composer({
             onClick={() => toggleMenu('model')}
           />
           {openMenu === 'model' && (
-            <DropdownPanel widthClassName="right-0 left-auto w-[20rem]">
+            <DropdownPanel widthClassName="right-0 left-auto w-[18rem] max-w-[calc(100vw-1.5rem)]">
               {llmConfigs.length === 0 ? (
                 <DropdownOption
                   selected
@@ -1938,7 +1952,7 @@ function ToolbarButton({
     >
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
-      <ChevronDown size={16} className={`shrink-0 transition ${active ? 'rotate-180' : ''}`} />
+      <ChevronDown size={14} className={`shrink-0 text-gray-400 transition-transform ${active ? 'rotate-180' : ''}`} />
     </button>
   )
 }
@@ -1954,7 +1968,7 @@ function DropdownPanel({
 }) {
   return (
     <div
-      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ${widthClassName} ${className || 'py-1'}`}
+      className={`absolute bottom-12 left-0 z-30 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl shadow-blue-950/10 ${widthClassName} ${className || 'py-1'}`}
     >
       {children}
     </div>
@@ -1976,19 +1990,21 @@ function DropdownOption({
 }) {
   return (
     <button
-      className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition ${
+      className={`flex w-full items-center gap-2 px-2 py-2 text-left transition ${
         selected ? 'bg-blue-50' : 'hover:bg-gray-50'
       }`}
       type="button"
       onClick={onClick}
     >
-      <span className={`${selected ? 'text-blue-700' : 'text-gray-500'}`}>{icon}</span>
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+        selected ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+      }`}>{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-gray-950">{title}</span>
-        <span className="mt-0.5 block truncate text-xs text-gray-500">{description}</span>
+        <span className="block truncate text-xs font-medium text-gray-900">{title}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-gray-500">{description}</span>
       </span>
       {selected ? (
-        <CheckCircle2 size={13} className="shrink-0 text-blue-600" />
+        <Check size={14} className="shrink-0 text-blue-600" />
       ) : (
         <span className="h-2 w-2 shrink-0 rounded-full bg-transparent" />
       )}
