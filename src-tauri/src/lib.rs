@@ -143,7 +143,7 @@ fn spawn_backend(
 ) -> std::io::Result<BackendProcess> {
     let port = port.to_string();
     let data_dir = data_dir.to_string_lossy().to_string();
-    let mut command = debug_backend_command();
+    let mut command = debug_backend_command()?;
     command
         .args([
             "--host",
@@ -267,23 +267,35 @@ fn is_allowed_external_url(url: &str) -> bool {
 }
 
 #[cfg(debug_assertions)]
-fn debug_backend_command() -> Command {
+fn debug_backend_command() -> std::io::Result<Command> {
     if let Ok(path) = std::env::var("LLM_TUTOR_BACKEND_BIN") {
-        return Command::new(path);
+        return Ok(Command::new(path));
     }
 
-    if let Some(path) = debug_backend_binary() {
-        if path.exists() {
-            return Command::new(path);
-        }
+    let root =
+        workspace_root().ok_or_else(|| std::io::Error::other("workspace root is unavailable"))?;
+    let status = Command::new("cargo")
+        .args(["build", "-p", "tutor-web", "--bin", "tutor-web"])
+        .current_dir(&root)
+        .status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!(
+            "failed to build tutor-web before startup: {status}"
+        )));
     }
 
-    let mut command = Command::new("cargo");
-    command.args(["run", "-p", "tutor-web", "--"]);
-    if let Some(root) = workspace_root() {
-        command.current_dir(root);
+    let path = debug_backend_binary()
+        .ok_or_else(|| std::io::Error::other("debug tutor-web path is unavailable"))?;
+    if !path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "debug tutor-web binary was not produced at {}",
+                path.display()
+            ),
+        ));
     }
-    command
+    Ok(Command::new(path))
 }
 
 #[cfg(debug_assertions)]
