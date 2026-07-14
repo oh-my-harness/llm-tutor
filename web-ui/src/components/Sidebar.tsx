@@ -227,7 +227,7 @@ export function Sidebar({
                   {!editing && (
                     <button
                       type="button"
-                      className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
+                      className="absolute inset-0 z-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
                       onClick={() => onSelectSession(session.id)}
                       aria-current={selected ? 'page' : undefined}
                       aria-label={`Open session: ${session.title}`}
