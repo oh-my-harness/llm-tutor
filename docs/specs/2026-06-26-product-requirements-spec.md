@@ -650,6 +650,26 @@ other generated learning records.
   recording. A saved report shall use the normal Notebook event and
   `notebook:` reference contract; no `research:` memory reference shall be
   created. Status: implemented.
+- REQ-758: Ordinary L3 generation shall use stable L2 entries as its primary
+  evidence and shall not behave as another all-surface L1 consolidation run.
+  Status: planned.
+- REQ-759: L3 evidence discovery shall provide bounded list, search, read, and
+  L1-provenance drill-down tools for stable L2 entries. Candidate lists shall
+  not make an entry citeable. Status: planned.
+- REQ-760: L3 changes shall use canonical entry-level L2 references rather than
+  bare surface names. Status: planned.
+- REQ-761: `profile.md`, `scope.md`, and `preferences.md` shall synthesize from
+  their documented L2 source matrix; `teaching_strategy.md` may additionally
+  use accepted Profile, Scope, and Preferences without creating a circular
+  dependency. Status: planned.
+- REQ-762: `recent.md` may use bounded recent L1 events as an explicit
+  chronology exception while retaining current L2 context. Status: planned.
+- REQ-763: L3 runs shall check relevant L2 freshness before analysis and expose
+  stale dependencies instead of silently rewriting multiple layers. Status:
+  planned.
+- REQ-764: The retired draft-oriented Memory assist and consolidation APIs,
+  prompt-injected L3 chunk implementation, and bare-surface citation path shall
+  be removed before the layered L3 runtime is introduced. Status: implemented.
 
 ## 21. Markdown Rendering
 

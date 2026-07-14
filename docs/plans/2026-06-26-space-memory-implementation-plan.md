@@ -282,6 +282,53 @@ structured change sets, and central diff review.
 - [x] No persistent document changes occur before explicit user confirmation.
 - [x] Selected changes apply atomically and can be undone.
 
+### L3 Layered Generation Redesign
+
+Status: designed on 2026-07-14; Phase 0 cleanup completed, layered runtime
+pending.
+
+#### Phase 0: Remove the Competing Legacy Path
+
+- [x] Remove the retired `/api/memory/assist` endpoint.
+- [x] Remove the retired consolidation preview/apply endpoints; manual edits
+  continue through the file API and agent changes through Memory runs.
+- [x] Remove unused `ConsolidationInput`, full-draft assist, prompt-injected L3
+  chunk, line-edit, and bare-surface reference code.
+- [x] Remove `research` from the Memory evidence-tool surface schema.
+- [x] Keep the structured `/api/memory/runs` change-set workflow as the single
+  Memory generation path.
+
+#### Phase 1: L2 Entry Evidence Boundary
+
+- [ ] Add stable canonical references for L2 entries, for example
+  `memory:L2/chat.md#m_xxx`.
+- [ ] Add bounded list/search/read tools for L2 entries.
+- [ ] Add an L2-entry source drill-down tool that resolves the entry's L1 refs.
+- [ ] Track read L2 refs separately from candidate lists and L1 verification
+  refs.
+
+#### Phase 2: Layer-Specific Runtime
+
+- [ ] Route L2 runs to L1 event tools and L3 runs to L2 entry tools.
+- [ ] Implement the L3 source matrix for Profile, Scope, Preferences, Recent,
+  and Teaching Strategy.
+- [ ] Treat `recent.md` as the explicit bounded-L1 chronology exception.
+- [ ] Enforce the dependency DAG and generate Teaching Strategy only from
+  accepted Profile, Scope, Preferences, and relevant L2 evidence.
+- [ ] Add L2 freshness metadata and warn before running L3 from stale inputs.
+- [ ] Expose L3-specific discovery, read, verification, and validation stages
+  in the workbench flow.
+
+#### Phase 3: Validation and Tests
+
+- [ ] Require each ordinary L3 change to cite a stable L2 entry actually read
+  in the current run.
+- [ ] Reject bare surface refs, catalog-only refs, stale entry revisions, and
+  circular L3 dependencies.
+- [ ] Verify that Research conversation reaches L3 through Chat L1/L2, saved
+  reports through Notebook L1/L2, and workflow traces never enter Memory.
+- [ ] Add boundary tests proving ordinary L3 runs do not scan L1 directly.
+
 ## 7. Phase 5: `read_memory` Tool
 
 Status: completed for harness-backed modes on 2026-06-26. `read_memory` landed

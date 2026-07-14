@@ -356,7 +356,7 @@ fn event_page_schema(require_query: bool) -> Value {
     let mut schema = json!({
         "type": "object",
         "properties": {
-            "surface": {"type": "string", "enum": ["chat", "quiz", "notebook", "knowledge", "research"]},
+            "surface": {"type": "string", "enum": ["chat", "quiz", "notebook", "knowledge"]},
             "session_id": {"type": "string"},
             "cursor": {"type": "string"},
             "limit": {"type": "integer", "minimum": 1, "maximum": 100}
@@ -443,6 +443,19 @@ mod tests {
             }),
             update_tx,
         }
+    }
+
+    #[test]
+    fn event_schema_only_exposes_active_l1_surfaces() {
+        let schema = event_page_schema(false);
+        let values = schema["properties"]["surface"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, vec!["chat", "quiz", "notebook", "knowledge"]);
     }
 
     #[tokio::test]

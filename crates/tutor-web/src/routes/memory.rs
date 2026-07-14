@@ -45,24 +45,8 @@ struct SourceQuery {
 }
 
 #[derive(Deserialize)]
-struct ApplyConsolidationRequest {
-    target_path: String,
-    markdown: String,
-}
-
-#[derive(Deserialize)]
 struct UndoMemoryRequest {
     target_path: String,
-}
-
-#[derive(Deserialize)]
-struct AssistMemoryRequest {
-    target_path: String,
-    action: MemoryAssistAction,
-    markdown: Option<String>,
-    llm: Option<MemoryLlmConfig>,
-    #[serde(default)]
-    output_language: MemoryOutputLanguage,
 }
 
 #[derive(Clone, Deserialize)]
@@ -595,27 +579,6 @@ async fn get_source(
     }
 }
 
-async fn preview_consolidation(State(state): State<MemoryState>) -> impl IntoResponse {
-    match state.store.consolidation_preview() {
-        Ok(preview) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "preview": preview })),
-        )
-            .into_response(),
-        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
-    }
-}
-
-async fn apply_consolidation(
-    State(state): State<MemoryState>,
-    Json(req): Json<ApplyConsolidationRequest>,
-) -> impl IntoResponse {
-    match state.store.write(&req.target_path, req.markdown) {
-        Ok(file) => (StatusCode::OK, Json(serde_json::json!({ "file": file }))).into_response(),
-        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
-    }
-}
-
 async fn undo_memory(
     State(state): State<MemoryState>,
     Json(req): Json<UndoMemoryRequest>,
@@ -628,81 +591,6 @@ async fn undo_memory(
             .into_response(),
         Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
     }
-}
-
-async fn assist_memory(
-    State(state): State<MemoryState>,
-    Json(req): Json<AssistMemoryRequest>,
-) -> impl IntoResponse {
-    if let Some(llm) = req.llm {
-        return match assist_memory_with_llm(
-            &state.store,
-            &state.workflow_root,
-            req.target_path,
-            req.action,
-            req.markdown,
-            llm,
-            req.output_language,
-        )
-        .await
-        {
-            Ok(result) => (
-                StatusCode::OK,
-                Json(serde_json::json!({ "result": result })),
-            )
-                .into_response(),
-            Err(err) => error_response(StatusCode::BAD_REQUEST, err),
-        };
-    }
-    match state
-        .store
-        .assist(&req.target_path, req.action, req.markdown)
-    {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "result": result })),
-        )
-            .into_response(),
-        Err(err) => error_response(StatusCode::BAD_REQUEST, err.to_string()),
-    }
-}
-
-async fn assist_memory_with_llm(
-    store: &MemoryStore,
-    workflow_root: &PathBuf,
-    target_path: String,
-    action: MemoryAssistAction,
-    markdown: Option<String>,
-    llm: MemoryLlmConfig,
-    output_language: MemoryOutputLanguage,
-) -> Result<crate::memory_store::MemoryAssistResult, String> {
-    let llm = build_llm_config(llm)?;
-    let mut file = store.read(&target_path).map_err(|err| err.to_string())?;
-    if let Some(markdown) = markdown {
-        file.markdown = markdown;
-        file.revision = crate::memory_store::memory_revision(&file.markdown);
-    }
-    let change_set = run_memory_change_set(
-        Arc::new(store.clone()),
-        workflow_root,
-        file,
-        action,
-        output_language,
-        &llm,
-        MemoryEvidenceTracker::default(),
-        uuid::Uuid::new_v4().to_string(),
-    )
-    .await?;
-    Ok(crate::memory_store::MemoryAssistResult {
-        target_path,
-        action,
-        report_markdown: change_set.summary,
-        proposed_markdown: None,
-        facts: Vec::new(),
-        edits: Vec::new(),
-        trace: None,
-        changed: !change_set.changes.is_empty(),
-    })
 }
 
 fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {
@@ -768,16 +656,7 @@ pub fn memory_router(store: Arc<MemoryStore>, workflow_root: impl Into<PathBuf>)
         .route("/api/memory/file", get(get_file).patch(update_file))
         .route("/api/memory/events", get(list_events))
         .route("/api/memory/source", get(get_source))
-        .route(
-            "/api/memory/consolidate/preview",
-            axum::routing::post(preview_consolidation),
-        )
-        .route(
-            "/api/memory/consolidate/apply",
-            axum::routing::post(apply_consolidation),
-        )
         .route("/api/memory/undo", axum::routing::post(undo_memory))
-        .route("/api/memory/assist", axum::routing::post(assist_memory))
         .route(
             "/api/memory/runs",
             get(list_memory_runs).post(start_memory_run),
@@ -969,107 +848,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn previews_and_applies_consolidation() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
-        store
-            .record_event(
-                crate::memory_store::MemoryEventCategory::Chat,
-                "answered",
-                "Explained lithography",
-                Some("session-1".into()),
-                serde_json::json!({}),
-            )
-            .unwrap();
-        let app = memory_router(store, dir.path().join("workflow-sessions"));
-
-        let response = app
-            .clone()
-            .oneshot(json_request(
-                Method::POST,
-                "/api/memory/consolidate/preview",
-                serde_json::json!({}),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_json(response).await;
-        assert_eq!(body["preview"]["target_path"], "L3/recent.md");
-        assert!(
-            body["preview"]["proposed_markdown"]
-                .as_str()
-                .unwrap()
-                .contains("Explained lithography")
-        );
-
-        let response = app
-            .oneshot(json_request(
-                Method::POST,
-                "/api/memory/consolidate/apply",
-                serde_json::json!({
-                    "target_path": "L3/recent.md",
-                    "markdown": "# Recent learning context\n\n- Reviewed lithography."
-                }),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_json(response).await;
-        assert!(
-            body["file"]["markdown"]
-                .as_str()
-                .unwrap()
-                .contains("Reviewed")
-        );
-    }
-
-    #[tokio::test]
-    async fn assists_memory_check_and_dedupe() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
-        let app = memory_router(store, dir.path().join("workflow-sessions"));
-
-        let markdown = "# Quiz memory\n\n- Same fact. <!--m_01-->\n- Same fact. <!--m_02-->\n\n[^1]: quiz:q1\n[^1]: quiz:q1";
-        let response = app
-            .clone()
-            .oneshot(json_request(
-                Method::POST,
-                "/api/memory/assist",
-                serde_json::json!({
-                    "target_path": "L2/quiz.md",
-                    "action": "check",
-                    "markdown": markdown
-                }),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_json(response).await;
-        assert!(
-            body["result"]["report_markdown"]
-                .as_str()
-                .unwrap()
-                .contains("Duplicate bullets")
-        );
-
-        let response = app
-            .oneshot(json_request(
-                Method::POST,
-                "/api/memory/assist",
-                serde_json::json!({
-                    "target_path": "L2/quiz.md",
-                    "action": "dedupe",
-                    "markdown": markdown
-                }),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_json(response).await;
-        assert_eq!(body["result"]["changed"], true);
-    }
-
-    #[tokio::test]
     async fn undo_restores_latest_memory_write() {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(MemoryStore::new_with_root(dir.path().join("memory")));
@@ -1141,6 +919,28 @@ mod tests {
             body["source"]["event"]["summary"],
             "Answered OPC question correctly"
         );
+    }
+
+    #[tokio::test]
+    async fn retired_memory_generation_routes_are_not_mounted() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = memory_router(
+            Arc::new(MemoryStore::new_with_root(dir.path().join("memory"))),
+            dir.path().join("workflow-sessions"),
+        );
+
+        for uri in [
+            "/api/memory/assist",
+            "/api/memory/consolidate/preview",
+            "/api/memory/consolidate/apply",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(json_request(Method::POST, uri, serde_json::json!({})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
     }
 
     fn json_request(method: Method, uri: &str, value: serde_json::Value) -> Request<Body> {

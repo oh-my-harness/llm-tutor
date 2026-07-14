@@ -127,6 +127,57 @@ Only `preferences.md` should be directly writable from chat, and only when the
 user explicitly states a long-term preference or approves a fact. Other L3 files
 should be updated through the memory workbench.
 
+### 3.1 L3 Generation Contract
+
+The normal durable generation path is strictly layered:
+
+```text
+L1 product events -> L2 surface memory -> L3 learner memory
+```
+
+L3 must not behave like another all-surface L2 run. Its initial evidence
+catalog contains L2 documents and stable L2 entries, not the complete L1 event
+catalog. The agent lists, searches, and reads concrete L2 entries on demand.
+When an L2 claim needs verification, the agent may follow that entry's source
+chain to L1. L1 is a provenance drill-down for L3, not its default discovery
+surface.
+
+L3 source matrix:
+
+| Target | Primary sources | Additional rule |
+| --- | --- | --- |
+| `profile.md` | Chat, Quiz, Notebook, and Knowledge L2 | Synthesize durable identity, learning style, strengths, and weaknesses. |
+| `scope.md` | Quiz, Chat, Notebook, and Knowledge L2 | Distinguish familiar, practicing, and unsure concepts. |
+| `preferences.md` | Chat and Notebook L2 | Explicit preference L1 may be opened only to verify wording or intent. |
+| `recent.md` | Bounded recent L1 plus current L2 context | This is the documented exception because L2 does not preserve an exact cross-surface timeline. |
+| `teaching_strategy.md` | Accepted `profile.md`, `scope.md`, and `preferences.md`, plus relevant L2 entries | It is generated after those L3 documents and must not become their input. |
+
+Every L2 bullet keeps its stable `<!--m_xxx-->` marker. L3 citations use a
+canonical entry-level reference such as:
+
+```text
+memory:L2/chat.md#m_01ABC
+```
+
+Bare surface refs such as `chat` or `quiz` are not durable provenance. Direct
+L1 refs are not accepted as the stored citation for ordinary L3 changes; a
+verified L1 event remains reachable through the cited L2 entry. The
+`recent.md` exception may store direct event refs when exact chronology is the
+claim being represented.
+
+L3 dependencies form a directed graph:
+
+```text
+L2 surfaces -> profile / scope / preferences / recent
+profile + scope + preferences + relevant L2 -> teaching_strategy
+```
+
+L3 never writes L2, and peer L3 documents do not recursively feed each other.
+Before an L3 run, the product checks the relevant L2 consolidation cursor or
+last-updated timestamp. A stale L2 dependency is shown to the user; a future
+explicit "Update all" orchestration may run and review L2 prerequisites before
+starting L3, but an ordinary L3 run must not silently rewrite multiple layers.
+
 ## 4. Normalized Consolidation Input
 
 DeepTutor's strongest idea is that consolidation consumes normalized evidence
@@ -258,9 +309,11 @@ precision.
 
 ## 6. Update Prompt Contract
 
-Update mode discovers evidence through the L1 tools and proposes small,
-evidence-bound changes. The model does not receive an automatically assembled
-full ledger and does not write a complete document.
+Update mode discovers evidence through the tools appropriate to the target
+layer and proposes small, evidence-bound changes. L2 uses L1 evidence tools;
+L3 uses L2 entry tools and optional provenance drill-down. The model does not
+receive an automatically assembled full ledger and does not write a complete
+document.
 
 ### L2 Update Prompt
 
@@ -654,7 +707,43 @@ Every proposed fact or edit must cite evidence actually read during that run.
 The product rejects unknown, unread, or stale refs. L1 itself remains append-only
 from the Memory workflow's perspective.
 
-### 13.2 Product Agent Memory Tools
+### 13.2 L2 Evidence Tools for L3 Runs
+
+L3 runs use a separate read-only tool set:
+
+```ts
+list_memory_entries({ path?: string, cursor?: string, limit?: number })
+search_memory_entries({ query: string, paths?: string[], cursor?: string, limit?: number })
+read_memory_entry({ reference: string })
+read_memory_entry_sources({ reference: string })
+```
+
+Listing and searching return candidates but do not make them citeable. Reading
+one stable L2 entry adds its canonical `memory:<path>#<entry_id>` reference to
+the run's read set. Source drill-down resolves the entry's L1 footnotes and
+records those reads in flow without replacing the L2 citation contract.
+
+The L3 workflow stages are:
+
+```text
+checking_l2_freshness
+  -> discovering_l2_sources
+  -> reading_l2_evidence
+  -> verifying_l1_evidence (optional)
+  -> analyzing
+  -> proposing_changes
+  -> validating
+  -> awaiting_review
+  -> applying
+  -> completed
+```
+
+L3 validation requires at least one read L2 entry for every ordinary insert or
+replacement, rejects catalog-only and bare-surface refs, resolves entry ids and
+revisions again before apply, and rejects circular dependencies. `recent.md`
+uses a separately declared chronology rule for bounded direct L1 refs.
+
+### 13.3 Product Agent Memory Tools
 
 `read_memory`:
 
@@ -690,6 +779,9 @@ after workspace navigation. The remaining hardening work should:
 - Keep L3 updates hedged and source-attributed.
 - Extend end-to-end tests to cover original-artifact resolution, cancellation,
   restart rejoin, and cross-surface expansion in a live model run.
+- The retired draft-oriented consolidation/assist APIs and their unused
+  prompt-injected L3 chunk path were removed on 2026-07-14. The structured
+  Memory Run change-set workflow is now the sole Memory generation contract.
 
 ## 15. Why This Shape Is Better
 
