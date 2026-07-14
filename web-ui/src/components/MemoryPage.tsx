@@ -370,23 +370,23 @@ function MemoryLayerCard({
 }) {
   return (
     <button
-      className={`min-h-72 rounded-lg border border-gray-200 bg-white p-6 text-left shadow-sm transition ${
+      className={`flex h-full min-h-72 flex-col rounded-lg border border-gray-200 bg-white p-6 text-left shadow-sm transition ${
         onClick ? 'hover:border-blue-200 hover:bg-blue-50/40' : 'cursor-default'
       }`}
       type="button"
       onClick={onClick}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex w-full items-center justify-between">
         <Icon size={22} className="text-blue-600" />
         <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-500">{badge}</span>
       </div>
       <h2 className="mt-10 text-xl font-semibold text-gray-950">{title}</h2>
-      <div className="mt-8 flex items-end gap-3">
+      <div className="mt-8 flex min-h-12 items-end gap-3">
         <span className="text-4xl font-semibold text-gray-950">{count}</span>
         <span className="pb-1 text-sm text-gray-500">{countLabel}</span>
       </div>
       <p className="mt-8 text-sm leading-6 text-gray-500">{description}</p>
-      {actionLabel && <div className="mt-8 text-sm font-medium text-blue-700">{actionLabel} →</div>}
+      {actionLabel && <div className="mt-auto pt-8 text-sm font-medium text-blue-700">{actionLabel} →</div>}
     </button>
   )
 }
