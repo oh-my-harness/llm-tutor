@@ -572,7 +572,15 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   sidebar, Chat canvas, and ordinary messages.
 - REQ-426: Settings shall allow users to select from multiple color themes,
   persist the selection locally, and apply it without restarting the app.
-  Status: planned.
+  The initial choices shall be `cool-light` and `graphite-dark`; changing only
+  the theme shall not reset or replace the active conversation session.
+  Status: implemented.
+- REQ-427: The `graphite-dark` theme shall use neutral graphite framing, a
+  near-black Chat canvas, elevated charcoal content surfaces, soft white text,
+  and blue interaction accents. Ordinary text, muted text, controls, status
+  colors, message surfaces, and scrollbars shall remain distinguishable without
+  relying on pure-black backgrounds. Status: implemented for current product
+  surfaces; continue migrating new component-local colors to semantic tokens.
 
 ## 24. Navigation and Layout
 

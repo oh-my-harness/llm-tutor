@@ -3,13 +3,16 @@ import {
   Activity,
   BookMarked,
   Brain,
+  Check,
   Database,
   Download,
   FolderOpen,
   Globe2,
   Palette,
   Plus,
+  Moon,
   SlidersHorizontal,
+  Sun,
   Trash2,
   Upload,
   type LucideIcon,
@@ -29,6 +32,7 @@ import type {
   LlmSettings,
   SearchConfig,
   SearchProvider,
+  ThemeId,
 } from '../settings'
 import { chooseDesktopDirectory, getDesktopDataDir, openDesktopDataDir } from '../api'
 
@@ -586,6 +590,32 @@ export function SettingsPage({ settings, onChange }: Props) {
               title={t('settings.appearance.title')}
               description={t('settings.appearance.description')}
             >
+              <div className="space-y-3 rounded-lg border border-gray-200 px-4 py-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">{t('settings.theme.title')}</div>
+                  <div className="mt-1 text-sm text-gray-500">{t('settings.theme.description')}</div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ThemeOption
+                    theme="cool-light"
+                    selected={settings.theme === 'cool-light'}
+                    icon={Sun}
+                    title={t('settings.theme.coolLight')}
+                    description={t('settings.theme.coolLight.description')}
+                    colors={['#eceff3', '#f8f9fa', '#ffffff', '#e1e5ea', '#2563eb']}
+                    onSelect={(theme) => update('theme', theme)}
+                  />
+                  <ThemeOption
+                    theme="graphite-dark"
+                    selected={settings.theme === 'graphite-dark'}
+                    icon={Moon}
+                    title={t('settings.theme.graphiteDark')}
+                    description={t('settings.theme.graphiteDark.description')}
+                    colors={['#202328', '#151719', '#24272c', '#34383f', '#60a5fa']}
+                    onSelect={(theme) => update('theme', theme)}
+                  />
+                </div>
+              </div>
               <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                 <div>
                   <div className="text-sm font-medium text-gray-900">{t('settings.language.title')}</div>
@@ -1218,6 +1248,57 @@ export function SettingsPage({ settings, onChange }: Props) {
         </div>
       </div>
     </main>
+  )
+}
+
+function ThemeOption({
+  theme,
+  selected,
+  icon: Icon,
+  title,
+  description,
+  colors,
+  onSelect,
+}: {
+  theme: ThemeId
+  selected: boolean
+  icon: LucideIcon
+  title: string
+  description: string
+  colors: string[]
+  onSelect: (theme: ThemeId) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`relative flex min-h-36 flex-col rounded-lg border p-4 text-left transition ${
+        selected
+          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
+          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+      }`}
+      aria-pressed={selected}
+      onClick={() => onSelect(theme)}
+    >
+      <span className="flex w-full items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-700">
+          <Icon size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-gray-900">{title}</span>
+          <span className="mt-1 block text-xs leading-5 text-gray-500">{description}</span>
+        </span>
+        {selected && (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+            <Check size={13} />
+          </span>
+        )}
+      </span>
+      <span className="mt-auto flex w-full overflow-hidden rounded-md border border-gray-200" aria-hidden="true">
+        {colors.map((color) => (
+          <span key={color} className="h-7 flex-1" style={{ backgroundColor: color }} />
+        ))}
+      </span>
+    </button>
   )
 }
 

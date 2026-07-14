@@ -470,17 +470,17 @@ Chat message presentation target:
   expands or focuses the separate citation/source surface; source details are
   not compressed into the icon toolbar itself.
 
-Theme architecture target:
+Theme architecture:
 
 - The default `cool-light` theme uses a cool-gray frame and sidebar, a
   near-white Chat canvas, white assistant content surfaces, medium-gray user
   bubbles, neutral borders, and blue interaction accents.
 - Core colors are semantic CSS variables owned by the active theme rather than
   repeated Tailwind palette choices inside product components.
-- Future themes shall be selectable from Settings, persisted locally, and
-  applied without restarting. Theme selection UI and additional palettes are a
-  separate follow-up; this phase establishes the token boundary and default
-  theme only.
+- Themes are selectable from Settings > Appearance, persisted locally, and
+  applied without restarting or resetting the active conversation. The initial
+  palettes are `cool-light` and `graphite-dark`; legacy settings without a
+  theme continue to use `cool-light`.
 
 Tasks:
 
@@ -526,8 +526,11 @@ Tasks:
       Notebook proposals, progress/status surfaces, citations, tables, and code.
 - [x] Establish the semantic `cool-light` theme tokens and apply them to the
       application frame, sidebar, Chat canvas, and ordinary message surfaces.
-- [ ] Add a persisted appearance-theme selector and at least one additional
-      complete palette after auditing all remaining component-local colors.
+- [x] Add a persisted Appearance theme selector with `cool-light` and the
+      complete `graphite-dark` palette, apply changes without restart or active
+      session reset, and preserve `cool-light` for legacy settings.
+- [ ] Continue replacing component-local palette utilities with semantic theme
+      tokens as new or revisited surfaces are developed.
 - [ ] Verify toolbar discovery by pointer and keyboard, no message overlap or
       layout shift, readable line length, and responsive behavior at common
       desktop widths.

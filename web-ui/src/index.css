@@ -14,6 +14,38 @@
   --chat-scrollbar-thumb: #a3a9b2;
   --chat-scrollbar-thumb-hover: #858d98;
   --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
+  --theme-surface: #ffffff;
+  --theme-surface-muted: #f9fafb;
+  --theme-surface-hover: #f3f4f6;
+  --theme-accent: #2563eb;
+  --theme-accent-surface: #eff6ff;
+  --theme-accent-border: #bfdbfe;
+}
+
+[data-theme="graphite-dark"] {
+  color-scheme: dark;
+  --app-frame: #17191c;
+  --app-sidebar: #202328;
+  --chat-canvas: #151719;
+  --assistant-surface: #24272c;
+  --user-surface: #34383f;
+  --surface-border: #3d424a;
+  --surface-border-subtle: #31353b;
+  --sidebar-scrollbar-thumb: #656d78;
+  --sidebar-scrollbar-thumb-hover: #858e9a;
+  --chat-scrollbar-thumb: #5d6570;
+  --chat-scrollbar-thumb-hover: #7d8692;
+  --text-primary: #f3f4f6;
+  --text-secondary: #d1d5db;
+  --text-muted: #aeb4bd;
+  --theme-surface: #24272c;
+  --theme-surface-muted: #1d2024;
+  --theme-surface-hover: #30343a;
+  --theme-accent: #60a5fa;
+  --theme-accent-surface: #1e3148;
+  --theme-accent-border: #35557a;
 }
 
 html,
@@ -110,6 +142,174 @@ body {
   color: var(--text-primary);
 }
 
+[data-theme="graphite-dark"] .bg-white,
+[data-theme="graphite-dark"] .disabled\:bg-white:disabled {
+  background-color: var(--theme-surface);
+}
+
+[data-theme="graphite-dark"] .bg-gray-50,
+[data-theme="graphite-dark"] .bg-gray-50\/60,
+[data-theme="graphite-dark"] .bg-gray-50\/70,
+[data-theme="graphite-dark"] .disabled\:bg-gray-50:disabled {
+  background-color: var(--theme-surface-muted);
+}
+
+[data-theme="graphite-dark"] .bg-gray-100,
+[data-theme="graphite-dark"] .hover\:bg-gray-100:hover,
+[data-theme="graphite-dark"] .disabled\:bg-gray-100:disabled {
+  background-color: var(--theme-surface-hover);
+}
+
+[data-theme="graphite-dark"] .bg-gray-200,
+[data-theme="graphite-dark"] .hover\:bg-gray-200:hover,
+[data-theme="graphite-dark"] .disabled\:bg-gray-200:disabled {
+  background-color: #3a3f46;
+}
+
+[data-theme="graphite-dark"] .hover\:bg-gray-50:hover {
+  background-color: var(--theme-surface-hover);
+}
+
+[data-theme="graphite-dark"] .text-gray-950,
+[data-theme="graphite-dark"] .text-gray-900,
+[data-theme="graphite-dark"] .hover\:text-gray-900:hover,
+[data-theme="graphite-dark"] .hover\:text-gray-950:hover {
+  color: var(--text-primary);
+}
+
+[data-theme="graphite-dark"] .text-gray-800,
+[data-theme="graphite-dark"] .text-gray-700,
+[data-theme="graphite-dark"] .hover\:text-gray-700:hover {
+  color: var(--text-secondary);
+}
+
+[data-theme="graphite-dark"] .text-gray-600,
+[data-theme="graphite-dark"] .text-gray-500 {
+  color: var(--text-muted);
+}
+
+[data-theme="graphite-dark"] .text-gray-400 {
+  color: #858d98;
+}
+
+[data-theme="graphite-dark"] .placeholder\:text-gray-400::placeholder,
+[data-theme="graphite-dark"] .disabled\:text-gray-400:disabled {
+  color: #858d98;
+}
+
+[data-theme="graphite-dark"] .border-gray-100,
+[data-theme="graphite-dark"] .border-gray-200,
+[data-theme="graphite-dark"] .border-gray-300,
+[data-theme="graphite-dark"] .hover\:border-gray-300:hover,
+[data-theme="graphite-dark"] .divide-gray-200 > :not(:last-child) {
+  border-color: var(--surface-border);
+}
+
+[data-theme="graphite-dark"] .ring-gray-100,
+[data-theme="graphite-dark"] .ring-gray-200 {
+  --tw-ring-color: var(--surface-border);
+}
+
+[data-theme="graphite-dark"] .border-gray-900,
+[data-theme="graphite-dark"] .focus\:border-gray-900:focus {
+  border-color: var(--theme-accent);
+}
+
+[data-theme="graphite-dark"] .bg-blue-50,
+[data-theme="graphite-dark"] .bg-blue-100,
+[data-theme="graphite-dark"] .bg-blue-50\/40,
+[data-theme="graphite-dark"] .bg-blue-50\/50,
+[data-theme="graphite-dark"] .bg-blue-50\/60,
+[data-theme="graphite-dark"] .bg-blue-50\/70,
+[data-theme="graphite-dark"] .hover\:bg-blue-50:hover,
+[data-theme="graphite-dark"] .hover\:bg-blue-50\/40:hover,
+[data-theme="graphite-dark"] .hover\:bg-blue-50\/50:hover {
+  background-color: var(--theme-accent-surface);
+}
+
+[data-theme="graphite-dark"] .text-blue-500,
+[data-theme="graphite-dark"] .text-blue-600,
+[data-theme="graphite-dark"] .text-blue-700,
+[data-theme="graphite-dark"] .text-blue-800,
+[data-theme="graphite-dark"] .text-blue-900,
+[data-theme="graphite-dark"] .hover\:text-blue-700:hover,
+[data-theme="graphite-dark"] .hover\:text-blue-800:hover {
+  color: var(--theme-accent);
+}
+
+[data-theme="graphite-dark"] .border-blue-50,
+[data-theme="graphite-dark"] .border-blue-100,
+[data-theme="graphite-dark"] .border-blue-200,
+[data-theme="graphite-dark"] .border-blue-300,
+[data-theme="graphite-dark"] .hover\:border-blue-100:hover,
+[data-theme="graphite-dark"] .hover\:border-blue-200:hover {
+  border-color: var(--theme-accent-border);
+}
+
+[data-theme="graphite-dark"] .ring-blue-50,
+[data-theme="graphite-dark"] .ring-blue-100,
+[data-theme="graphite-dark"] .ring-blue-200 {
+  --tw-ring-color: var(--theme-accent-border);
+}
+
+[data-theme="graphite-dark"] .bg-amber-50,
+[data-theme="graphite-dark"] .bg-amber-50\/70 {
+  background-color: #3a2d18;
+}
+
+[data-theme="graphite-dark"] .bg-amber-100 {
+  background-color: #4a381b;
+}
+
+[data-theme="graphite-dark"] .text-amber-600,
+[data-theme="graphite-dark"] .text-amber-700,
+[data-theme="graphite-dark"] .text-amber-800,
+[data-theme="graphite-dark"] .text-amber-900 {
+  color: #fbbf24;
+}
+
+[data-theme="graphite-dark"] .border-amber-200 {
+  border-color: #755719;
+}
+
+[data-theme="graphite-dark"] .bg-red-50 {
+  background-color: #3a2023;
+}
+
+[data-theme="graphite-dark"] .text-red-600,
+[data-theme="graphite-dark"] .text-red-700,
+[data-theme="graphite-dark"] .text-red-900 {
+  color: #fca5a5;
+}
+
+[data-theme="graphite-dark"] .border-red-100,
+[data-theme="graphite-dark"] .border-red-200 {
+  border-color: #7f3d45;
+}
+
+[data-theme="graphite-dark"] .bg-emerald-50 {
+  background-color: #17352c;
+}
+
+[data-theme="graphite-dark"] .text-emerald-700,
+[data-theme="graphite-dark"] .text-emerald-900,
+[data-theme="graphite-dark"] .text-green-700 {
+  color: #6ee7b7;
+}
+
+[data-theme="graphite-dark"] .border-emerald-200,
+[data-theme="graphite-dark"] .border-emerald-300 {
+  border-color: #357a66;
+}
+
+[data-theme="graphite-dark"] .ring-emerald-100 {
+  --tw-ring-color: #357a66;
+}
+
+[data-theme="graphite-dark"] .bg-green-50 {
+  background-color: #17352c;
+}
+
 [data-desktop="true"] img,
 [data-desktop="true"] a {
   -webkit-user-drag: none;
@@ -120,9 +320,9 @@ body {
   z-index: 9999;
   min-width: 168px;
   overflow: hidden;
-  border: 1px solid rgb(191 219 254);
+  border: 1px solid var(--theme-accent-border);
   border-radius: 0.5rem;
-  background: white;
+  background: var(--theme-surface);
   box-shadow: 0 18px 45px rgb(15 23 42 / 16%);
   padding: 0.25rem;
 }
@@ -137,12 +337,12 @@ body {
   padding: 0.45rem 0.65rem;
   text-align: left;
   font-size: 0.8125rem;
-  color: rgb(31 41 55);
+  color: var(--text-secondary);
 }
 
 .desktop-context-menu button:not(:disabled):hover {
-  background: rgb(239 246 255);
-  color: rgb(29 78 216);
+  background: var(--theme-accent-surface);
+  color: var(--theme-accent);
 }
 
 .desktop-context-menu button:disabled {
@@ -169,7 +369,7 @@ body {
   margin: 0.85rem 0 0.35rem;
   font-weight: 700;
   line-height: 1.3;
-  color: rgb(17 24 39);
+  color: var(--text-primary);
 }
 
 .markdown-message h1 {
@@ -194,22 +394,22 @@ body {
 }
 
 .markdown-message a {
-  color: rgb(37 99 235);
+  color: var(--theme-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .markdown-message blockquote {
   margin: 0.65rem 0 0;
-  border-left: 3px solid rgb(147 197 253);
+  border-left: 3px solid var(--theme-accent-border);
   padding-left: 0.85rem;
-  color: rgb(75 85 99);
+  color: var(--text-muted);
 }
 
 .markdown-message hr {
   margin: 0.85rem 0;
   border: 0;
-  border-top: 1px solid rgb(209 213 219);
+  border-top: 1px solid var(--surface-border);
 }
 
 .markdown-message ul,
@@ -241,7 +441,7 @@ body {
 
 .markdown-message code {
   border-radius: 0.25rem;
-  background: rgb(229 231 235);
+  background: var(--theme-surface-hover);
   padding: 0.08rem 0.28rem;
   font-size: 0.88em;
 }
@@ -271,7 +471,7 @@ body {
 
 .markdown-message th,
 .markdown-message td {
-  border: 1px solid rgb(209 213 219);
+  border: 1px solid var(--surface-border);
   padding: 0.35rem 0.5rem;
   text-align: left;
 }

@@ -59,6 +59,12 @@ export type TranslationKey =
   | 'settings.tabs.governance'
   | 'settings.appearance.title'
   | 'settings.appearance.description'
+  | 'settings.theme.title'
+  | 'settings.theme.description'
+  | 'settings.theme.coolLight'
+  | 'settings.theme.coolLight.description'
+  | 'settings.theme.graphiteDark'
+  | 'settings.theme.graphiteDark.description'
   | 'settings.llm.description'
   | 'settings.embedding.description'
   | 'settings.search.description'
@@ -139,6 +145,12 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.tabs.governance': '能力',
     'settings.appearance.title': '界面外观',
     'settings.appearance.description': '调整界面语言和视觉偏好。',
+    'settings.theme.title': '主题色',
+    'settings.theme.description': '选择应用框架、工作区和内容表面的整体配色。',
+    'settings.theme.coolLight': '冷灰浅色',
+    'settings.theme.coolLight.description': '冷灰框架、白色内容面和清晰的中性层级。',
+    'settings.theme.graphiteDark': '石墨深色',
+    'settings.theme.graphiteDark.description': '中性石墨背景、柔和白字和低眩光内容面。',
     'settings.llm.description': '配置对话模型服务，可新增多个服务配置。',
     'settings.embedding.description': '配置知识库检索使用的嵌入模型。',
     'settings.search.description': '配置 agent web_search 工具使用的搜索服务。',
@@ -218,6 +230,12 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.tabs.governance': 'Capabilities',
     'settings.appearance.title': 'Appearance',
     'settings.appearance.description': 'Adjust interface language and visual preferences.',
+    'settings.theme.title': 'Color theme',
+    'settings.theme.description': 'Choose the palette used by the app frame, workspaces, and content surfaces.',
+    'settings.theme.coolLight': 'Cool Light',
+    'settings.theme.coolLight.description': 'Cool-gray framing, white content surfaces, and crisp neutral layers.',
+    'settings.theme.graphiteDark': 'Graphite Dark',
+    'settings.theme.graphiteDark.description': 'Neutral graphite framing, soft white text, and low-glare content surfaces.',
     'settings.llm.description': 'Configure chat model services and add multiple service profiles.',
     'settings.embedding.description': 'Configure embedding models used by knowledge-base retrieval.',
     'settings.search.description': 'Configure search services used by the agent web_search tool.',

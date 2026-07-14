@@ -2,6 +2,7 @@ import type { UiLanguage } from './i18n'
 
 export type LlmProvider = 'anthropic' | 'openai'
 export type EmbeddingProvider = 'openai'
+export type ThemeId = 'cool-light' | 'graphite-dark'
 export type SearchProvider =
   | 'duckduckgo'
   | 'bing'
@@ -47,6 +48,7 @@ export interface SearchConfig {
 
 export interface LlmSettings {
   language: UiLanguage
+  theme: ThemeId
   provider: LlmProvider
   model: string
   apiKey: string
@@ -66,6 +68,7 @@ export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000
 
 export const defaultLlmSettings: LlmSettings = {
   language: 'zh-CN',
+  theme: 'cool-light',
   provider: 'openai',
   model: 'deepseek-v4-flash',
   apiKey: '',
@@ -323,6 +326,7 @@ function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
     budgetLimitUsd: Number(parsed.budgetLimitUsd ?? defaultLlmSettings.budgetLimitUsd),
     requireApproval: Boolean(parsed.requireApproval),
     language: normalizeUiLanguage((parsed as { language?: unknown }).language),
+    theme: normalizeTheme((parsed as { theme?: unknown }).theme),
     llmConfigs,
     activeLlmConfigId,
     embeddingConfigs,
@@ -330,6 +334,14 @@ function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
     searchConfigs,
     activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
   }
+}
+
+export function normalizeTheme(value: unknown): ThemeId {
+  return value === 'graphite-dark' ? 'graphite-dark' : 'cool-light'
+}
+
+export function settingsRequireSessionReset(current: LlmSettings, next: LlmSettings): boolean {
+  return JSON.stringify({ ...current, theme: next.theme }) !== JSON.stringify(next)
 }
 
 function normalizeUiLanguage(value: unknown): UiLanguage {

@@ -24,6 +24,7 @@ import {
   saveLlmSettings,
   saveStoredLlmSettings,
   searchForSession,
+  settingsRequireSessionReset,
   settingsForSession,
 } from './settings'
 import type { QuizSession } from './quizTypes'
@@ -918,7 +919,7 @@ export default function App() {
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     persistSettings(nextSettings)
-    activateSession(null)
+    if (settingsRequireSessionReset(llmSettings, nextSettings)) activateSession(null)
   }
 
   const startNewChat = useCallback(() => {
@@ -1281,7 +1282,7 @@ export default function App() {
 
   return (
     <I18nProvider language={llmSettings.language}>
-    <div className="app-shell flex h-screen overflow-hidden" data-theme="cool-light">
+    <div className="app-shell flex h-screen overflow-hidden" data-theme={llmSettings.theme}>
       <Sidebar
         activeView={view}
         activeSessionId={view === 'chat' ? sessionId : null}
