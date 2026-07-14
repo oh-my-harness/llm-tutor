@@ -216,7 +216,7 @@ export function Sidebar({
                   key={session.id}
                   data-surface-context-menu="true"
                   onContextMenu={(event) => openSessionContextMenu(event, session)}
-                  className={`group flex w-full items-center gap-2 rounded-lg border-l-2 px-3 py-2 text-sm ${
+                  className={`group relative flex w-full items-center gap-2 rounded-lg border-l-2 px-3 py-2 text-sm ${
                     selected
                       ? 'border-blue-600 bg-gray-100 text-gray-900'
                       : running
@@ -224,7 +224,17 @@ export function Sidebar({
                         : 'border-transparent text-gray-700 hover:bg-gray-100'
                   }`}
                 >
-                  <div className="relative shrink-0">
+                  {!editing && (
+                    <button
+                      type="button"
+                      className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
+                      onClick={() => onSelectSession(session.id)}
+                      aria-current={selected ? 'page' : undefined}
+                      aria-label={`Open session: ${session.title}`}
+                      title={[session.title, selected ? 'Current session' : '', session.pinned ? 'Pinned' : '', running ? 'Running' : ''].filter(Boolean).join(' · ')}
+                    />
+                  )}
+                  <div className="pointer-events-none relative z-10 shrink-0">
                     <FileText size={16} className={running ? 'text-blue-600' : 'text-gray-500'} />
                     {running && (
                       <span
@@ -238,7 +248,7 @@ export function Sidebar({
                   {editing ? (
                     <>
                       <input
-                        className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-sm outline-none focus:border-gray-900"
+                        className="relative z-10 min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-sm outline-none focus:border-gray-900"
                         value={editingTitle}
                         autoFocus
                         onChange={(event) => setEditingTitle(event.target.value)}
@@ -256,13 +266,7 @@ export function Sidebar({
                     </>
                   ) : (
                     <>
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => onSelectSession(session.id)}
-                        aria-current={selected ? 'page' : undefined}
-                        title={[session.title, selected ? 'Current session' : '', session.pinned ? 'Pinned' : '', running ? 'Running' : ''].filter(Boolean).join(' · ')}
-                      >
+                      <div className="pointer-events-none relative z-10 min-w-0 flex-1 text-left">
                         <span className="flex min-w-0 items-center gap-1">
                           {session.pinned && <Pin size={12} className="shrink-0 text-gray-500" />}
                           <span className="block min-w-0 truncate">{session.title}</span>
@@ -272,8 +276,8 @@ export function Sidebar({
                             Running{session.activeRun?.capability ? ` · ${capabilityLabel(session.activeRun.capability)}` : ''}
                           </span>
                         )}
-                      </button>
-                      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      </div>
+                      <div className="pointer-events-none relative z-20 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                         <IconButton label="Rename session" onClick={() => startEditing(session)}>
                           <Edit3 size={15} />
                         </IconButton>
@@ -318,7 +322,7 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
     <button
       type="button"
       title={label}
-      className="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-900"
+      className="pointer-events-auto rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-900"
       onClick={(event) => {
         event.stopPropagation()
         onClick()

@@ -623,6 +623,10 @@ Remaining hardening: richer verifier booleans and repair guidance can be added l
   visually distinct from hover and running indicators. Selection styling shall
   not reorder the session list and shall remain compatible with pinned and
   running states. Status: implemented.
+- REQ-452E: The entire visible hover and selected area of a recent-session item
+  shall activate that session, except for explicit inline actions such as rename
+  and delete. The full-row target shall remain keyboard focusable. Status:
+  implemented.
 - REQ-453: Clicking Chat shall open a new conversation by default.
 - REQ-454: The new conversation view shall center the composer.
 - REQ-455: The chat scroll behavior shall match common chat apps.
