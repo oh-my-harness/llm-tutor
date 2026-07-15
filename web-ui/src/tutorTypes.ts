@@ -40,6 +40,31 @@ export interface TutorDraft {
   resource_permissions: TutorResourcePermissions
 }
 
+export type TutorMemoryKind = 'commitment' | 'open_loop' | 'lesson_plan' | 'reflection' | 'strategy'
+export type TutorMemoryStatus = 'active' | 'resolved'
+
+export interface TutorMemoryEntry {
+  id: string
+  tutor_id: string
+  kind: TutorMemoryKind
+  text: string
+  status: TutorMemoryStatus
+  next_action?: string | null
+  due_at?: string | null
+  source_session_id?: string | null
+  source_message_id?: string | null
+  resolution_note?: string | null
+  created_at: string
+  updated_at: string
+  resolved_at?: string | null
+}
+
+export interface TutorMemoryDraft {
+  kind: TutorMemoryKind
+  text: string
+  next_action?: string | null
+}
+
 export const tutorCapabilities = ['chat', 'deep_solve', 'quiz', 'research', 'organize'] as const
 
 export function tutorSoulSummary(markdown: string) {
@@ -71,6 +96,71 @@ export async function archiveTutor(id: string): Promise<void> {
     const data = await readJson(response)
     throw new Error(apiError(data, response.status))
   }
+}
+
+export async function fetchTutorMemory(id: string, includeResolved = true): Promise<TutorMemoryEntry[]> {
+  const response = await fetch(`/api/tutors/${encodeURIComponent(id)}/memory?include_resolved=${includeResolved}`)
+  const data = await readJson(response)
+  if (!response.ok) throw new Error(apiError(data, response.status))
+  return Array.isArray(data.entries) ? data.entries as TutorMemoryEntry[] : []
+}
+
+export async function createTutorMemory(id: string, draft: TutorMemoryDraft): Promise<TutorMemoryEntry> {
+  return mutateTutorMemory(`/api/tutors/${encodeURIComponent(id)}/memory`, 'POST', draft)
+}
+
+export async function updateTutorMemory(
+  tutorId: string,
+  entryId: string,
+  draft: Partial<TutorMemoryDraft> & { status?: TutorMemoryStatus; resolution_note?: string | null },
+): Promise<TutorMemoryEntry> {
+  return mutateTutorMemory(
+    `/api/tutors/${encodeURIComponent(tutorId)}/memory/${encodeURIComponent(entryId)}`,
+    'PATCH',
+    draft,
+  )
+}
+
+export async function resolveTutorMemory(tutorId: string, entryId: string): Promise<TutorMemoryEntry> {
+  return mutateTutorMemory(
+    `/api/tutors/${encodeURIComponent(tutorId)}/memory/${encodeURIComponent(entryId)}/resolve`,
+    'POST',
+    {},
+  )
+}
+
+export async function deleteTutorMemory(tutorId: string, entryId: string): Promise<void> {
+  const response = await fetch(
+    `/api/tutors/${encodeURIComponent(tutorId)}/memory/${encodeURIComponent(entryId)}`,
+    { method: 'DELETE' },
+  )
+  if (!response.ok) {
+    const data = await readJson(response)
+    throw new Error(apiError(data, response.status))
+  }
+}
+
+export async function resetTutorMemory(tutorId: string): Promise<void> {
+  const response = await fetch(`/api/tutors/${encodeURIComponent(tutorId)}/reset-memory`, { method: 'POST' })
+  if (!response.ok) {
+    const data = await readJson(response)
+    throw new Error(apiError(data, response.status))
+  }
+}
+
+async function mutateTutorMemory(
+  url: string,
+  method: 'POST' | 'PATCH',
+  body: unknown,
+): Promise<TutorMemoryEntry> {
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await readJson(response)
+  if (!response.ok) throw new Error(apiError(data, response.status))
+  return data as unknown as TutorMemoryEntry
 }
 
 async function mutateTutor(url: string, method: 'POST' | 'PATCH', body: unknown): Promise<TutorProfile> {

@@ -18,6 +18,8 @@ mod session;
 mod settings_store;
 mod space_tool;
 mod stream;
+mod tutor_memory_store;
+mod tutor_memory_tool;
 mod tutor_store;
 
 #[tokio::main]
@@ -44,6 +46,9 @@ async fn main() -> anyhow::Result<()> {
         config.data_dir.join("settings.json"),
     ));
     let tutors = std::sync::Arc::new(tutor_store::TutorStore::new_with_root(
+        config.data_dir.join("tutors"),
+    ));
+    let tutor_memory = std::sync::Arc::new(tutor_memory_store::TutorMemoryStore::new_with_root(
         config.data_dir.join("tutors"),
     ));
     let rag_root = config.data_dir.join("rag");
@@ -83,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::tutors::tutors_router(
             tutors.clone(),
             settings.clone(),
+            tutor_memory.clone(),
         ))
         .merge(routes::sessions::sessions_router(
             pool.clone(),
@@ -96,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
             memory.clone(),
             notebook.clone(),
             quizzes.clone(),
-            tutors.clone(),
+            routes::ws::TutorRuntimeStores::new(tutors.clone(), tutor_memory),
             rag_root,
         ))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

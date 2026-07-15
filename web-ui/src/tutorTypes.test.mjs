@@ -11,7 +11,12 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const module = { exports: {} }
 Function('module', 'exports', compiled)(module, module.exports)
-const { assertTutorMutationContract, normalizeTutorProfile } = module.exports
+const {
+  assertTutorMutationContract,
+  fetchTutorMemory,
+  normalizeTutorProfile,
+  resolveTutorMemory,
+} = module.exports
 
 test('keeps native Soul Markdown unchanged', () => {
   const profile = normalizeTutorProfile({ soul_markdown: '# Identity\n\nTeach visually.' })
@@ -30,4 +35,27 @@ test('rejects writes acknowledged by a legacy Tutor backend', () => {
     /重启 Tutor Agent/,
   )
   assert.doesNotThrow(() => assertTutorMutationContract({ soul_markdown: '# Identity' }))
+})
+
+test('uses tutor-scoped memory endpoints', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url, method: init.method ?? 'GET' })
+    if (String(url).includes('/resolve')) {
+      return new Response(JSON.stringify({ id: 'entry-1', status: 'resolved' }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ entries: [{ id: 'entry-1', tutor_id: 'tutor-a' }] }), { status: 200 })
+  }
+  try {
+    const entries = await fetchTutorMemory('tutor-a', true)
+    assert.equal(entries[0].tutor_id, 'tutor-a')
+    await resolveTutorMemory('tutor-a', 'entry-1')
+    assert.deepEqual(requests, [
+      { url: '/api/tutors/tutor-a/memory?include_resolved=true', method: 'GET' },
+      { url: '/api/tutors/tutor-a/memory/entry-1/resolve', method: 'POST' },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

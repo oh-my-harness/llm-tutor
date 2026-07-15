@@ -62,7 +62,8 @@
 - REQ-061: A tutor shall own a user-editable Markdown Soul, default model,
   allowed capabilities, resource permissions, conversation collection, and
   private Tutor Memory. Soul defines stable identity and teaching behavior;
-  changing learning goals belong to Tutor Memory. Status: in progress.
+  changing learning goals belong to Tutor Memory. Status: implemented except
+  for the tutor conversation collection and stronger autonomous-write policy.
 - REQ-062: The new-conversation empty state shall let the user optionally choose
   a tutor before the first message. Status: implemented.
 - REQ-063: When no tutor is selected, the product shall use Temporary Assistant
@@ -78,17 +79,17 @@
   for immutable binding and new-session creation; handoff remains planned.
 - REQ-066: Authorized tutors may read shared Learner Memory, but each tutor's
   commitments, open loops, lesson plans, reflections, and strategy shall remain
-  private by default. Status: implemented for permission-gated Learner Memory;
-  private Tutor Memory remains planned.
+  private by default. Status: implemented.
 - REQ-067: Tutor Memory shall be visible, editable, removable, resettable,
   source-linked, and lifecycle-aware. It shall not duplicate the complete
   learner profile or store sensitive data and external factual claims.
-  Status: planned.
+  Status: implemented for storage, lifecycle, source session, and management;
+  hard content-policy validation remains in progress.
 - REQ-068: Tutor context shall combine Soul and permissions, relevant Learner
   Memory, relevant private Tutor Memory, runtime session history, and current
   resources through thin mappings to runtime APIs. Status: implemented for
-  Soul, runtime history, model defaults, and permission-filtered current
-  resources; Tutor Memory remains planned.
+  Soul, runtime history, model defaults, permission-filtered current resources,
+  and bounded active Tutor Memory.
 - REQ-068A: Soul Markdown shall be injected only as bounded product-owned
   runtime instruction. It shall not be parsed to grant capabilities, tools, or
   resource access and cannot override safety policy. Status: implemented.

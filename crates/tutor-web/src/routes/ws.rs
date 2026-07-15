@@ -33,6 +33,8 @@ use crate::space_tool::{
     ListNotebookTreeTool, ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool,
 };
 use crate::stream::StreamEvent;
+use crate::tutor_memory_store::{TutorMemoryEntry, TutorMemoryKind, TutorMemoryStore};
+use crate::tutor_memory_tool::{ReadTutorMemoryTool, RememberForLaterTool, ResolveTutorMemoryTool};
 use crate::tutor_store::{TutorProfile, TutorStore};
 
 #[derive(Clone)]
@@ -43,7 +45,20 @@ struct WsState {
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
     tutors: Arc<TutorStore>,
+    tutor_memory: Arc<TutorMemoryStore>,
     rag_root: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct TutorRuntimeStores {
+    profiles: Arc<TutorStore>,
+    memory: Arc<TutorMemoryStore>,
+}
+
+impl TutorRuntimeStores {
+    pub fn new(profiles: Arc<TutorStore>, memory: Arc<TutorMemoryStore>) -> Self {
+        Self { profiles, memory }
+    }
 }
 
 #[derive(Clone)]
@@ -380,7 +395,7 @@ pub fn ws_router(
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
-    tutors: Arc<TutorStore>,
+    tutor_runtime: TutorRuntimeStores,
     rag_root: impl Into<PathBuf>,
 ) -> Router {
     let state = WsState {
@@ -389,7 +404,8 @@ pub fn ws_router(
         memory,
         notebook,
         quizzes,
-        tutors,
+        tutors: tutor_runtime.profiles,
+        tutor_memory: tutor_runtime.memory,
         rag_root: rag_root.into(),
     };
     Router::new()
@@ -405,6 +421,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         notebook,
         quizzes,
         tutors,
+        tutor_memory,
         rag_root,
     } = state;
     let TutorMessageInput {
@@ -534,7 +551,27 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
                     entry.capability.clone(),
                 ));
             }
-            router = router.with_product_instruction(tutor_product_instruction(tutor));
+            let active_memory = tutor_memory
+                .list(&tutor.id, false)
+                .map_err(|error| tutor_agent::TutorError::Internal(error.to_string()))?;
+            router =
+                router.with_product_instruction(tutor_product_instruction(tutor, &active_memory));
+            router = router.with_product_tool(Arc::new(ReadTutorMemoryTool::new(
+                tutor_memory.clone(),
+                tutor.id.clone(),
+            )));
+            if tutor.autonomous_memory {
+                router = router
+                    .with_product_tool(Arc::new(RememberForLaterTool::new(
+                        tutor_memory.clone(),
+                        tutor.id.clone(),
+                        entry.id.clone(),
+                    )))
+                    .with_product_tool(Arc::new(ResolveTutorMemoryTool::new(
+                        tutor_memory.clone(),
+                        tutor.id.clone(),
+                    )));
+            }
         }
         if entry.capability == "quiz" {
             let quiz_tool = CreateQuizTool::new(
@@ -722,12 +759,56 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
     }
 }
 
-fn tutor_product_instruction(tutor: &TutorProfile) -> String {
-    format!(
+fn tutor_product_instruction(tutor: &TutorProfile, active_memory: &[TutorMemoryEntry]) -> String {
+    let mut instruction = format!(
         "Tutor name: {}\n\n## Tutor Soul (user-authored Markdown)\n\n{}",
         tutor.name.trim(),
         tutor.soul_markdown.trim()
-    )
+    );
+    let memory_lines = active_memory
+        .iter()
+        .take(8)
+        .map(|entry| {
+            let mut line = format!(
+                "- [{}:{}] {}",
+                tutor_memory_kind_name(entry.kind),
+                entry.id,
+                bounded_text(&entry.text, 320)
+            );
+            if let Some(next_action) = entry.next_action.as_deref() {
+                line.push_str("; next: ");
+                line.push_str(&bounded_text(next_action, 180));
+            }
+            line
+        })
+        .collect::<Vec<_>>();
+    if !memory_lines.is_empty() {
+        instruction.push_str(
+            "\n\n## Active private tutor continuity\n\nThese items belong only to this tutor. Apply them naturally and use read_tutor_memory for more detail. Do not treat them as general learner-profile facts.\n",
+        );
+        instruction.push_str(&memory_lines.join("\n"));
+    }
+    instruction
+}
+
+fn tutor_memory_kind_name(kind: TutorMemoryKind) -> &'static str {
+    match kind {
+        TutorMemoryKind::Commitment => "commitment",
+        TutorMemoryKind::OpenLoop => "open_loop",
+        TutorMemoryKind::LessonPlan => "lesson_plan",
+        TutorMemoryKind::Reflection => "reflection",
+        TutorMemoryKind::Strategy => "strategy",
+    }
+}
+
+fn bounded_text(value: &str, max_chars: usize) -> String {
+    let mut chars = value.trim().chars();
+    let bounded = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{bounded}...")
+    } else {
+        bounded
+    }
 }
 
 fn should_record_chat_memory(capability: &str, research_report_started: bool) -> bool {

@@ -18,8 +18,8 @@ use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use crate::runtime_engine::{RuntimeDeclarativeJudge, build_workflow_engine_config};
 use crate::runtime_workflow::{
-    DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow_with_memory,
-    validate_deep_solve_workflow_with_memory,
+    DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow_with_memory_and_tools,
+    validate_deep_solve_workflow_with_memory_and_tools,
 };
 use tutor_tools::WebSearchConfig;
 
@@ -36,6 +36,7 @@ pub struct SolveOrchestrator {
     memory_root: Option<PathBuf>,
     learner_memory_access: bool,
     product_instruction: Option<String>,
+    additional_tools: Vec<Arc<dyn Tool>>,
 }
 
 impl SolveOrchestrator {
@@ -57,6 +58,7 @@ impl SolveOrchestrator {
             memory_root: None,
             learner_memory_access: true,
             product_instruction: None,
+            additional_tools: Vec::new(),
         }
     }
 
@@ -96,6 +98,11 @@ impl SolveOrchestrator {
         self
     }
 
+    pub fn with_additional_tools(mut self, tools: Vec<Arc<dyn Tool>>) -> Self {
+        self.additional_tools = tools;
+        self
+    }
+
     fn make_client(&self) -> Arc<dyn Provider> {
         if let Some(c) = &self.client {
             return c.clone();
@@ -105,8 +112,19 @@ impl SolveOrchestrator {
 
     /// Run the full pipeline: [Pre-retrieve] -> Plan -> (Solve -> [REPLAN])* -> Synthesize.
     pub async fn run(&mut self, kb: Option<&str>) -> Result<String> {
-        validate_deep_solve_workflow_with_memory(self.learner_memory_access)?;
-        let workflow = deep_solve_workflow_with_memory(self.learner_memory_access);
+        let additional_tool_names = self
+            .additional_tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        validate_deep_solve_workflow_with_memory_and_tools(
+            self.learner_memory_access,
+            &additional_tool_names,
+        )?;
+        let workflow = deep_solve_workflow_with_memory_and_tools(
+            self.learner_memory_access,
+            &additional_tool_names,
+        );
         emit_trace(
             &self.event_sink,
             "workflow_validated",
@@ -224,6 +242,7 @@ impl SolveOrchestrator {
                 None => WriteMemoryTool::new(),
             }));
         }
+        tools.extend(self.additional_tools.iter().cloned());
         tools
     }
 }

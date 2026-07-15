@@ -15,11 +15,23 @@ pub fn deep_solve_workflow() -> Workflow {
 }
 
 pub fn deep_solve_workflow_with_memory(learner_memory_access: bool) -> Workflow {
+    deep_solve_workflow_with_memory_and_tools(learner_memory_access, &[])
+}
+
+pub fn deep_solve_workflow_with_memory_and_tools(
+    learner_memory_access: bool,
+    additional_tools: &[String],
+) -> Workflow {
     let mut solve_tools = vec!["rag_search".into()];
     if learner_memory_access {
         solve_tools.extend(["read_memory".into(), "write_memory".into()]);
     }
     solve_tools.extend(["web_search".into(), "web_fetch".into(), "code_exec".into()]);
+    for tool in additional_tools {
+        if !solve_tools.contains(tool) {
+            solve_tools.push(tool.clone());
+        }
+    }
     let memory_instruction = if learner_memory_access {
         NATURAL_MEMORY_INTERACTION_POLICY
     } else {
@@ -101,7 +113,18 @@ pub fn validate_deep_solve_workflow() -> Result<()> {
 }
 
 pub fn validate_deep_solve_workflow_with_memory(learner_memory_access: bool) -> Result<()> {
-    validate_workflow(&deep_solve_workflow_with_memory(learner_memory_access)).map_err(|err| {
+    validate_deep_solve_workflow_with_memory_and_tools(learner_memory_access, &[])
+}
+
+pub fn validate_deep_solve_workflow_with_memory_and_tools(
+    learner_memory_access: bool,
+    additional_tools: &[String],
+) -> Result<()> {
+    validate_workflow(&deep_solve_workflow_with_memory_and_tools(
+        learner_memory_access,
+        additional_tools,
+    ))
+    .map_err(|err| {
         TutorError::Internal(format!(
             "runtime workflow validation failed for {DEEP_SOLVE_WORKFLOW_ID}: {err}"
         ))
@@ -363,6 +386,17 @@ mod tests {
         assert!(!workflow_text.contains("read_memory"));
         assert!(!workflow_text.contains("write_memory"));
         assert!(!workflow_text.contains("silent internal context loading"));
+    }
+
+    #[test]
+    fn deep_solve_workflow_declares_product_tools() {
+        let workflow = serde_json::to_value(deep_solve_workflow_with_memory_and_tools(
+            true,
+            &["read_tutor_memory".into()],
+        ))
+        .unwrap();
+
+        assert!(workflow.to_string().contains("read_tutor_memory"));
     }
 
     #[test]

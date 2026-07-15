@@ -212,6 +212,7 @@ impl CapabilityRouter {
                 .with_memory_root(self.memory_root.clone())
                 .with_learner_memory_access(self.learner_memory_access)
                 .with_product_instruction(self.product_instruction.clone())
+                .with_additional_tools(self.product_tools.clone())
                 .with_client(client);
                 orchestrator.run(None).await
             }

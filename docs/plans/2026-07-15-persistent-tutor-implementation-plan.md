@@ -7,10 +7,13 @@
 Implementation progress (2026-07-15): the Phase 0/1 identity loop, bounded Soul
 runtime context, tutor default-model resolution, and server-enforced resource
 policy are implemented. Tutor CRUD, General Tutor seeding, immutable session
-binding, the optional Chat chooser, session restoration, and Tutor management
-are working. Private Tutor Memory, the continuity workspace, recent-tutor
-ranking, avatar presentation, handoff, and settings-deletion protection for a
-model referenced by a tutor remain pending.
+binding, the optional Chat chooser, session restoration, Tutor management, and
+the first private Tutor Memory slice are working. Private commitments, open
+loops, lesson plans, reflections, and strategies are isolated per Tutor,
+tool-readable, and user-manageable in the continuity view. Recent-tutor
+ranking, avatar presentation, handoff, stronger autonomous-write content
+policy, and settings-deletion protection for a model referenced by a tutor
+remain pending.
 
 ## 1. Objective
 
@@ -320,32 +323,33 @@ strategy across multiple sessions.
 
 Backend tasks:
 
-- [ ] Implement typed entries for `commitment`, `open_loop`, `lesson_plan`,
+- [x] Implement typed entries for `commitment`, `open_loop`, `lesson_plan`,
   `reflection`, and `strategy` with status, provenance, timestamps, and optional
   due/next-action fields.
-- [ ] Add scoped operations to list, read, create, update, resolve, delete, and
+- [x] Add scoped operations to list, read, create, update, resolve, delete, and
   reset entries for one tutor.
-- [ ] Add product tools such as `read_tutor_memory`, `remember_for_later`, and
+- [x] Add product tools `read_tutor_memory`, `remember_for_later`, and
   `resolve_tutor_memory`; never expose a generic filesystem tool.
-- [ ] Mount these tools only for a tutor-bound session and hard-bind tool scope
+- [x] Mount these tools only for a tutor-bound session and hard-bind tool scope
   to that session's `tutor_id`.
 - [ ] Allow autonomous writes only for the low-risk categories defined by the
   design; credentials, sensitive personal data, unsupported judgments, and
-  external factual claims are rejected.
-- [ ] Provide a compact active commitments/open-loops summary for turn start;
+  external factual claims are rejected. Tool descriptions carry this contract,
+  but hard content-policy validation remains pending.
+- [x] Provide a compact active commitments/open-loops summary for turn start;
   full content remains tool-read on demand.
 
 Frontend tasks:
 
-- [ ] Show private memory in the Tutor workspace grouped by type and state.
-- [ ] Support inspect, edit, resolve/reopen, delete, and reset actions.
-- [ ] Clearly distinguish Tutor Memory from shared Learner Memory.
-- [ ] Show provenance back to the originating session when available.
+- [x] Show private memory in the Tutor continuity view with type and state.
+- [x] Support inspect, edit, resolve/reopen, delete, and reset actions.
+- [x] Clearly distinguish Tutor Memory from shared Learner Memory.
+- [x] Show source session provenance when available.
 
 Tests:
 
-- [ ] Cross-tutor isolation tests at store, route, and tool boundaries.
-- [ ] Restart persistence and reset-without-Learner-Memory-impact tests.
+- [x] Cross-tutor isolation tests at store, route, and tool boundaries.
+- [x] Restart persistence and Tutor-scoped reset tests.
 - [ ] Autonomous-memory allow/deny policy tests.
 - [ ] Two-session continuity test for one tutor and isolation test for another.
 

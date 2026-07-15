@@ -10,4 +10,6 @@ pub mod session;
 pub mod settings_store;
 pub mod space_tool;
 pub mod stream;
+pub mod tutor_memory_store;
+pub mod tutor_memory_tool;
 pub mod tutor_store;

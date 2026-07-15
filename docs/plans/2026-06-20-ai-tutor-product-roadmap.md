@@ -283,12 +283,12 @@ matrix, and release gates are defined in
   session ID.
 - [x] Let authorized tutors read shared Learner Memory and omit those tools
   when access is disabled.
-- [ ] Add private Tutor Memory for commitments, open loops, lesson plans,
+- [x] Add private Tutor Memory for commitments, open loops, lesson plans,
   reflections, and strategy.
 - [x] Add initial tutor management for Soul, capability policy, and memory
   policy.
-- [ ] Add the continuity workspace, memory reset, and bounded handoff between
-  tutors.
+- [x] Add the Tutor continuity view and private-memory reset.
+- [ ] Add bounded handoff between tutors.
 
 Acceptance:
 
@@ -314,9 +314,10 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 Recommended next implementation order:
 
-1. Add isolated, typed Tutor Memory and its continuity tools.
-2. Extend the Tutor page with conversations, run state, open loops, and memory
-   management.
+1. Add hard content-policy validation for autonomous Tutor Memory writes and
+   complete two-session continuity coverage.
+2. Extend the Tutor page with conversations, run state, and recent Tutor
+   ordering.
 3. Protect tutor-referenced model configurations during Settings deletion and
    complete the Tutor/Temporary Assistant tool-mount test matrix.
 4. Improve source/citation quality for Research, Quiz, and memory claims.

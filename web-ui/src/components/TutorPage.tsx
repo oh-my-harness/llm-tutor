@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Bot, Eye, MessageSquare, Pencil, Plus, Save, Trash2 } from 'lucide-react'
+import { Bot, Check, Eye, History, ListTodo, MessageSquare, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react'
 import {
   archiveTutor,
+  createTutorMemory,
   createTutor,
+  deleteTutorMemory,
+  fetchTutorMemory,
+  resetTutorMemory,
+  resolveTutorMemory,
   tutorCapabilities,
   tutorSoulSummary,
+  updateTutorMemory,
   updateTutor,
   type TutorDraft,
+  type TutorMemoryDraft,
+  type TutorMemoryEntry,
+  type TutorMemoryKind,
   type TutorProfile,
 } from '../tutorTypes'
 import { MarkdownMessage } from './MarkdownMessage'
@@ -47,6 +56,12 @@ const emptyDraft: TutorDraft = {
   resource_permissions: { knowledge_base_ids: [], notebook: true, space: true },
 }
 
+const emptyMemoryDraft: TutorMemoryDraft = {
+  kind: 'open_loop',
+  text: '',
+  next_action: '',
+}
+
 export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onStartConversation }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(tutors[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
@@ -54,6 +69,13 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [soulView, setSoulView] = useState<'edit' | 'preview'>('edit')
+  const [workspaceView, setWorkspaceView] = useState<'profile' | 'memory'>('profile')
+  const [memoryEntries, setMemoryEntries] = useState<TutorMemoryEntry[]>([])
+  const [memoryDraft, setMemoryDraft] = useState<TutorMemoryDraft>(emptyMemoryDraft)
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null)
+  const [includeResolved, setIncludeResolved] = useState(true)
+  const [memoryBusy, setMemoryBusy] = useState(false)
+  const [memoryStatus, setMemoryStatus] = useState('')
   const selected = tutors.find((item) => item.id === selectedId) ?? null
 
   useEffect(() => {
@@ -66,12 +88,35 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
     }
   }, [creating, selected, tutors])
 
+  useEffect(() => {
+    if (!selectedId || creating) {
+      setMemoryEntries([])
+      return
+    }
+    let active = true
+    setMemoryBusy(true)
+    void fetchTutorMemory(selectedId, includeResolved)
+      .then((entries) => {
+        if (active) setMemoryEntries(entries)
+      })
+      .catch((error) => {
+        if (active) setMemoryStatus(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (active) setMemoryBusy(false)
+      })
+    return () => { active = false }
+  }, [creating, includeResolved, selectedId])
+
   const choose = (tutor: TutorProfile) => {
     setCreating(false)
     setSelectedId(tutor.id)
     setDraft(profileToDraft(tutor))
     setStatus('')
     setSoulView('edit')
+    setWorkspaceView('profile')
+    setEditingMemoryId(null)
+    setMemoryStatus('')
   }
 
   const startCreate = () => {
@@ -80,6 +125,7 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
     setDraft({ ...emptyDraft, resource_permissions: { ...emptyDraft.resource_permissions } })
     setStatus('')
     setSoulView('edit')
+    setWorkspaceView('profile')
   }
 
   const save = async () => {
@@ -116,6 +162,96 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const reloadMemory = async () => {
+    if (!selected) return
+    setMemoryEntries(await fetchTutorMemory(selected.id, includeResolved))
+  }
+
+  const addMemory = async () => {
+    if (!selected || !memoryDraft.text.trim()) {
+      setMemoryStatus('请填写记忆内容。')
+      return
+    }
+    setMemoryBusy(true)
+    setMemoryStatus('')
+    try {
+      await createTutorMemory(selected.id, memoryDraft)
+      setMemoryDraft(emptyMemoryDraft)
+      await reloadMemory()
+      setMemoryStatus('导师记忆已添加。')
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
+
+  const beginMemoryEdit = (entry: TutorMemoryEntry) => {
+    setEditingMemoryId(entry.id)
+    setMemoryDraft({ kind: entry.kind, text: entry.text, next_action: entry.next_action ?? '' })
+    setMemoryStatus('')
+  }
+
+  const saveMemoryEdit = async () => {
+    if (!selected || !editingMemoryId || !memoryDraft.text.trim()) return
+    setMemoryBusy(true)
+    try {
+      await updateTutorMemory(selected.id, editingMemoryId, memoryDraft)
+      setEditingMemoryId(null)
+      setMemoryDraft(emptyMemoryDraft)
+      await reloadMemory()
+      setMemoryStatus('导师记忆已更新。')
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
+
+  const toggleMemoryStatus = async (entry: TutorMemoryEntry) => {
+    if (!selected) return
+    setMemoryBusy(true)
+    try {
+      if (entry.status === 'active') {
+        await resolveTutorMemory(selected.id, entry.id)
+      } else {
+        await updateTutorMemory(selected.id, entry.id, { status: 'active' })
+      }
+      await reloadMemory()
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
+
+  const removeMemory = async (entry: TutorMemoryEntry) => {
+    if (!selected || !window.confirm('删除这条导师私有记忆？')) return
+    setMemoryBusy(true)
+    try {
+      await deleteTutorMemory(selected.id, entry.id)
+      await reloadMemory()
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
+
+  const resetMemory = async () => {
+    if (!selected || !window.confirm(`清空“${selected.name}”的全部私有记忆？学习者记忆不会受到影响。`)) return
+    setMemoryBusy(true)
+    try {
+      await resetTutorMemory(selected.id)
+      await reloadMemory()
+      setMemoryStatus('导师私有记忆已清空。')
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryBusy(false)
     }
   }
 
@@ -165,18 +301,24 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
               <p className="mt-1 text-sm text-gray-500">设置导师的长期 Soul、默认行为和可使用的能力。</p>
             </div>
             {selected && !creating && (
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
-                onClick={() => onStartConversation(selected.id)}
-              >
-                <MessageSquare size={16} />
-                开始对话
-              </button>
+              <div className="flex items-center gap-3">
+                <div className="flex rounded-md bg-gray-100 p-0.5">
+                  <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('profile')}>配置</button>
+                  <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'memory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('memory')}>连续性</button>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
+                  onClick={() => onStartConversation(selected.id)}
+                >
+                  <MessageSquare size={16} />
+                  开始对话
+                </button>
+              </div>
             )}
           </div>
 
-          {(creating || selected) && (
+          {(creating || selected) && (creating || workspaceView === 'profile') && (
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-3">
                 <Field label="导师名称">
@@ -329,6 +471,92 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
               </div>
             </div>
           )}
+
+          {selected && !creating && workspaceView === 'memory' && (
+            <div className="space-y-6">
+              <section className="border-b border-gray-200 pb-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">导师私有记忆</h3>
+                    <p className="mt-1 text-sm text-gray-500">只属于这位导师的承诺、未完成事项、课程计划、反思和教学策略。</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs text-gray-600">
+                      <input type="checkbox" checked={includeResolved} onChange={(event) => setIncludeResolved(event.target.checked)} />
+                      显示已解决
+                    </label>
+                    <button type="button" disabled={memoryBusy || memoryEntries.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40" title="清空导师记忆" aria-label="清空导师记忆" onClick={() => void resetMemory()}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-4 flex gap-6 text-sm text-gray-600">
+                  <span><strong className="text-gray-900">{memoryEntries.filter((entry) => entry.status === 'active').length}</strong> 项进行中</span>
+                  <span><strong className="text-gray-900">{memoryEntries.filter((entry) => entry.status === 'resolved').length}</strong> 项已解决</span>
+                </div>
+              </section>
+
+              {!editingMemoryId && (
+                <section>
+                  <h3 className="mb-3 text-sm font-medium text-gray-800">添加连续性记忆</h3>
+                  <MemoryEditor draft={memoryDraft} onChange={setMemoryDraft} />
+                  <div className="mt-3 flex items-center gap-3">
+                    <button type="button" disabled={memoryBusy || !memoryDraft.text.trim()} className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" onClick={() => void addMemory()}>
+                      <Plus size={15} />
+                      添加
+                    </button>
+                    {memoryStatus && <span className="text-sm text-gray-600">{memoryStatus}</span>}
+                  </div>
+                </section>
+              )}
+
+              <section>
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800">
+                  <History size={16} />
+                  记忆记录
+                </div>
+                {memoryBusy && memoryEntries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-gray-500">正在加载...</p>
+                ) : memoryEntries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-gray-500">这位导师还没有私有记忆。</p>
+                ) : (
+                  <div className="divide-y divide-gray-200 border-y border-gray-200">
+                    {memoryEntries.map((entry) => (
+                      <div key={entry.id} className="py-4">
+                        {editingMemoryId === entry.id ? (
+                          <>
+                            <MemoryEditor draft={memoryDraft} onChange={setMemoryDraft} />
+                            <div className="mt-3 flex gap-2">
+                              <button type="button" disabled={memoryBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs text-white" onClick={() => void saveMemoryEdit()}><Save size={14} />保存</button>
+                              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs text-gray-600 hover:bg-gray-100" onClick={() => { setEditingMemoryId(null); setMemoryDraft(emptyMemoryDraft) }}><X size={14} />取消</button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex items-start gap-4">
+                            <ListTodo size={17} className={`mt-0.5 shrink-0 ${entry.status === 'active' ? 'text-blue-600' : 'text-gray-400'}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium text-blue-700">{memoryKindLabel(entry.kind)}</span>
+                                <span className="text-xs text-gray-400">{entry.status === 'active' ? '进行中' : '已解决'}</span>
+                              </div>
+                              <p className={`mt-1 text-sm leading-6 ${entry.status === 'resolved' ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{entry.text}</p>
+                              {entry.next_action && <p className="mt-1 text-xs text-gray-500">下一步：{entry.next_action}</p>}
+                              {entry.source_session_id && <p className="mt-1 text-xs text-gray-400">来源会话：{entry.source_session_id.slice(0, 8)}</p>}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title="编辑" aria-label="编辑" onClick={() => beginMemoryEdit(entry)}><Pencil size={14} /></button>
+                              <button type="button" disabled={memoryBusy} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100" title={entry.status === 'active' ? '标记已解决' : '重新打开'} aria-label={entry.status === 'active' ? '标记已解决' : '重新打开'} onClick={() => void toggleMemoryStatus(entry)}>{entry.status === 'active' ? <Check size={15} /> : <RotateCcw size={15} />}</button>
+                              <button type="button" disabled={memoryBusy} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600" title="删除" aria-label="删除" onClick={() => void removeMemory(entry)}><Trash2 size={14} /></button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
         </div>
       </main>
     </div>
@@ -339,6 +567,30 @@ const inputClass = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-medium text-gray-800">{label}</span>{children}</label>
+}
+
+function MemoryEditor({
+  draft,
+  onChange,
+}: {
+  draft: TutorMemoryDraft
+  onChange: (draft: TutorMemoryDraft) => void
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+      <select className={inputClass} value={draft.kind} onChange={(event) => onChange({ ...draft, kind: event.target.value as TutorMemoryKind })}>
+        <option value="commitment">承诺</option>
+        <option value="open_loop">未完成事项</option>
+        <option value="lesson_plan">课程计划</option>
+        <option value="reflection">教学反思</option>
+        <option value="strategy">教学策略</option>
+      </select>
+      <input className={inputClass} value={draft.text} placeholder="记录这位导师需要延续的事项" onChange={(event) => onChange({ ...draft, text: event.target.value })} />
+      <div className="md:col-start-2">
+        <input className={inputClass} value={draft.next_action ?? ''} placeholder="下一步行动（可选）" onChange={(event) => onChange({ ...draft, next_action: event.target.value })} />
+      </div>
+    </div>
+  )
 }
 
 function profileToDraft(profile: TutorProfile): TutorDraft {
@@ -386,4 +638,14 @@ function toggleCapability(draft: TutorDraft, capability: string): TutorDraft {
 
 function capabilityLabel(capability: string) {
   return ({ chat: '聊天', deep_solve: '深度解题', quiz: '测验', research: '调研', organize: '整理' } as Record<string, string>)[capability] ?? capability
+}
+
+function memoryKindLabel(kind: TutorMemoryKind) {
+  return ({
+    commitment: '承诺',
+    open_loop: '未完成事项',
+    lesson_plan: '课程计划',
+    reflection: '教学反思',
+    strategy: '教学策略',
+  } as Record<TutorMemoryKind, string>)[kind]
 }

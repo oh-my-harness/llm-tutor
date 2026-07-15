@@ -204,6 +204,12 @@ permissions, and memory policy. Soul supports edit and rendered-preview modes.
 The server applies the resolved model at session creation and revalidates
 resource permissions for session changes and every runtime turn.
 
+The Tutor page also provides a continuity view for private typed memory. Users
+can add, edit, resolve, reopen, delete, and reset entries without changing
+shared Learner Memory. Each runtime tool is constructed with one immutable
+Tutor ID; active entries are injected as a bounded turn-start summary and full
+entries remain available through `read_tutor_memory`.
+
 The target Tutor workspace extends that surface with:
 
 - left rail: tutor list, selection, and run state;
