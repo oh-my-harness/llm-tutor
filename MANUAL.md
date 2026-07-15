@@ -116,6 +116,8 @@ DuckDuckGo 可作为无需 API Key 的基础选项，但稳定性和结果质量
 
 每位导师使用 Markdown Soul 定义稳定的身份、教学风格、专业方向、原则和边界。当前学习目标、下一步计划和未完成事项不写入 Soul，后续由独立 Tutor Memory 持续维护。
 
+当前版本已经让 Soul 影响导师在 Chat、Research、Quiz 和 Deep Solve 中的教学方式。默认模型、细粒度资料权限、独立 Tutor Memory、导师连续性面板和导师交接仍在开发中；界面中的相关开关不应被理解为这些后续能力已经全部生效。
+
 预期能力包括：
 
 - 新建会话时可以选择一位持久导师；机器人代表“由谁陪伴学习”，Chat、Research、Quiz 和 Deep Solve 代表它当前使用的能力。

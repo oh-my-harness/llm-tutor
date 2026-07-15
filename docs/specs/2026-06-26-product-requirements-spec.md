@@ -58,7 +58,7 @@
 ## 4A. Persistent Tutors
 
 - REQ-060: The Tutor surface shall manage persistent tutor entities rather
-  than act as another capability mode. Status: planned.
+  than act as another capability mode. Status: implemented.
 - REQ-061: A tutor shall own a user-editable Markdown Soul, default model,
   allowed capabilities, resource permissions, conversation collection, and
   private Tutor Memory. Soul defines stable identity and teaching behavior;
@@ -71,10 +71,11 @@
   Status: implemented.
 - REQ-064: Tutor identity and capability mode shall remain separate concepts:
   the tutor is who accompanies the learner, while Chat, Research, Quiz, and
-  Deep Solve describe what it is doing. Status: planned.
+  Deep Solve describe what it is doing. Status: implemented.
 - REQ-065: Tutor-bound sessions shall persist an immutable `tutor_id` beside
   the runtime session mapping. Changing tutors shall create a new session or a
-  bounded handoff rather than replacing identity in place. Status: planned.
+  bounded handoff rather than replacing identity in place. Status: implemented
+  for immutable binding and new-session creation; handoff remains planned.
 - REQ-066: Authorized tutors may read shared Learner Memory, but each tutor's
   commitments, open loops, lesson plans, reflections, and strategy shall remain
   private by default. Status: planned.
@@ -84,14 +85,18 @@
   Status: planned.
 - REQ-068: Tutor context shall combine Soul and permissions, relevant Learner
   Memory, relevant private Tutor Memory, runtime session history, and current
-  resources through thin mappings to runtime APIs. Status: planned.
+  resources through thin mappings to runtime APIs. Status: implemented for
+  Soul and runtime history; permission-filtered resources and Tutor Memory
+  remain planned.
 - REQ-068A: Soul Markdown shall be injected only as bounded product-owned
   runtime instruction. It shall not be parsed to grant capabilities, tools, or
-  resource access and cannot override safety policy. Status: planned.
+  resource access and cannot override safety policy. Status: implemented.
 - REQ-069: Deleting or resetting a tutor shall not implicitly delete global
-  Learner Memory, Notebook, Knowledge, Quiz, or Space assets. Status: planned.
+  Learner Memory, Notebook, Knowledge, Quiz, or Space assets. Status:
+  implemented for archive and profile reset; permanent deletion remains
+  planned.
 - REQ-069A: The detailed product contract and MVP sequence shall follow
-  `docs/specs/2026-07-15-persistent-tutor-design.md`. Status: planned.
+  `docs/specs/2026-07-15-persistent-tutor-design.md`. Status: active.
 
 ## 5. Chat Mode
 

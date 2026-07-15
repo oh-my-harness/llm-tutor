@@ -10,7 +10,7 @@
 >
 > 当前阶段：单用户本地产品原型；核心闭环可用，桌面发布仍在持续人工 QA。
 >
-> 文档状态：已按 `main` 分支截至 2026-07-14 的实现更新。
+> 文档状态：已按 `main` 分支截至 2026-07-15 的实现更新。
 
 ## 文档
 
@@ -37,7 +37,7 @@
 | Memory | L1 事件证据、L2 分模块摘要与 L3 跨模块记忆；支持模型/模式可选的更新、检查、去重 workflow，以及逐项 diff 审核。 |
 | Desktop | Tauri 原生窗口、托管 `tutor-web` sidecar、系统文件对话框、桌面剪贴板/右键菜单、外部链接。 |
 | Appearance | `cool-light` 与 `graphite-dark` 主题，中英文界面。 |
-| Tutor | 持久导师身份、Markdown Soul、不可变会话绑定、基础能力策略和导师管理。 |
+| Tutor | 持久导师身份、Markdown Soul、不可变会话绑定、基础能力策略、权限配置结构和导师管理。 |
 
 “辅导机器人”现在支持创建和管理持久导师。每位导师通过 Markdown Soul 定义稳定身份与教学方式；独立 Tutor Memory、完整资源权限和导师交接仍在后续阶段。原 Books 能力已经移除，Research 报告只保存到 Notebook。
 
@@ -134,7 +134,7 @@ Tutor Agent desktop
           -> tutor-rag
               -> LanceDB + embedding retrieval
           -> local product stores
-              -> Notebook / Quiz / Memory / Settings / Knowledge
+              -> Notebook / Quiz / Learner Memory / Tutors / Settings / Knowledge
 ```
 
 ### 工作区结构
@@ -176,6 +176,7 @@ knowledge-bases.json
 quizzes.json
 notebook/
 memory/
+tutors/
 rag/
 workflow-sessions/
 ```

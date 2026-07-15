@@ -53,16 +53,15 @@ consolidation path.
 
 ## 3. Tutor Memory
 
-Each tutor may maintain:
+Each tutor maintains one product-owned structured store:
 
 ```text
-tutors/<tutor-id>/memory/
-  commitments.md
-  open_loops.md
-  lesson_plan.md
-  reflections.md
-  strategy.md
+tutors/<tutor-id>/memory.json
 ```
+
+Soul remains user-editable Markdown because it is a stable authored identity.
+Tutor Memory uses typed records because provenance, lifecycle state, isolation,
+expiry, and atomic updates must be enforced without parsing prose documents.
 
 Supported entry kinds:
 
@@ -122,18 +121,21 @@ is selected.
 
 > 这次想和哪位导师交流？
 
-It shows:
+The implemented chooser shows all available tutors, the selected tutor's Soul
+summary, and a management action. Temporary Assistant is represented by no
+selection rather than by a duplicate list item. Clicking the selected tutor
+again clears the selection.
 
-- recently used tutors;
-- all configured tutors;
-- each tutor's Soul summary, current goal, last progress, and open-loop count;
-- create-tutor action;
-- a clear Temporary Assistant state for one-off work without duplicating it as
-  a persistent-tutor list item.
+Selecting a tutor updates the pending conversation configuration. The runtime
+session is created only when the user sends the first message, matching normal
+deferred Chat session creation. Selection alone does not create, open, or
+reorder a conversation.
 
-Selecting a tutor immediately creates or opens a conversation. A configured
-default or last-used tutor may support a one-click quick start so the chooser
-does not become repeated friction.
+Later continuity enhancements may add:
+
+- each tutor's current goal, last progress, and open-loop count;
+- recent-tutor ordering and one-click continuation of an existing conversation;
+- open-loop and background-run indicators.
 
 Temporary Assistant preserves today's lightweight Chat behavior. It may read
 authorized Learner Memory but has no persistent Soul, private Tutor Memory, or
@@ -196,7 +198,11 @@ appropriate capability as the task develops.
 
 ## 9. UI Shape
 
-The Tutor page is an operational workspace:
+The current Tutor page provides a compact tutor rail and a profile editor for
+name, Markdown Soul, default capability, allowed capabilities, and memory
+policy. Soul supports edit and rendered-preview modes.
+
+The target Tutor workspace extends that surface with:
 
 - left rail: tutor list, selection, and run state;
 - main area: the selected tutor's conversations;
@@ -205,8 +211,8 @@ The Tutor page is an operational workspace:
   autonomous-memory policy;
 - memory management: inspect, edit, close, delete, or reset private entries.
 
-Conversation rows display their tutor identity. Tutor selection is also the
-first step of the new-conversation empty state.
+Conversation rows will display their tutor identity. Tutor selection remains
+an optional control in the new-conversation empty state.
 
 ## 10. MVP Scope
 
@@ -220,7 +226,7 @@ first step of the new-conversation empty state.
 
 ### Phase 2: Private Continuity Memory
 
-- Add tutor memory files and read/write tools.
+- Add the typed Tutor Memory store and scoped read/write tools.
 - Support commitments, open loops, plans, reflections, and strategy.
 - Show tutor memory in the Tutor workspace.
 - Allow reset without changing Learner Memory.

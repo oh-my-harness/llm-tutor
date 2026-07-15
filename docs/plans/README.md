@@ -20,6 +20,8 @@ checklists.
 - `2026-06-28-tauri-desktop-release-plan.md`: desktop release hardening and QA.
 - `2026-07-13-background-session-resilience-plan.md`: durable background runs,
   session rejoin, and restorable interactive Chat attachments.
+- `2026-07-15-persistent-tutor-implementation-plan.md`: active persistent Tutor
+  identity, Soul, permissions, private continuity memory, and handoff plan.
 
 ## Feature Plans
 

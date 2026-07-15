@@ -1,14 +1,16 @@
 # Persistent Tutor Implementation Plan
 
-> Status: planned | Date: 2026-07-15 | Target: post-0.2.1 development
+> Status: in progress | Date: 2026-07-15 | Target: post-0.2.1 development
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
-Implementation progress (2026-07-15): Phase 0/1 identity slice is implemented.
-Tutor CRUD, General Tutor seeding, immutable session binding, the Chat chooser,
-session restoration, and the initial Tutor management page are implemented.
-Default model resolution, recent-tutor ranking, avatar presentation, and runtime
-Soul context injection remain pending.
+Implementation progress (2026-07-15): the Phase 0/1 identity loop and the Soul
+portion of Phase 2 are implemented. Tutor CRUD, General Tutor seeding, immutable
+session binding, the optional Chat chooser, session restoration, Tutor
+management, and bounded Soul injection across Chat, Research, Quiz, and Deep
+Solve are working. Resource-tool enforcement, tutor default-model resolution,
+private Tutor Memory, the continuity workspace, recent-tutor ranking, avatar
+presentation, and handoff remain pending.
 
 ## 1. Objective
 
@@ -40,8 +42,8 @@ The implementation starts from these existing boundaries:
 - `web-ui/src/App.tsx` owns session creation, restoration, switching, and the
   Chat empty state.
 - `web-ui/src/components/Sidebar.tsx` renders conversation state and navigation.
-- The Tutor route currently renders `PlaceholderPage`; no tutor store or tutor
-  API exists yet.
+- `TutorStore`, Tutor CRUD routes, the Chat chooser, and the initial `TutorPage`
+  now provide the persistent identity surface.
 
 This is a favorable boundary: tutor identity can remain product metadata while
 `llm-harness-runtime` continues to own durable conversation history, context,
@@ -89,9 +91,10 @@ TutorProfile
 ```
 
 The store seeds one built-in General Tutor on first use. It may be edited and
-reset to defaults, but not deleted. User-created tutors may be archived or
-deleted only after the API reports affected sessions and asks the UI for an
-explicit retention choice.
+reset to defaults, but not deleted. User-created tutors are currently archived
+through `DELETE /api/tutors/:id`; permanent deletion remains future work and
+must report affected sessions before asking the UI for an explicit retention
+choice.
 
 ### 3.3 Session Binding
 
@@ -151,12 +154,16 @@ Goal: establish a tested product domain before changing conversation behavior.
 
 Backend tasks:
 
-- [ ] Add `crates/tutor-web/src/tutor_store.rs` with typed profile, permission,
-  memory, and validation models.
+- [x] Add `crates/tutor-web/src/tutor_store.rs` with typed profile, permission,
+  and validation models. Private memory models remain Phase 4 work.
 - [x] Seed the built-in General Tutor idempotently.
-- [x] Add atomic create, list, get, update, archive/delete, and reset operations.
-- [ ] Reject duplicate IDs, blank Souls, unknown capabilities, and dangling
-  model configuration IDs.
+- [x] Add atomic create, list, get, update, archive, and reset operations.
+- [ ] Add explicit permanent deletion with affected-session preview and
+  retention choice.
+- [x] Generate stable unique IDs and reject blank Souls and unknown
+  capabilities.
+- [ ] Reject dangling model configuration IDs once tutor default-model
+  selection is connected to Settings.
 - [x] Add `crates/tutor-web/src/routes/tutors.rs` and mount it from `main.rs`.
 - [x] Expose `GET/POST /api/tutors` and
   `GET/PATCH/DELETE /api/tutors/:id`.
@@ -189,7 +196,8 @@ Backend tasks:
   session list/detail responses.
 - [x] Extend `POST /api/sessions` with optional `tutor_id` and validate it against
   `TutorStore`.
-- [ ] Resolve tutor default capability/model only during session creation.
+- [x] Resolve tutor default capability only during session creation.
+- [ ] Resolve tutor default model only during session creation.
 - [x] Reject disallowed capabilities before creating a runtime session.
 - [x] Restore `tutor_id` through `SessionPool::ensure_entry` after restart.
 - [x] Return tutor summary data with session list items to avoid frontend N+1
@@ -199,17 +207,21 @@ Backend tasks:
 Frontend tasks:
 
 - [x] Add a compact tutor chooser to the empty Chat state.
-- [ ] Show recent tutors, all tutors, create action, and Temporary Assistant.
+- [x] Show all tutors, a management/create action, and an implicit Temporary
+  Assistant default; clicking the selected tutor again clears the selection.
+- [ ] Add recent-tutor ordering and continuity summaries.
 - [x] Carry the selected `tutor_id` through deferred session creation on first
   send.
-- [ ] Display tutor avatar/name on the active conversation header and session
-  list row.
+- [x] Display tutor name on the active conversation header.
+- [ ] Display tutor identity in session rows and add avatar presentation.
 - [x] Restore the selected tutor when reopening a session.
 
 Tests:
 
 - [x] Session metadata round trip with and without `tutor_id`.
-- [ ] Unknown tutor and disallowed capability request tests.
+- [x] Unknown tutor request test.
+- [ ] Complete disallowed-capability request coverage for creation, updates,
+  and runtime execution.
 - [x] Frontend helper tests for tutor selection and create-session payloads.
 - [ ] Regression test proving existing unbound sessions still open normally.
 
@@ -261,14 +273,15 @@ Goal: replace the Tutor placeholder with a useful management surface.
 
 Frontend tasks:
 
-- [ ] Add `TutorPage` with a compact tutor rail, main conversation list, and
-  compact continuity panel.
-- [ ] Add create/edit forms for Markdown Soul, default model, default capability,
-  allowed capabilities, and memory policy.
+- [x] Add the initial `TutorPage` with a compact tutor rail and profile editor.
+- [ ] Add the tutor conversation list and compact continuity panel.
+- [x] Add create/edit forms for Markdown Soul, default capability, allowed
+  capabilities, and memory policy.
+- [ ] Add default-model and resource-permission controls.
 - [ ] Show active/background run state beside tutor conversations.
-- [ ] Add quick actions: start conversation, continue recent conversation,
-  edit tutor, and reset profile.
-- [ ] Preserve current desktop layout rules: pane-local scrolling, keyboard
+- [ ] Add quick actions for continuing a recent conversation and resetting the
+  built-in profile. Starting a conversation and editing are implemented.
+- [x] Preserve current desktop layout rules: pane-local scrolling, keyboard
   access, no nested cards, and no browser-like context behavior.
 - [ ] Add empty, loading, error, archived, and deleted-tutor states.
 

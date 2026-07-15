@@ -271,8 +271,12 @@ Status: in progress. The executable task breakdown, architecture boundaries, tes
 matrix, and release gates are defined in
 `2026-07-15-persistent-tutor-implementation-plan.md`.
 
-- [ ] Add persistent tutor profiles with role, goal, model defaults, capability
-  policy, and resource permissions.
+- [x] Add persistent tutor profiles with Markdown Soul, capability policy, and
+  resource-permission configuration.
+- [x] Apply bounded Soul instructions across Chat, Research, Quiz, and Deep
+  Solve without creating a parallel agent or workflow engine.
+- [ ] Resolve tutor model defaults and enforce resource permissions at every
+  mounted product-tool boundary.
 - [x] Add tutor selection to the new-conversation empty state and retain a
   Temporary Assistant path.
 - [x] Bind each tutor conversation to an immutable `tutor_id` and runtime
@@ -280,11 +284,14 @@ matrix, and release gates are defined in
 - [ ] Let authorized tutors read shared Learner Memory.
 - [ ] Add private Tutor Memory for commitments, open loops, lesson plans,
   reflections, and strategy.
-- [ ] Add tutor management, memory reset, and bounded handoff between tutors.
+- [x] Add initial tutor management for Soul, capability policy, and memory
+  policy.
+- [ ] Add the continuity workspace, memory reset, and bounded handoff between
+  tutors.
 
 Acceptance:
 
-- A user starts a conversation by choosing who to learn with.
+- A user may choose who to learn with; no selection uses Temporary Assistant.
 - The same tutor can continue its goals, promises, and open learning threads
   across multiple sessions.
 - Chat, Research, Quiz, and Deep Solve remain reusable capabilities rather than
@@ -306,14 +313,17 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 Recommended next implementation order:
 
-1. Improve source/citation quality for Research and Quiz.
-2. Add source references from Student Profile memory claims back to their evidence.
-3. Add chat-to-notebook and quiz-summary-to-notebook save flows.
-4. Upgrade RAG chunking from basic character chunks to paragraph/token-aware chunks.
-5. Add model/provider health checks in Settings.
-6. Add export for chat, Notebook entries, and reports.
-7. Add a smoke test for `tutor-web` startup.
-8. Decide whether local JSON stores should move to SQLite.
+1. Finish Tutor default-model resolution and server-enforced resource/tool
+   permissions.
+2. Add isolated, typed Tutor Memory and its continuity tools.
+3. Extend the Tutor page with conversations, run state, open loops, and memory
+   management.
+4. Improve source/citation quality for Research, Quiz, and memory claims.
+5. Upgrade RAG chunking from basic character chunks to paragraph/token-aware
+   chunks.
+6. Add remaining model/provider health checks and export flows.
+7. Revisit JSON versus SQLite only when measured store relationships require
+   migration.
 
 ## 7. Risks
 

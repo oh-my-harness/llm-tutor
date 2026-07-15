@@ -4,6 +4,8 @@ Current product and runtime-facing specs live here.
 
 - `2026-06-26-product-requirements-spec.md` is the consolidated product requirement source.
 - `2026-06-26-memory-consolidation-design.md` records the current memory/profile design.
+- `2026-07-15-persistent-tutor-design.md` defines persistent tutor identity,
+  Markdown Soul, private Tutor Memory, permissions, and handoff boundaries.
 
 Historical v0.1 runtime-demo designs were moved to `docs/plans/archive/`.
 They describe pre-migration `PhaseManager`, `ReplanHook`, and direct
