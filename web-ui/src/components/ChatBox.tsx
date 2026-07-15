@@ -284,6 +284,7 @@ export function ChatBox({
   disabled,
   running = false,
 }: Props) {
+  const { t } = useI18n()
   const [input, setInput] = useState('')
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -533,9 +534,12 @@ export function ChatBox({
         )
       )}
       {empty ? (
-        <div className="chat-scroll-pane flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
+        <div className="chat-scroll-pane flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-20">
           <div className="w-full max-w-4xl">
-            <TutorChooser tutors={tutors} selectedTutorId={selectedTutorId} onSelect={onTutorSelect} onManage={onManageTutors} />
+            <div className="mb-7 text-center">
+              <h2 className="text-3xl font-semibold text-gray-950">{t('chat.empty.title')}</h2>
+              <p className="mt-2 text-sm text-gray-500">{t('chat.empty.description')}</p>
+            </div>
             <Composer
               inputRef={composerInputRef}
               input={input}
@@ -561,6 +565,14 @@ export function ChatBox({
               disabled={disabled}
               running={running}
               variant="center"
+              footer={(
+                <TutorChooser
+                  tutors={tutors}
+                  selectedTutorId={selectedTutorId}
+                  onSelect={onTutorSelect}
+                  onManage={onManageTutors}
+                />
+              )}
             />
           </div>
         </div>
@@ -1343,6 +1355,7 @@ function Composer({
   disabled,
   running,
   variant,
+  footer,
 }: {
   inputRef?: RefObject<HTMLTextAreaElement | null>
   input: string
@@ -1368,6 +1381,7 @@ function Composer({
   disabled: boolean
   running: boolean
   variant: 'center' | 'bottom'
+  footer?: ReactNode
 }) {
   const { t } = useI18n()
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
@@ -1708,6 +1722,7 @@ function Composer({
           {running ? <Square size={15} /> : <ArrowUp size={20} />}
         </button>
       </div>
+      {footer}
     </div>
   )
 }

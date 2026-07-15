@@ -1,4 +1,6 @@
-import { Bot, Check, UserRound } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Bot, Check, ChevronDown, Settings2, UserRound } from 'lucide-react'
+import { useI18n } from '../i18n'
 import type { TutorProfile } from '../tutorTypes'
 
 interface Props {
@@ -9,44 +11,99 @@ interface Props {
 }
 
 export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Props) {
-  return (
-    <section className="mb-6" aria-labelledby="tutor-chooser-title">
-      <div className="mb-3 flex items-end justify-between gap-4">
-        <div>
-          <h2 id="tutor-chooser-title" className="text-base font-semibold text-gray-900">
-            这次想和哪位导师交流？
-          </h2>
-          <p className="mt-1 text-xs text-gray-500">导师身份会随会话保存，之后可以继续同一段学习过程。</p>
-        </div>
-        <button type="button" className="shrink-0 text-xs text-blue-600 hover:text-blue-700" onClick={onManage}>
-          管理导师
-        </button>
-      </div>
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const chooserRef = useRef<HTMLDivElement>(null)
+  const selectedTutor = selectedTutorId
+    ? tutors.find((tutor) => tutor.id === selectedTutorId) ?? null
+    : null
+  const selectedName = selectedTutorId === undefined
+    ? t('chat.tutor.select')
+    : selectedTutor?.name ?? t('chat.tutor.temporary')
+  const selectedDescription = selectedTutorId === undefined
+    ? t('chat.tutor.select.description')
+    : selectedTutor?.goal || selectedTutor?.role || t('chat.tutor.temporary.description')
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {tutors.map((tutor) => (
-          <TutorChoice
-            key={tutor.id}
-            selected={selectedTutorId === tutor.id}
-            title={tutor.name}
-            description={tutor.goal || tutor.role}
-            icon={<Bot size={18} />}
-            onClick={() => onSelect(tutor.id)}
-          />
-        ))}
-        <TutorChoice
-          selected={selectedTutorId === null}
-          title="临时助手"
-          description="适合一次性问题，不保留独立导师身份和私有计划。"
-          icon={<UserRound size={18} />}
-          onClick={() => onSelect(null)}
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!chooserRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true)
+  }, [open])
+
+  const select = (tutorId: string | null) => {
+    onSelect(tutorId)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={chooserRef} className="relative flex min-h-11 items-stretch border-t border-blue-50">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-bl-3xl px-4 py-2 text-left hover:bg-gray-50"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+          {selectedTutorId === null ? <UserRound size={16} /> : <Bot size={16} />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="shrink-0 text-xs text-gray-500">{t('chat.tutor.label')}</span>
+            <span className="truncate text-sm font-medium text-gray-900">{selectedName}</span>
+          </span>
+          <span className="block truncate text-[11px] text-gray-500">{selectedDescription}</span>
+        </span>
+        <ChevronDown
+          size={17}
+          className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
         />
-      </div>
-    </section>
+      </button>
+
+      <button
+        type="button"
+        className="flex w-12 shrink-0 items-center justify-center rounded-br-3xl border-l border-blue-50 text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+        title={t('chat.tutor.manage')}
+        aria-label={t('chat.tutor.manage')}
+        onClick={onManage}
+      >
+        <Settings2 size={17} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute left-3 right-3 top-[calc(100%+0.5rem)] z-50 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl shadow-gray-950/10"
+          role="listbox"
+          aria-label={t('chat.tutor.select')}
+        >
+          {tutors.map((tutor) => (
+            <TutorOption
+              key={tutor.id}
+              selected={selectedTutorId === tutor.id}
+              title={tutor.name}
+              description={tutor.goal || tutor.role}
+              icon={<Bot size={17} />}
+              onClick={() => select(tutor.id)}
+            />
+          ))}
+          {tutors.length > 0 && <div className="my-1 border-t border-gray-100" />}
+          <TutorOption
+            selected={selectedTutorId === null}
+            title={t('chat.tutor.temporary')}
+            description={t('chat.tutor.temporary.description')}
+            icon={<UserRound size={17} />}
+            onClick={() => select(null)}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
-function TutorChoice({
+function TutorOption({
   selected,
   title,
   description,
@@ -62,20 +119,21 @@ function TutorChoice({
   return (
     <button
       type="button"
-      className={`relative min-h-24 rounded-lg border p-3 text-left transition-colors ${
-        selected
-          ? 'border-blue-500 bg-blue-50/70 text-gray-900'
-          : 'border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50'
+      role="option"
+      aria-selected={selected}
+      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left ${
+        selected ? 'bg-blue-50 text-gray-900' : 'text-gray-800 hover:bg-gray-50'
       }`}
       onClick={onClick}
-      aria-pressed={selected}
     >
-      <span className="flex items-center gap-2">
-        <span className={selected ? 'text-blue-600' : 'text-gray-500'}>{icon}</span>
-        <span className="min-w-0 truncate text-sm font-semibold">{title}</span>
+      <span className={selected ? 'text-blue-600' : 'text-gray-500'}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{title}</span>
+        <span className="block truncate text-xs text-gray-500">{description}</span>
       </span>
-      <span className="mt-2 line-clamp-2 block text-xs leading-5 text-gray-500">{description}</span>
-      {selected && <Check size={15} className="absolute right-3 top-3 text-blue-600" />}
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-blue-600">
+        {selected && <Check size={16} />}
+      </span>
     </button>
   )
 }
