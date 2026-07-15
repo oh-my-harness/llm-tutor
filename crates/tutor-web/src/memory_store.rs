@@ -548,7 +548,11 @@ impl MemoryStore {
             .filter(|change| accepted.contains(change.id.as_str()))
             .collect::<Vec<_>>();
         if selected.is_empty() {
-            return Err(anyhow!("no memory changes were selected"));
+            return if accepted_change_ids.is_empty() {
+                Ok(current)
+            } else {
+                Err(anyhow!("none of the accepted memory change ids matched the review"))
+            };
         }
         let target = target_catalog(target_path, current.markdown.clone());
         let allowed_sections = target
@@ -1866,5 +1870,24 @@ mod tests {
         assert_eq!(unchanged.revision, original.revision);
         assert!(unchanged.markdown.contains("Original note"));
         assert!(!unchanged.markdown.contains("Changed note"));
+    }
+
+    #[test]
+    fn memory_change_apply_allows_review_to_finish_without_accepting_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new_with_root(dir.path().join("memory"));
+        let original = store
+            .write(
+                "L2/chat.md",
+                "# Chat memory\n\n## Topics\n\n- Keep this note. <!--m_original-->".into(),
+            )
+            .unwrap();
+
+        let reviewed = store
+            .apply_memory_changes("L2/chat.md", &original.revision, &[], &[])
+            .unwrap();
+
+        assert_eq!(reviewed.revision, original.revision);
+        assert_eq!(reviewed.markdown, original.markdown);
     }
 }

@@ -313,7 +313,7 @@ export function MemoryPage({
         const run = data.run as MemoryRun
         setMemoryRun(run)
         setActiveRuns((current) => reconcileRestorableMemoryRun(current, run))
-        if (run.change_set) {
+        if (run.status === 'awaiting_review' && run.change_set) {
           setSelectedChangeIds(memoryChangeIds(run.change_set.changes))
           setViewMode('review')
         }
@@ -323,6 +323,11 @@ export function MemoryPage({
         } else if (run.status === 'failed') {
           setLoading(false)
           setStatus(run.error ?? '记忆工作流失败')
+        } else if (run.status === 'completed') {
+          setLoading(false)
+          setSelectedChangeIds([])
+          setViewMode('rendered')
+          setStatus(run.change_set?.summary ?? '记忆工作流已完成')
         }
       } catch (err) {
         setLoading(false)
@@ -356,9 +361,9 @@ export function MemoryPage({
   }, [activeRuns, memoryRun?.run_id])
 
   const applySelectedChanges = async () => {
-    if (!memoryRun?.change_set || selectedChangeIds.length === 0) return
+    if (!memoryRun?.change_set) return
     setLoading(true)
-    setStatus('正在应用已接受的记忆变更…')
+    setStatus(selectedChangeIds.length > 0 ? '正在应用已接受的记忆变更…' : '正在完成记忆审核…')
     try {
       const res = await fetch(`/api/memory/runs/${encodeURIComponent(memoryRun.run_id)}/apply`, {
         method: 'POST',
@@ -374,7 +379,7 @@ export function MemoryPage({
       setActiveRuns((current) => current.filter((run) => run.run_id !== memoryRun.run_id))
       setSelectedChangeIds([])
       setViewMode('rendered')
-      setStatus('已应用选中的记忆变更')
+      setStatus(selectedChangeIds.length > 0 ? '已应用选中的记忆变更' : '审核已完成，未应用变更')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -980,9 +985,9 @@ function ChangeReview({
         <button className={secondaryButtonClassName} type="button" disabled={changeSet.changes.length === 0} onClick={() => onSelectAll(!allSelected)}>
           {allSelected ? '全部拒绝' : '全部接受'}
         </button>
-        <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200" type="button" disabled={loading || selectedChangeIds.length === 0} onClick={onApply}>
+        <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-200" type="button" disabled={loading} onClick={onApply}>
           <Check size={14} />
-          应用 {selectedChangeIds.length} 项
+          {selectedChangeIds.length > 0 ? `应用 ${selectedChangeIds.length} 项` : '完成审核'}
         </button>
       </div>
       {changeSet.findings.length > 0 && (
