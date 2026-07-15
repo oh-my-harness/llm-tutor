@@ -12,7 +12,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::SharedEventSink;
 use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
-use tutor_tools::WebSearchConfig;
+use tutor_tools::{ReadMemoryTool, WebSearchConfig, WriteMemoryTool};
 
 /// Supported teaching modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +59,7 @@ pub struct CapabilityRouter {
     pub web_search: Option<WebSearchConfig>,
     pub product_tools: Vec<Arc<dyn Tool>>,
     pub workflow_root: Option<PathBuf>,
+    pub memory_root: Option<PathBuf>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -74,6 +75,7 @@ impl CapabilityRouter {
             web_search: None,
             product_tools: vec![],
             workflow_root: None,
+            memory_root: None,
             client: None,
         }
     }
@@ -118,6 +120,25 @@ impl CapabilityRouter {
         self
     }
 
+    pub fn with_memory_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.memory_root = Some(root.into());
+        self
+    }
+
+    pub(crate) fn read_memory_tool(&self) -> ReadMemoryTool {
+        self.memory_root
+            .clone()
+            .map(ReadMemoryTool::with_root)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn write_memory_tool(&self) -> WriteMemoryTool {
+        self.memory_root
+            .clone()
+            .map(WriteMemoryTool::with_root)
+            .unwrap_or_default()
+    }
+
     /// Returns the injected client or builds one from `LlmConfig`.
     pub(crate) fn make_client(&self) -> Arc<dyn Provider> {
         if let Some(c) = &self.client {
@@ -155,6 +176,7 @@ impl CapabilityRouter {
                 .with_event_sink(self.event_sink.clone())
                 .with_web_search(self.web_search.clone())
                 .with_workflow_root(self.workflow_root.clone())
+                .with_memory_root(self.memory_root.clone())
                 .with_client(client);
                 orchestrator.run(None).await
             }

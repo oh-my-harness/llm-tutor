@@ -206,6 +206,10 @@ impl MemoryStore {
         store
     }
 
+    pub fn root_path(&self) -> &Path {
+        &self.root
+    }
+
     pub fn list(&self) -> Result<Vec<MemoryFile>> {
         self.ensure_skeleton()?;
         let mut files = Vec::new();
@@ -551,7 +555,9 @@ impl MemoryStore {
             return if accepted_change_ids.is_empty() {
                 Ok(current)
             } else {
-                Err(anyhow!("none of the accepted memory change ids matched the review"))
+                Err(anyhow!(
+                    "none of the accepted memory change ids matched the review"
+                ))
             };
         }
         let target = target_catalog(target_path, current.markdown.clone());

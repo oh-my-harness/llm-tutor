@@ -12,7 +12,7 @@ use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
 use llm_harness_runtime::workflow::model::{StepResult, Transition};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
-use tutor_tools::{RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool, WriteMemoryTool};
+use tutor_tools::{RagSearchTool, WebFetchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
 use crate::chat::{assistant_message, user_message};
@@ -163,8 +163,8 @@ fn build_research_engine(
         "tutor.research.prepare",
         Arc::new(PrepareResearchWorkflowExecutor { input }),
     )
-    .with_tool(Arc::new(ReadMemoryTool::new()))
-    .with_tool(Arc::new(WriteMemoryTool::new()))
+    .with_tool(Arc::new(router.read_memory_tool()))
+    .with_tool(Arc::new(router.write_memory_tool()))
     .with_tool(Arc::new(rag_search_tool(router)))
     .with_tool(Arc::new(match router.web_search.clone() {
         Some(config) => WebSearchTool::with_config(config),

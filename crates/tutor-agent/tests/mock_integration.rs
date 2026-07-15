@@ -152,16 +152,33 @@ async fn chat_tool_call_then_text() {
 
 #[tokio::test]
 async fn chat_can_call_read_memory_then_text() {
+    let memory_dir = tempfile::tempdir().unwrap();
+    let memory_root = memory_dir.path().join("memory");
+    std::fs::create_dir_all(memory_root.join("L3")).unwrap();
+    std::fs::write(
+        memory_root.join("L3/profile.md"),
+        "# Student profile\n\n- Learns best from worked examples.",
+    )
+    .unwrap();
+    let sink = Arc::new(TraceRecorder::default());
     let responses = vec![
         MockResponse::tool_use("use-memory", "read_memory", r#"{"scope":"profile"}"#),
         MockResponse::text("I will adapt the next explanation to your profile."),
     ];
-    let router = make_router(responses, make_governance(None));
+    let router = make_router(responses, make_governance(None))
+        .with_memory_root(memory_root)
+        .with_event_sink(sink.clone());
     let answer = router
         .run(Capability::Chat, "review this based on my profile")
         .await
         .unwrap();
     assert!(answer.contains("profile"));
+    assert!(sink.events().iter().any(|(kind, data)| {
+        kind == "tool_result"
+            && data["tool"] == "read_memory"
+            && data["details"]["empty"] == false
+            && data["details"]["files"][0] == "L3/profile.md"
+    }));
 }
 
 #[tokio::test]

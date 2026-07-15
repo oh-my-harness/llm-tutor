@@ -32,6 +32,7 @@ pub struct SolveOrchestrator {
     web_search: Option<WebSearchConfig>,
     client: Option<Arc<dyn Provider>>,
     workflow_root: Option<PathBuf>,
+    memory_root: Option<PathBuf>,
 }
 
 impl SolveOrchestrator {
@@ -50,6 +51,7 @@ impl SolveOrchestrator {
             web_search: None,
             client: None,
             workflow_root: None,
+            memory_root: None,
         }
     }
 
@@ -71,6 +73,11 @@ impl SolveOrchestrator {
 
     pub fn with_workflow_root(mut self, root: Option<PathBuf>) -> Self {
         self.workflow_root = root;
+        self
+    }
+
+    pub fn with_memory_root(mut self, root: Option<PathBuf>) -> Self {
+        self.memory_root = root;
         self
     }
 
@@ -180,8 +187,14 @@ impl SolveOrchestrator {
         };
 
         vec![
-            Arc::new(ReadMemoryTool::new()),
-            Arc::new(WriteMemoryTool::new()),
+            Arc::new(match self.memory_root.clone() {
+                Some(root) => ReadMemoryTool::with_root(root),
+                None => ReadMemoryTool::new(),
+            }),
+            Arc::new(match self.memory_root.clone() {
+                Some(root) => WriteMemoryTool::with_root(root),
+                None => WriteMemoryTool::new(),
+            }),
             Arc::new(RagSearchTool::new()),
             Arc::new(match self.web_search.clone() {
                 Some(config) => WebSearchTool::with_config(config),

@@ -8,9 +8,7 @@ use llm_harness_types::{
     ContentBlock, HarnessError, StopReason, UserMessage,
 };
 use tokio_util::sync::CancellationToken;
-use tutor_tools::{
-    CodeExecTool, RagSearchTool, ReadMemoryTool, WebFetchTool, WebSearchTool, WriteMemoryTool,
-};
+use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
 
 use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
@@ -221,8 +219,8 @@ async fn run_chat_inner(
     };
 
     let mut tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
-        Arc::new(ReadMemoryTool::new()),
-        Arc::new(WriteMemoryTool::new()),
+        Arc::new(router.read_memory_tool()),
+        Arc::new(router.write_memory_tool()),
         Arc::new(rag_tool),
         Arc::new(match router.web_search.clone() {
             Some(config) => WebSearchTool::with_config(config),
