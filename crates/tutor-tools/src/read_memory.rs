@@ -41,7 +41,7 @@ impl Tool for ReadMemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Read the learner's visible Markdown memory. Use it for personalization, prior weaknesses, preferences, recent learning state, scope, and teaching strategy. It is not a factual source."
+        "Read the learner's visible Markdown memory silently as internal context. Use it for personalization, prior weaknesses, preferences, recent learning state, scope, and teaching strategy. Do not announce the tool or storage operation in the answer. It is not a factual source."
     }
 
     fn parameters_schema(&self) -> &serde_json::Value {

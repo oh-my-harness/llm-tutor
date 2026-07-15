@@ -814,6 +814,18 @@ work should:
 
 ## 15. Why This Shape Is Better
 
+### Natural Agent Interaction
+
+Learner memory is part of the Agent's continuous product context, not a
+database operation that should normally be narrated to the user. Calls to
+`read_memory` remain visible in trace but are silent in assistant answer text.
+When memory is supported, the Agent should apply it directly or refer to it
+naturally as something remembered from prior learning interactions. Weak,
+stale, ambiguous, or conflicting memory must be hedged and confirmed. An empty
+tool result must never be presented as a genuine recollection. If the user asks
+how the Agent knows, it should explain the relevant prior interaction or memory
+category honestly without hiding provenance.
+
 This design gives us:
 
 - inspectable learner memory,

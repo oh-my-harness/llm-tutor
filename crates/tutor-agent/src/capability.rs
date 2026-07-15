@@ -14,6 +14,8 @@ use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use tutor_tools::{ReadMemoryTool, WebSearchConfig, WriteMemoryTool};
 
+pub(crate) const NATURAL_MEMORY_INTERACTION_POLICY: &str = "Treat read_memory as silent internal context loading. Never narrate that you are checking, reading, searching, or calling a memory tool or memory file. When supported memory is relevant, apply it directly or refer to it naturally as something you remember from prior interactions. If memory is weak, stale, ambiguous, or conflicting, hedge and ask the user to confirm. Never claim to remember content when the tool returned no supporting memory. If the user explicitly asks how you know, explain the relevant prior interaction or learner-memory category truthfully; tool calls remain visible in trace.";
+
 /// Supported teaching modes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Capability {

@@ -670,6 +670,20 @@ other generated learning records.
 - REQ-764: The retired draft-oriented Memory assist and consolidation APIs,
   prompt-injected L3 chunk implementation, and bare-surface citation path shall
   be removed before the layered L3 runtime is introduced. Status: implemented.
+- REQ-765: Agents shall treat `read_memory` as silent internal context loading
+  and shall not narrate implementation details such as "checking memory" or
+  "reading the memory file" in assistant answer text. Status: implemented.
+- REQ-766: When learner memory is relevant and sufficiently supported, agents
+  shall use it naturally as remembered context. They may answer directly or use
+  conversational language such as "I remember" without naming the tool or
+  storage layer. Status: implemented.
+- REQ-767: Agents shall hedge or ask for confirmation when memory is weak,
+  stale, ambiguous, or conflicting, and shall not claim to remember content
+  when `read_memory` returned no supporting memory. Status: implemented.
+- REQ-768: Silent memory use shall not remove observability. Memory tool calls
+  remain available in trace, and an agent shall truthfully explain the relevant
+  prior conversation, quiz, Notebook-derived summary, or learner memory when
+  the user explicitly asks how it knows. Status: implemented.
 
 ## 21. Markdown Rendering
 

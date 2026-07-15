@@ -2,6 +2,7 @@ use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, S
 use llm_harness_runtime::workflow::plan::validate_workflow;
 use llm_harness_types::SYNC_SPAWN_TOOL_NAME;
 
+use crate::capability::NATURAL_MEMORY_INTERACTION_POLICY;
 use crate::error::{Result, TutorError};
 
 pub const DEEP_SOLVE_WORKFLOW_ID: &str = "tutor.deep_solve";
@@ -30,13 +31,16 @@ pub fn deep_solve_workflow() -> Workflow {
             Step::llm(
                 "solve",
                 "Solve steps",
-                "Read the workflow Context and prior step history, then execute the current solve plan. \
+                format!(
+                    "Read the workflow Context and prior step history, then execute the current solve plan. \
                  Use available tools when verification, calculation, memory, RAG, or fresh evidence is needed. \
                  For non-trivial numeric calculations, approximations, transcendental functions, statistics, \
                  or simulations, use code_exec to compute or verify the result. \
+                 {NATURAL_MEMORY_INTERACTION_POLICY} \
                  When this step is complete, call submit_step_result with a JSON object. \
-                 Use {\"route\":\"finish\",\"summary\":\"...\"} when the work is ready for synthesis. \
-                 Use {\"route\":\"replan\",\"reason\":\"...\"} only if the current plan is fundamentally wrong.",
+                 Use {{\"route\":\"finish\",\"summary\":\"...\"}} when the work is ready for synthesis. \
+                 Use {{\"route\":\"replan\",\"reason\":\"...\"}} only if the current plan is fundamentally wrong."
+                ),
                 vec![
                     "rag_search".into(),
                     "read_memory".into(),
@@ -49,8 +53,10 @@ pub fn deep_solve_workflow() -> Workflow {
             Step::llm(
                 "synthesize",
                 "Synthesize answer",
-                "Read the workflow Context and prior step history. Synthesize the verified work into a clear final answer for the learner. \
-                 Start with the direct answer, then provide the explanation.",
+                format!(
+                    "Read the workflow Context and prior step history. Synthesize the verified work into a clear final answer for the learner. \
+                 Start with the direct answer, then provide the explanation. {NATURAL_MEMORY_INTERACTION_POLICY}"
+                ),
                 vec![],
             ),
         ],
