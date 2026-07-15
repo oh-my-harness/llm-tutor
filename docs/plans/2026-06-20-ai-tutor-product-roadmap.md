@@ -1,6 +1,6 @@
 # AI Tutor Product Roadmap
 
-> Status: in progress | Date: 2026-06-20 | Last updated: 2026-06-30 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
+> Status: in progress | Date: 2026-06-20 | Last updated: 2026-07-15 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
 
 > Superseding decision (2026-07-14): Books are retired and Research reports use
 > Notebook as their only durable destination. Historical Book milestones below
@@ -17,6 +17,8 @@ prefer the newer focused plans:
   `docs/specs/2026-06-26-product-requirements-spec.md`
 - Desktop release hardening:
   `docs/plans/2026-06-28-tauri-desktop-release-plan.md`
+- Persistent tutor product design:
+  `docs/specs/2026-07-15-persistent-tutor-design.md`
 
 The original 2026-06-13 Phase 1-5 implementation checklists are historical and
 have been superseded by the current product plans.
@@ -260,6 +262,30 @@ Acceptance:
 - A new user can understand the app without reading source docs.
 - Common failures produce actionable messages.
 
+### Phase 7: Persistent Tutors
+
+Goal: make tutor identity the entry point that connects conversations,
+capabilities, resources, and memory.
+
+- [ ] Add persistent tutor profiles with role, goal, model defaults, capability
+  policy, and resource permissions.
+- [ ] Add tutor selection to the new-conversation empty state and retain a
+  Temporary Assistant path.
+- [ ] Bind each tutor conversation to an immutable `tutor_id` and runtime
+  session ID.
+- [ ] Let authorized tutors read shared Learner Memory.
+- [ ] Add private Tutor Memory for commitments, open loops, lesson plans,
+  reflections, and strategy.
+- [ ] Add tutor management, memory reset, and bounded handoff between tutors.
+
+Acceptance:
+
+- A user starts a conversation by choosing who to learn with.
+- The same tutor can continue its goals, promises, and open learning threads
+  across multiple sessions.
+- Chat, Research, Quiz, and Deep Solve remain reusable capabilities rather than
+  duplicated tutor types.
+
 ## 5. Later Expansion
 
 After the MVP loop works, consider larger DeepTutor-like surfaces:
@@ -268,7 +294,7 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 |---|---|
 | Deeper Research | Current Research MVP exists; needs robust citations, report store, regeneration, and parallel task orchestration |
 | Automatic Memory Consolidation | Start with manual Markdown consolidation first; automatic triggers need trust and good review UX |
-| TutorBot | Needs auth, workspace isolation, and channel security |
+| External TutorBot channels | Persistent local tutors come first; external channels still need auth, workspace isolation, and channel security |
 | Multi-user | Changes storage, permissions, and deployment model |
 | Math Animator | Requires media rendering pipeline and visual QA |
 
