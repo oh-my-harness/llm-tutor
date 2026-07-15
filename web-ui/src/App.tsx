@@ -9,7 +9,7 @@ import { SettingsPage } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
 import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
-import { PlaceholderPage } from './components/PlaceholderPage'
+import { TutorPage } from './components/TutorPage'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
@@ -42,6 +42,8 @@ import {
   titleFromMarkdown,
 } from './notebookSave'
 import type { NotebookVaultInfo, SaveToNotebookResult } from './notebookSave'
+import { fetchTutors, type TutorProfile, type TutorSummary } from './tutorTypes'
+import { tutorBindingForCreate } from './tutorSession'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
@@ -114,6 +116,8 @@ interface RecentSession {
   title: string
   activeRun?: SessionRunSummary | null
   pinned?: boolean
+  tutorId?: string | null
+  tutor?: TutorSummary | null
 }
 
 interface SessionRunSummary {
@@ -137,10 +141,14 @@ interface SessionListResponse {
     title?: string
     name?: string | null
     active_run?: SessionRunSummary | null
+    tutor_id?: string | null
+    tutor?: TutorSummary | null
   }>
 }
 
 interface SessionDetailResponse {
+  tutor_id?: string | null
+  tutor?: TutorSummary | null
   capability?: Capability
   kb?: string | null
   notebook_enabled?: boolean
@@ -183,6 +191,8 @@ export default function App() {
   const [capability, setCapability] = useState<Capability>('chat')
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [selectedTutorId, setSelectedTutorId] = useState<string | null | undefined>(undefined)
+  const [tutors, setTutors] = useState<TutorProfile[]>([])
   const activeSessionIdRef = useRef<string | null>(null)
   const sessionSelectionVersionRef = useRef(0)
   const activateSession = useCallback((id: string | null) => {
@@ -472,8 +482,14 @@ export default function App() {
       title: session.title || session.name || 'New session',
       activeRun: session.active_run ?? null,
       pinned: pinnedSessionIds.has(session.id),
+      tutorId: session.tutor_id ?? null,
+      tutor: session.tutor ?? null,
     }))))
   }, [pinnedSessionIds])
+
+  const refreshTutors = useCallback(async () => {
+    setTutors(await fetchTutors())
+  }, [])
 
   const reconcileActiveSessionRuns = useCallback(async () => {
     const res = await fetch('/api/sessions')
@@ -581,10 +597,15 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       pushStatus({ kind: 'error', label: 'Error', detail: message })
     })
-  }, [refreshSessions, refreshKnowledgeBases, refreshNotebookFolders, pushStatus])
+    refreshTutors().catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      pushStatus({ kind: 'error', label: '导师加载失败', detail: message })
+    })
+  }, [refreshSessions, refreshKnowledgeBases, refreshNotebookFolders, refreshTutors, pushStatus])
 
   const handleSend = useCallback(async (text: string, attachments: ChatAttachment[] = [], mentions: SpaceMention[] = []) => {
     try {
+      const tutorBinding = sessionId ? null : tutorBindingForCreate(selectedTutorId)
       const content = buildMessageContentWithAttachments(text, attachments)
       const displayText = text.trim() || (attachments.length > 0 ? `Sent ${attachments.length} attachment(s)` : `Referenced ${mentions.length} Space item(s)`)
       let sid = sessionId
@@ -596,6 +617,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             capability,
+            ...tutorBinding,
             kb,
             notebook_enabled: selectedNotebookEnabled,
             llm: settingsForSession(llmSettings),
@@ -611,7 +633,12 @@ export default function App() {
         createdSession = true
         pendingSessionSendRef.current = { sessionId: createdSessionId, content, mentions }
         activateSession(createdSessionId)
-        promoteRecentSession(setRecentSessions, createdSessionId, sessionTitleFromMessage(displayText))
+        promoteRecentSession(
+          setRecentSessions,
+          createdSessionId,
+          sessionTitleFromMessage(displayText),
+          selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) ?? null : null,
+        )
       } else {
         promoteRecentSession(setRecentSessions, sid, sessionTitleFromMessage(displayText))
       }
@@ -626,7 +653,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, refreshSessions, messages, activateSession])
+  }, [sessionId, selectedTutorId, tutors, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, activateSession])
 
   const handleStopGeneration = useCallback(() => {
     if (!running) return
@@ -680,6 +707,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           capability,
+          ...tutorBindingForCreate(selectedTutorId),
           kb: selectedKnowledgeBaseId || null,
           notebook_enabled: selectedNotebookEnabled,
           llm: settingsForSession(llmSettings),
@@ -693,7 +721,12 @@ export default function App() {
       const nextSessionId = data.id as string
 
       activateSession(nextSessionId)
-      promoteRecentSession(setRecentSessions, nextSessionId, sessionTitleFromMessage(nextText))
+      promoteRecentSession(
+        setRecentSessions,
+        nextSessionId,
+        sessionTitleFromMessage(nextText),
+        selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) ?? null : null,
+      )
       setMessages([{ role: 'user', text: nextText }])
       setTraceEntries([])
       setLatestUsage(null)
@@ -716,7 +749,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [capability, llmSettings, messages, pushStatus, refreshSessions, running, selectedKnowledgeBaseId, selectedNotebookEnabled, send, sessionId, activateSession])
+  }, [capability, llmSettings, messages, pushStatus, running, selectedKnowledgeBaseId, selectedNotebookEnabled, selectedTutorId, tutors, send, sessionId, activateSession])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -919,11 +952,15 @@ export default function App() {
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
     persistSettings(nextSettings)
-    if (settingsRequireSessionReset(llmSettings, nextSettings)) activateSession(null)
+    if (settingsRequireSessionReset(llmSettings, nextSettings)) {
+      activateSession(null)
+      setSelectedTutorId(undefined)
+    }
   }
 
   const startNewChat = useCallback(() => {
     activateSession(null)
+    setSelectedTutorId(undefined)
     setMessages([])
     setStreamingText('')
     streamingRef.current = ''
@@ -941,6 +978,16 @@ export default function App() {
     setRunning(false)
     setView('chat')
   }, [activateSession])
+
+  const handleTutorSelect = useCallback((tutorId: string | null) => {
+    setSelectedTutorId(tutorId)
+    const nextCapability = tutorId
+      ? tutors.find((item) => item.id === tutorId)?.default_capability
+      : 'chat'
+    if (nextCapability && isCapability(nextCapability)) {
+      setCapability(nextCapability)
+    }
+  }, [tutors])
 
   const handleNavigate = useCallback((nextView: AppView) => {
     if (nextView === 'chat') {
@@ -1100,6 +1147,7 @@ export default function App() {
         })
         setTraceEntries(restoredTrace)
         setLatestUsage(data.latest_usage ?? null)
+        setSelectedTutorId(data.tutor_id ?? null)
         if (data.active_run) {
           setRunning(true)
           pushStatus({
@@ -1187,6 +1235,7 @@ export default function App() {
     setRecentSessions((prev) => prev.filter((item) => item.id !== id))
     if (sessionId === id) {
       activateSession(null)
+      setSelectedTutorId(undefined)
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
@@ -1278,6 +1327,7 @@ export default function App() {
   }, [handleSelectSession, pushStatus])
 
   const chatIsEmpty = view === 'chat' && messages.length === 0 && !streamingText && !sessionId
+  const activeTutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) ?? null : null
   const t = (key: TranslationKey) => translate(llmSettings.language, key)
 
   return (
@@ -1302,7 +1352,9 @@ export default function App() {
             <header className="flex items-center gap-4 bg-white px-6 py-3">
               <div>
                 <h1 className="text-lg font-semibold text-gray-900">{t('chat.title')}</h1>
-                <p className="text-xs text-gray-500">{t('chat.subtitle')}</p>
+                <p className="text-xs text-gray-500">
+                  {selectedTutorId === undefined ? t('chat.subtitle') : activeTutor?.name ?? '临时助手'}
+                </p>
               </div>
               <div className="ml-auto">
                 <BudgetPanel spent={budgetSpent} limit={llmSettings.budgetLimitUsd} warning={budgetWarning} />
@@ -1320,6 +1372,10 @@ export default function App() {
                   knowledgeBases={knowledgeBases}
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   selectedNotebookEnabled={selectedNotebookEnabled}
+                  tutors={tutors}
+                  selectedTutorId={selectedTutorId}
+                  onTutorSelect={handleTutorSelect}
+                  onManageTutors={() => setView('tutor')}
                   onSend={handleSend}
                   onStop={handleStopGeneration}
                   onEditUserMessage={handleEditUserMessage}
@@ -1342,7 +1398,7 @@ export default function App() {
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   onSourceNavigate={handleSourceNavigate}
-                  disabled={false}
+                  disabled={!sessionId && selectedTutorId === undefined}
                   running={running}
                 />
               </main>
@@ -1364,9 +1420,17 @@ export default function App() {
         )}
 
         {view === 'tutor' && (
-          <PlaceholderPage
-            title="Tutor Agent"
-            description="A guided learning entry point for explanations, mistake analysis, step-by-step follow-up, and study path suggestions."
+          <TutorPage
+            tutors={tutors}
+            onChanged={refreshTutors}
+            onStartConversation={(tutorId) => {
+              startNewChat()
+              const tutor = tutors.find((item) => item.id === tutorId)
+              setSelectedTutorId(tutorId)
+              if (tutor?.default_capability && isCapability(tutor.default_capability)) {
+                setCapability(tutor.default_capability)
+              }
+            }}
           />
         )}
 
@@ -1867,6 +1931,7 @@ function promoteRecentSession(
   setRecentSessions: Dispatch<SetStateAction<RecentSession[]>>,
   id: string,
   title: string,
+  tutor: TutorSummary | null | undefined = undefined,
 ) {
   setRecentSessions((prev) => {
     const existing = prev.find((session) => session.id === id)
@@ -1875,6 +1940,8 @@ function promoteRecentSession(
       title,
       activeRun: existing?.activeRun ?? null,
       pinned: existing?.pinned ?? false,
+      tutorId: tutor === undefined ? existing?.tutorId ?? null : tutor?.id ?? null,
+      tutor: tutor === undefined ? existing?.tutor ?? null : tutor,
     }
     const rest = prev.filter((session) => session.id !== id)
     return nextSession.pinned

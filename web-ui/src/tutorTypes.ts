@@ -1,0 +1,86 @@
+export interface TutorResourcePermissions {
+  knowledge_base_ids: string[]
+  notebook: boolean
+  space: boolean
+}
+
+export interface TutorProfile {
+  id: string
+  name: string
+  role: string
+  goal: string
+  avatar?: string | null
+  default_model_config_id?: string | null
+  default_capability: string
+  allowed_capabilities: string[]
+  learner_memory_access: boolean
+  resource_permissions: TutorResourcePermissions
+  autonomous_memory: boolean
+  built_in: boolean
+  archived: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface TutorSummary {
+  id: string
+  name: string
+  avatar?: string | null
+  built_in?: boolean
+  archived?: boolean
+}
+
+export interface TutorDraft {
+  name: string
+  role: string
+  goal: string
+  default_capability: string
+  allowed_capabilities: string[]
+  learner_memory_access: boolean
+  autonomous_memory: boolean
+  resource_permissions: TutorResourcePermissions
+}
+
+export const tutorCapabilities = ['chat', 'deep_solve', 'quiz', 'research', 'organize'] as const
+
+export async function fetchTutors(): Promise<TutorProfile[]> {
+  const response = await fetch('/api/tutors')
+  const data = await readJson(response)
+  if (!response.ok) throw new Error(apiError(data, response.status))
+  return Array.isArray(data.tutors) ? data.tutors as TutorProfile[] : []
+}
+
+export async function createTutor(draft: TutorDraft): Promise<TutorProfile> {
+  return mutateTutor('/api/tutors', 'POST', draft)
+}
+
+export async function updateTutor(id: string, draft: Partial<TutorDraft>): Promise<TutorProfile> {
+  return mutateTutor(`/api/tutors/${encodeURIComponent(id)}`, 'PATCH', draft)
+}
+
+export async function archiveTutor(id: string): Promise<void> {
+  const response = await fetch(`/api/tutors/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!response.ok) {
+    const data = await readJson(response)
+    throw new Error(apiError(data, response.status))
+  }
+}
+
+async function mutateTutor(url: string, method: 'POST' | 'PATCH', body: unknown): Promise<TutorProfile> {
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await readJson(response)
+  if (!response.ok) throw new Error(apiError(data, response.status))
+  return data as unknown as TutorProfile
+}
+
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  return response.json().catch(() => ({})) as Promise<Record<string, unknown>>
+}
+
+function apiError(data: Record<string, unknown>, status: number) {
+  return typeof data.error === 'string' ? data.error : `HTTP ${status}`
+}

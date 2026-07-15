@@ -13,16 +13,19 @@ use crate::knowledge_store::KnowledgeStore;
 use crate::session::{
     LlmSessionConfig, SearchSessionConfig, SessionPool, message_role, message_text,
 };
+use crate::tutor_store::{TutorProfile, TutorStore};
 
 #[derive(Clone)]
 pub struct SessionsState {
     pool: Arc<SessionPool>,
     knowledge: Arc<KnowledgeStore>,
+    tutors: Arc<TutorStore>,
 }
 
 #[derive(Deserialize)]
 struct CreateSessionRequest {
-    capability: String,
+    capability: Option<String>,
+    tutor_id: Option<String>,
     kb: Option<String>,
     notebook_enabled: Option<bool>,
     llm: Option<CreateLlmConfig>,
@@ -58,6 +61,7 @@ struct CreateSearchConfig {
 
 #[derive(Deserialize)]
 struct UpdateSessionRequest {
+    tutor_id: Option<String>,
     capability: Option<String>,
     name: Option<String>,
     kb: Option<String>,
@@ -102,6 +106,43 @@ async fn create_session(
     });
     let search = req.search.and_then(search_config_from_request);
     let notebook_enabled = req.notebook_enabled.unwrap_or(false);
+    let tutor = match req.tutor_id.as_deref() {
+        Some(id) => match state.tutors.get_available(id) {
+            Some(tutor) => Some(tutor),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "tutor not found or archived" })),
+                )
+                    .into_response();
+            }
+        },
+        None => None,
+    };
+    let capability = req
+        .capability
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| tutor.as_ref().map(|item| item.default_capability.clone()))
+        .unwrap_or_else(|| "chat".into());
+    if capability
+        .parse::<tutor_agent::capability::Capability>()
+        .is_err()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "unsupported capability" })),
+        )
+            .into_response();
+    }
+    if let Some(tutor) = &tutor
+        && !tutor.allowed_capabilities.contains(&capability)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "capability is not allowed for this tutor" })),
+        )
+            .into_response();
+    }
     let (kb, embedding) = match knowledge_binding(&state.knowledge, req.kb, notebook_enabled) {
         Ok(binding) => binding,
         Err(err) => {
@@ -113,8 +154,9 @@ async fn create_session(
         }
     };
     match pool
-        .create(
-            &req.capability,
+        .create_with_tutor(
+            tutor.as_ref().map(|item| item.id.clone()),
+            &capability,
             kb,
             notebook_enabled,
             llm,
@@ -138,6 +180,11 @@ async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResp
         Ok(sessions) => {
             let mut items = Vec::with_capacity(sessions.len());
             for session in sessions {
+                let entry = pool.ensure_entry(&session.id).await;
+                let tutor = entry
+                    .as_ref()
+                    .and_then(|item| item.tutor_id.as_deref())
+                    .and_then(|id| state.tutors.get(id));
                 let title = match session.name.clone() {
                     Some(name) if !name.trim().is_empty() => name,
                     _ => pool
@@ -155,6 +202,8 @@ async fn list_sessions(State(state): State<Arc<SessionsState>>) -> impl IntoResp
                     "created_at": session.created_at,
                     "updated_at": session.updated_at,
                     "model": session.model,
+                    "tutor_id": entry.as_ref().and_then(|item| item.tutor_id.clone()),
+                    "tutor": tutor.as_ref().map(tutor_summary),
                     "active_run": active_run.map(|run| serde_json::json!({
                         "run_id": run.run_id,
                         "session_id": run.session_id,
@@ -306,6 +355,8 @@ async fn get_session(
         StatusCode::OK,
         Json(serde_json::json!({
             "id": entry.id,
+            "tutor_id": entry.tutor_id,
+            "tutor": entry.tutor_id.as_deref().and_then(|id| state.tutors.get(id)).as_ref().map(tutor_summary),
             "capability": entry.capability,
             "kb": entry.kb,
             "notebook_enabled": entry.notebook_enabled,
@@ -424,6 +475,15 @@ async fn update_session(
     Json(req): Json<UpdateSessionRequest>,
 ) -> impl IntoResponse {
     let pool = &state.pool;
+    if req.tutor_id.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({ "error": "tutor identity is immutable; create a new session" }),
+            ),
+        )
+            .into_response();
+    }
     if let Some(capability) = req.capability {
         if capability
             .parse::<tutor_agent::capability::Capability>()
@@ -436,6 +496,31 @@ async fn update_session(
                 .into_response();
         }
 
+        let Some(entry) = pool.ensure_entry(&id).await else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        };
+        if let Some(tutor_id) = entry.tutor_id.as_deref() {
+            let Some(tutor) = state.tutors.get_available(tutor_id) else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "bound tutor not found or archived" })),
+                )
+                    .into_response();
+            };
+            if !tutor.allowed_capabilities.contains(&capability) {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        serde_json::json!({ "error": "capability is not allowed for this tutor" }),
+                    ),
+                )
+                    .into_response();
+            }
+        }
         if !pool.set_capability(&id, &capability) {
             return (
                 StatusCode::NOT_FOUND,
@@ -786,8 +871,16 @@ async fn delete_session(
     }
 }
 
-pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -> Router {
-    let state = Arc::new(SessionsState { pool, knowledge });
+pub fn sessions_router(
+    pool: Arc<SessionPool>,
+    knowledge: Arc<KnowledgeStore>,
+    tutors: Arc<TutorStore>,
+) -> Router {
+    let state = Arc::new(SessionsState {
+        pool,
+        knowledge,
+        tutors,
+    });
     Router::new()
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route(
@@ -806,6 +899,16 @@ pub fn sessions_router(pool: Arc<SessionPool>, knowledge: Arc<KnowledgeStore>) -
             post(append_message_citations),
         )
         .with_state(state)
+}
+
+fn tutor_summary(tutor: &TutorProfile) -> serde_json::Value {
+    serde_json::json!({
+        "id": tutor.id,
+        "name": tutor.name,
+        "avatar": tutor.avatar,
+        "built_in": tutor.built_in,
+        "archived": tutor.archived,
+    })
 }
 
 fn knowledge_binding(
@@ -847,5 +950,87 @@ fn session_title_from_message(text: &str) -> String {
         normalized
     } else {
         format!("{}...", normalized.chars().take(18).collect::<String>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    fn test_app(root: &std::path::Path) -> Router {
+        sessions_router(
+            SessionPool::new_with_root(root.join("sessions")),
+            KnowledgeStore::new_with_path(root.join("knowledge.json")),
+            Arc::new(TutorStore::new_with_root(root.join("tutors"))),
+        )
+    }
+
+    #[tokio::test]
+    async fn creates_tutor_bound_session_and_rejects_identity_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path());
+        let created = app
+            .clone()
+            .oneshot(
+                Request::post("/api/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"tutor_id":"general-tutor","capability":"chat"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(created.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let id = created["id"].as_str().unwrap();
+
+        let detail = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/sessions/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(detail.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(detail["tutor_id"], "general-tutor");
+        assert_eq!(detail["tutor"]["name"], "通用导师");
+
+        let update = app
+            .oneshot(
+                Request::patch(format!("/api/sessions/{id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"tutor_id":"another-tutor"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(update.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_tutor_without_creating_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let response = test_app(dir.path())
+            .oneshot(
+                Request::post("/api/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"tutor_id":"missing","capability":"chat"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

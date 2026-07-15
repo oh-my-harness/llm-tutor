@@ -267,15 +267,15 @@ Acceptance:
 Goal: make tutor identity the entry point that connects conversations,
 capabilities, resources, and memory.
 
-Status: planned. The executable task breakdown, architecture boundaries, test
+Status: in progress. The executable task breakdown, architecture boundaries, test
 matrix, and release gates are defined in
 `2026-07-15-persistent-tutor-implementation-plan.md`.
 
 - [ ] Add persistent tutor profiles with role, goal, model defaults, capability
   policy, and resource permissions.
-- [ ] Add tutor selection to the new-conversation empty state and retain a
+- [x] Add tutor selection to the new-conversation empty state and retain a
   Temporary Assistant path.
-- [ ] Bind each tutor conversation to an immutable `tutor_id` and runtime
+- [x] Bind each tutor conversation to an immutable `tutor_id` and runtime
   session ID.
 - [ ] Let authorized tutors read shared Learner Memory.
 - [ ] Add private Tutor Memory for commitments, open loops, lesson plans,

@@ -18,6 +18,7 @@ mod session;
 mod settings_store;
 mod space_tool;
 mod stream;
+mod tutor_store;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,6 +42,9 @@ async fn main() -> anyhow::Result<()> {
     ));
     let settings = std::sync::Arc::new(settings_store::SettingsStore::new_with_path(
         config.data_dir.join("settings.json"),
+    ));
+    let tutors = std::sync::Arc::new(tutor_store::TutorStore::new_with_root(
+        config.data_dir.join("tutors"),
     ));
     let rag_root = config.data_dir.join("rag");
 
@@ -76,9 +80,11 @@ async fn main() -> anyhow::Result<()> {
             config.data_dir.join("workflow-sessions").join("memory"),
         ))
         .merge(routes::settings::settings_router(settings))
+        .merge(routes::tutors::tutors_router(tutors.clone()))
         .merge(routes::sessions::sessions_router(
             pool.clone(),
             knowledge.clone(),
+            tutors.clone(),
         ))
         .merge(routes::ws::ws_router(
             pool.clone(),

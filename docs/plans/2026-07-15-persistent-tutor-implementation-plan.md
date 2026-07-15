@@ -4,6 +4,12 @@
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
+Implementation progress (2026-07-15): Phase 0/1 identity slice is in progress.
+Tutor CRUD, General Tutor seeding, immutable session binding, the Chat chooser,
+session restoration, and the initial Tutor management page are implemented.
+Default model resolution, recent-tutor ranking, avatar presentation, and runtime
+role/context injection remain pending.
+
 ## 1. Objective
 
 Implement persistent tutors as the identity layer that connects conversations,
@@ -148,25 +154,25 @@ Backend tasks:
 
 - [ ] Add `crates/tutor-web/src/tutor_store.rs` with typed profile, permission,
   memory, and validation models.
-- [ ] Seed the built-in General Tutor idempotently.
-- [ ] Add atomic create, list, get, update, archive/delete, and reset operations.
+- [x] Seed the built-in General Tutor idempotently.
+- [x] Add atomic create, list, get, update, archive/delete, and reset operations.
 - [ ] Reject duplicate IDs, blank roles, unknown capabilities, and dangling
   model configuration IDs.
-- [ ] Add `crates/tutor-web/src/routes/tutors.rs` and mount it from `main.rs`.
-- [ ] Expose `GET/POST /api/tutors` and
+- [x] Add `crates/tutor-web/src/routes/tutors.rs` and mount it from `main.rs`.
+- [x] Expose `GET/POST /api/tutors` and
   `GET/PATCH/DELETE /api/tutors/:id`.
-- [ ] Expose `POST /api/tutors/:id/reset-profile` separately from memory reset.
+- [x] Expose `POST /api/tutors/:id/reset-profile` separately from memory reset.
 
 Frontend contract tasks:
 
-- [ ] Add tutor DTOs and pure mapping helpers outside the main App component.
+- [x] Add tutor DTOs and pure mapping helpers outside the main App component.
 - [ ] Add localized validation and API error labels.
 
 Tests:
 
-- [ ] Store restart round trip and built-in seed idempotence.
-- [ ] Validation and non-deletable built-in tutor tests.
-- [ ] Route tests for CRUD status codes and redacted configuration output.
+- [x] Store restart round trip and built-in seed idempotence.
+- [x] Validation and non-deletable built-in tutor tests.
+- [x] Route tests for CRUD status codes and redacted configuration output.
 
 Exit criteria:
 
@@ -180,32 +186,32 @@ Goal: complete the smallest end-to-end tutor-bound conversation path.
 
 Backend tasks:
 
-- [ ] Add immutable `tutor_id` to `SessionEntry`, `ProductSessionMetadata`, and
+- [x] Add immutable `tutor_id` to `SessionEntry`, `ProductSessionMetadata`, and
   session list/detail responses.
-- [ ] Extend `POST /api/sessions` with optional `tutor_id` and validate it against
+- [x] Extend `POST /api/sessions` with optional `tutor_id` and validate it against
   `TutorStore`.
 - [ ] Resolve tutor default capability/model only during session creation.
-- [ ] Reject disallowed capabilities before creating a runtime session.
-- [ ] Restore `tutor_id` through `SessionPool::ensure_entry` after restart.
-- [ ] Return tutor summary data with session list items to avoid frontend N+1
+- [x] Reject disallowed capabilities before creating a runtime session.
+- [x] Restore `tutor_id` through `SessionPool::ensure_entry` after restart.
+- [x] Return tutor summary data with session list items to avoid frontend N+1
   requests.
-- [ ] Keep sessions without `tutor_id` as Temporary Assistant sessions.
+- [x] Keep sessions without `tutor_id` as Temporary Assistant sessions.
 
 Frontend tasks:
 
-- [ ] Add a compact tutor chooser to the empty Chat state.
+- [x] Add a compact tutor chooser to the empty Chat state.
 - [ ] Show recent tutors, all tutors, create action, and Temporary Assistant.
-- [ ] Carry the selected `tutor_id` through deferred session creation on first
+- [x] Carry the selected `tutor_id` through deferred session creation on first
   send.
 - [ ] Display tutor avatar/name on the active conversation header and session
   list row.
-- [ ] Restore the selected tutor when reopening a session.
+- [x] Restore the selected tutor when reopening a session.
 
 Tests:
 
-- [ ] Session metadata round trip with and without `tutor_id`.
+- [x] Session metadata round trip with and without `tutor_id`.
 - [ ] Unknown tutor and disallowed capability request tests.
-- [ ] Frontend helper tests for tutor selection and create-session payloads.
+- [x] Frontend helper tests for tutor selection and create-session payloads.
 - [ ] Regression test proving existing unbound sessions still open normally.
 
 Exit criteria:

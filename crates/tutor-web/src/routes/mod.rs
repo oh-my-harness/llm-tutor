@@ -5,4 +5,5 @@ pub mod quiz;
 pub mod sessions;
 pub mod settings;
 pub mod space;
+pub mod tutors;
 pub mod ws;

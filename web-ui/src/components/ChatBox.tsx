@@ -20,7 +20,6 @@ import {
   Paperclip,
   Quote,
   RefreshCw,
-  Sparkles,
   Circle,
   Square,
   X,
@@ -45,6 +44,8 @@ import { useI18n, type TranslationKey } from '../i18n'
 import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
+import type { TutorProfile } from '../tutorTypes'
+import { TutorChooser } from './TutorChooser'
 import { ResearchReportMessage, looksLikeResearchReport } from './ResearchReportMessage'
 import { SaveNotebookDialog, SaveNotebookOutcomeDialog } from './SaveNotebookDialog'
 
@@ -168,6 +169,10 @@ interface Props {
   knowledgeBases: Array<{ id: string; name: string }>
   selectedKnowledgeBaseId: string
   selectedNotebookEnabled: boolean
+  tutors: TutorProfile[]
+  selectedTutorId: string | null | undefined
+  onTutorSelect: (tutorId: string | null) => void
+  onManageTutors: () => void
   onSend: (text: string, attachments?: ChatAttachment[], mentions?: SpaceMention[]) => void
   onStop?: () => void
   onEditUserMessage?: (messageIndex: number, nextText: string) => void
@@ -253,6 +258,10 @@ export function ChatBox({
   knowledgeBases,
   selectedKnowledgeBaseId,
   selectedNotebookEnabled,
+  tutors,
+  selectedTutorId,
+  onTutorSelect,
+  onManageTutors,
   onSend,
   onStop,
   onEditUserMessage,
@@ -275,7 +284,6 @@ export function ChatBox({
   disabled,
   running = false,
 }: Props) {
-  const { t } = useI18n()
   const [input, setInput] = useState('')
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -527,10 +535,7 @@ export function ChatBox({
       {empty ? (
         <div className="chat-scroll-pane flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
           <div className="w-full max-w-4xl">
-            <div className="mb-10 flex items-center justify-center gap-4 text-center">
-              <Sparkles size={42} className="text-gray-800" />
-              <h2 className="text-4xl font-semibold text-gray-900">{t('chat.empty.title')}</h2>
-            </div>
+            <TutorChooser tutors={tutors} selectedTutorId={selectedTutorId} onSelect={onTutorSelect} onManage={onManageTutors} />
             <Composer
               inputRef={composerInputRef}
               input={input}
