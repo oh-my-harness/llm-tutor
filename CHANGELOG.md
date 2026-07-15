@@ -9,6 +9,52 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-15
+
+### Added
+
+- Persistent Tutor profiles with Markdown Soul, default model and capability
+  policy, resource permissions, and immutable runtime-session binding.
+- A compact Tutor chooser for new conversations while retaining Temporary
+  Assistant as the no-selection path.
+- Per-Tutor private continuity memory for commitments, open loops, lesson
+  plans, reflections, and teaching strategies, including inspect, edit,
+  resolve, reopen, delete, and reset controls.
+
+### Changed
+
+- Learner Memory and Tutor Memory now use a tool-aware runtime routing policy:
+  learner facts stay in shared Learner Memory, Tutor-owned continuity stays
+  private, unavailable tools are omitted from prompts, and duplicate writes
+  are forbidden.
+- Tutor Soul now shapes Chat, Research, Quiz, and Deep Solve through the shared
+  runtime path without introducing a separate agent implementation.
+- Tutor model defaults and Knowledge, Notebook, Space, Quiz-source, and Learner
+  Memory permissions are enforced at session and mounted-tool boundaries.
+- Memory-backed answers use reliable prior context naturally instead of
+  narrating internal memory lookups.
+- The Memory workspace can switch directly between L2 and L3 files and keeps
+  no-change workflow results reviewable.
+- Settings configuration deletion now uses a compact icon-only action, and the
+  new-conversation Tutor picker has a clearer Temporary Assistant default.
+
+### Fixed
+
+- Prevented stale Tutor editor state from overwriting newer backend changes.
+- Restored shared Learner Memory access for authorized chat agents.
+- Allowed no-change Memory reviews to close cleanly without forcing a write.
+
+### Known Gaps
+
+- Tutor-to-Tutor handoff and the consolidated Tutor conversation workspace are
+  not complete.
+- Autonomous Tutor Memory currently has prompt/tool-contract safeguards;
+  server-side sensitive-content validation remains pending.
+- Running workflows still do not resume from their exact interruption point
+  after a full application restart.
+- Linux packaging, code signing, automatic updates, and system-keychain secret
+  storage are not yet available.
+
 ## 0.2.1 - 2026-07-14
 
 ### Added
