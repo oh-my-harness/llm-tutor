@@ -211,10 +211,10 @@ async fn run_embedding_test(
     }
     let provider = builder.build();
     let mut req = EmbeddingRequest::builder(model.clone()).input("llm-tutor embedding test");
-    if request.send_dimensions {
-        if let Some(dimensions) = request.dimensions.filter(|value| *value > 0) {
-            req = req.dimensions(dimensions);
-        }
+    if request.send_dimensions
+        && let Some(dimensions) = request.dimensions.filter(|value| *value > 0)
+    {
+        req = req.dimensions(dimensions);
     }
     let req = req.build();
     let response = provider

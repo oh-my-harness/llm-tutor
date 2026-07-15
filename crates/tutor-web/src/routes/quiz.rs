@@ -151,7 +151,7 @@ pub(crate) async fn create_quiz_for_request(
     };
 
     match generate_questions(
-        &state,
+        state,
         quiz,
         req.llm,
         source_text,

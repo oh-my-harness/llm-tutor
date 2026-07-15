@@ -1,14 +1,8 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use futures::future::BoxFuture;
 use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
 use serde_json::json;
 
-use crate::knowledge_store::KnowledgeStore;
-use crate::memory_store::MemoryStore;
-use crate::notebook_store::NotebookStore;
-use crate::quiz_store::{QuizDifficulty, QuizStore};
+use crate::quiz_store::QuizDifficulty;
 use crate::routes::quiz::{CreateLlmConfig, CreateQuizRequest, QuizState, create_quiz_for_request};
 
 static CREATE_QUIZ_SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
@@ -16,34 +10,19 @@ static PROPOSE_QUIZ_PLAN_SCHEMA: std::sync::OnceLock<serde_json::Value> =
     std::sync::OnceLock::new();
 
 pub(crate) struct CreateQuizTool {
-    store: Arc<QuizStore>,
-    knowledge: Arc<KnowledgeStore>,
-    notebook: Arc<NotebookStore>,
-    memory: Arc<MemoryStore>,
-    rag_root: PathBuf,
-    workflow_root: PathBuf,
+    state: QuizState,
     default_kb_id: Option<String>,
     llm: Option<CreateLlmConfig>,
 }
 
 impl CreateQuizTool {
     pub(crate) fn new(
-        store: Arc<QuizStore>,
-        knowledge: Arc<KnowledgeStore>,
-        notebook: Arc<NotebookStore>,
-        memory: Arc<MemoryStore>,
-        rag_root: PathBuf,
-        workflow_root: PathBuf,
+        state: QuizState,
         default_kb_id: Option<String>,
         llm: Option<CreateLlmConfig>,
     ) -> Self {
         Self {
-            store,
-            knowledge,
-            notebook,
-            memory,
-            rag_root,
-            workflow_root,
+            state,
             default_kb_id,
             llm,
         }
@@ -199,12 +178,12 @@ impl Tool for CreateQuizTool {
                 llm: self.llm.clone(),
             };
             let state = QuizState {
-                store: self.store.clone(),
-                knowledge: self.knowledge.clone(),
-                notebook: self.notebook.clone(),
-                memory: self.memory.clone(),
-                rag_root: self.rag_root.clone(),
-                workflow_root: self.workflow_root.clone(),
+                store: self.state.store.clone(),
+                knowledge: self.state.knowledge.clone(),
+                notebook: self.state.notebook.clone(),
+                memory: self.state.memory.clone(),
+                rag_root: self.state.rag_root.clone(),
+                workflow_root: self.state.workflow_root.clone(),
             };
             let quiz = create_quiz_for_request(&state, request)
                 .await

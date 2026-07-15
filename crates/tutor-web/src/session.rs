@@ -36,6 +36,16 @@ pub struct SearchSessionConfig {
     pub max_fetch_chars: Option<usize>,
 }
 
+#[derive(Clone)]
+pub struct SessionCreateConfig {
+    pub capability: String,
+    pub kb: Option<String>,
+    pub notebook_enabled: bool,
+    pub llm: Option<LlmSessionConfig>,
+    pub search: Option<SearchSessionConfig>,
+    pub embedding: Option<tutor_rag::EmbeddingConfig>,
+}
+
 /// Product metadata for an active tutor session.
 #[derive(Clone)]
 pub struct SessionEntry {
@@ -175,27 +185,31 @@ impl SessionPool {
     ) -> Result<String, llm_harness_types::SessionError> {
         self.create_with_tutor(
             None,
+            SessionCreateConfig {
+                capability: capability.to_string(),
+                kb,
+                notebook_enabled,
+                llm,
+                search,
+                embedding,
+            },
+        )
+        .await
+    }
+
+    pub async fn create_with_tutor(
+        &self,
+        tutor_id: Option<String>,
+        config: SessionCreateConfig,
+    ) -> Result<String, llm_harness_types::SessionError> {
+        let SessionCreateConfig {
             capability,
             kb,
             notebook_enabled,
             llm,
             search,
             embedding,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_with_tutor(
-        &self,
-        tutor_id: Option<String>,
-        capability: &str,
-        kb: Option<String>,
-        notebook_enabled: bool,
-        llm: Option<LlmSessionConfig>,
-        search: Option<SearchSessionConfig>,
-        embedding: Option<tutor_rag::EmbeddingConfig>,
-    ) -> Result<String, llm_harness_types::SessionError> {
+        } = config;
         let storage = self
             .repo
             .create(CreateSessionOptions {
@@ -210,7 +224,7 @@ impl SessionPool {
         let entry = SessionEntry {
             id: id.clone(),
             tutor_id: tutor_id.clone(),
-            capability: capability.to_string(),
+            capability: capability.clone(),
             kb: kb.clone(),
             notebook_enabled,
             llm: llm.clone(),
@@ -223,7 +237,7 @@ impl SessionPool {
             &id,
             ProductSessionMetadata {
                 tutor_id,
-                capability: capability.to_string(),
+                capability,
                 kb,
                 notebook_enabled,
                 llm,
@@ -564,10 +578,10 @@ impl SessionPool {
                         return Ok(Some(usage));
                     }
                 }
-                SessionEntryPayload::Message(AgentMessage::Assistant(message)) => {
-                    if message.usage.is_some() {
-                        return Ok(message.usage);
-                    }
+                SessionEntryPayload::Message(AgentMessage::Assistant(message))
+                    if message.usage.is_some() =>
+                {
+                    return Ok(message.usage);
                 }
                 _ => {}
             }
@@ -1743,12 +1757,14 @@ mod tests {
         let id = pool
             .create_with_tutor(
                 Some("general-tutor".into()),
-                "chat",
-                None,
-                false,
-                None,
-                None,
-                None,
+                SessionCreateConfig {
+                    capability: "chat".into(),
+                    kb: None,
+                    notebook_enabled: false,
+                    llm: None,
+                    search: None,
+                    embedding: None,
+                },
             )
             .await
             .unwrap();

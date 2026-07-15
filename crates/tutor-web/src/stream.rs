@@ -49,6 +49,7 @@ impl TutorStream {
         }
     }
 
+    #[cfg(test)]
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
         self.tx.subscribe()
     }

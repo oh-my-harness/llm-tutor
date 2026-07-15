@@ -144,7 +144,7 @@ impl QuizStore {
 
     pub fn list(&self) -> Vec<QuizSession> {
         let mut items = self.items.lock().unwrap().clone();
-        items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        items.sort_by_key(|item| std::cmp::Reverse(item.updated_at));
         items
     }
 

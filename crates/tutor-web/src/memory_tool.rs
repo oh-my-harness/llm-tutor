@@ -118,13 +118,13 @@ impl MemoryEvidenceTracker {
         requested_reference: &str,
         canonical_reference: &str,
     ) {
-        if requested_reference != canonical_reference {
-            if let Ok(mut aliases) = self.resolved_aliases.lock() {
-                aliases.insert(
-                    requested_reference.to_string(),
-                    canonical_reference.to_string(),
-                );
-            }
+        if requested_reference != canonical_reference
+            && let Ok(mut aliases) = self.resolved_aliases.lock()
+        {
+            aliases.insert(
+                requested_reference.to_string(),
+                canonical_reference.to_string(),
+            );
         }
         self.record_l1(stage, tool, summary, vec![canonical_reference.to_string()]);
     }

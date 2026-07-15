@@ -235,10 +235,10 @@ impl LanceDbRag {
         let provider = builder.build();
 
         let mut req = EmbeddingRequest::builder(self.embedding.model.clone()).inputs(input);
-        if self.embedding.send_dimensions {
-            if let Some(dimensions) = self.embedding.dimensions {
-                req = req.dimensions(dimensions);
-            }
+        if self.embedding.send_dimensions
+            && let Some(dimensions) = self.embedding.dimensions
+        {
+            req = req.dimensions(dimensions);
         }
 
         let response = provider.embed(&req.build()).await?;

@@ -311,7 +311,7 @@ impl MemoryStore {
 
     pub fn recent_events(&self, limit: usize) -> Result<Vec<MemoryEvent>> {
         let mut events = self.all_events()?;
-        events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        events.sort_by_key(|event| std::cmp::Reverse(event.created_at));
         events.truncate(limit);
         Ok(events)
     }
@@ -357,7 +357,7 @@ impl MemoryStore {
             .unwrap_or(0);
         let limit = limit.clamp(1, 100);
         let mut events = self.all_events()?;
-        events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        events.sort_by_key(|event| std::cmp::Reverse(event.created_at));
         events.retain(|event| {
             category.is_none_or(|value| event.category == value)
                 && session_id.is_none_or(|value| event.source_id.as_deref() == Some(value))
@@ -403,7 +403,7 @@ impl MemoryStore {
                     }
             })
             .collect::<Vec<_>>();
-        related.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        related.sort_by_key(|event| event.created_at);
         let index = related
             .iter()
             .position(|candidate| candidate.id == event.id)
@@ -793,14 +793,7 @@ pub fn serialize_memory_entries(title: &str, entries: &[MemoryEntry]) -> Result<
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
-        if lines.len() == 1 {
-            lines.push(String::new());
-            if let Some(section) = &section {
-                lines.push(format!("## {section}"));
-                lines.push(String::new());
-            }
-            last_section = section;
-        } else if section != last_section {
+        if lines.len() == 1 || section != last_section {
             lines.push(String::new());
             if let Some(section) = &section {
                 lines.push(format!("## {section}"));

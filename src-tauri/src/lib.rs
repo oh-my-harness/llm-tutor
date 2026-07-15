@@ -30,10 +30,10 @@ enum BackendProcess {
 
 impl Drop for BackendState {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.child.lock() {
-            if let Some(child) = child.take() {
-                child.kill();
-            }
+        if let Ok(mut child) = self.child.lock()
+            && let Some(child) = child.take()
+        {
+            child.kill();
         }
     }
 }

@@ -263,15 +263,14 @@ impl StepTransitionJudge for ResearchWorkflowJudge {
 }
 
 fn report_payload(result: StepResult) -> Result<ResearchReportPayload> {
-    if let Some(structured) = result.structured {
-        if let Ok(payload) = serde_json::from_value::<ResearchReportPayload>(structured) {
-            if !payload.markdown.trim().is_empty() {
-                return Ok(ResearchReportPayload {
-                    markdown: payload.markdown.trim().to_string(),
-                    sources: payload.sources,
-                });
-            }
-        }
+    if let Some(structured) = result.structured
+        && let Ok(payload) = serde_json::from_value::<ResearchReportPayload>(structured)
+        && !payload.markdown.trim().is_empty()
+    {
+        return Ok(ResearchReportPayload {
+            markdown: payload.markdown.trim().to_string(),
+            sources: payload.sources,
+        });
     }
     let markdown = result.output.trim().to_string();
     if markdown.is_empty() {

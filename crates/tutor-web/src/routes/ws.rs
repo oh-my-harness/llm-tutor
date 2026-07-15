@@ -26,7 +26,7 @@ use crate::notebook_store::NotebookStore;
 use crate::quiz_store::QuizStore;
 use crate::quiz_tool::{CreateQuizTool, ProposeQuizPlanTool};
 use crate::research_tool::{CreateResearchReportTool, ProposeResearchPlanTool};
-use crate::routes::quiz::CreateLlmConfig;
+use crate::routes::quiz::{CreateLlmConfig, QuizState};
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
 use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
 use crate::space_tool::{
@@ -190,6 +190,14 @@ enum ClientMessage {
     ApprovalResponse { request_id: String, approved: bool },
 }
 
+struct TutorMessageInput {
+    entry: SessionEntry,
+    content: String,
+    mentions: Vec<SpaceMention>,
+    run_id: String,
+    cancel: CancellationToken,
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<WsState>,
@@ -285,24 +293,17 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                             .unwrap_or_else(|| entry.clone());
                         let run_pool = pool.clone();
                         let run_session_id = session_id.clone();
-                        let knowledge = state.knowledge.clone();
-                        let memory = state.memory.clone();
-                        let notebook = state.notebook.clone();
-                        let quizzes = state.quizzes.clone();
-                        let rag_root = state.rag_root.clone();
+                        let run_state = state.clone();
                         tokio::spawn(async move {
                             let terminal_status = run_tutor_message(
-                                run_pool.clone(),
-                                knowledge,
-                                memory,
-                                notebook,
-                                quizzes,
-                                rag_root,
-                                active_entry,
-                                content,
-                                mentions.unwrap_or_default(),
-                                run_id.clone(),
-                                cancel,
+                                run_state,
+                                TutorMessageInput {
+                                    entry: active_entry,
+                                    content,
+                                    mentions: mentions.unwrap_or_default(),
+                                    run_id: run_id.clone(),
+                                    cancel,
+                                },
                             )
                             .await;
                             if let Some(run) = run_pool.terminal_active_run(
@@ -387,19 +388,22 @@ pub fn ws_router(
         .with_state(state)
 }
 
-async fn run_tutor_message(
-    pool: Arc<SessionPool>,
-    knowledge: Arc<KnowledgeStore>,
-    memory: Arc<MemoryStore>,
-    notebook: Arc<NotebookStore>,
-    quizzes: Arc<QuizStore>,
-    rag_root: PathBuf,
-    entry: SessionEntry,
-    content: String,
-    mentions: Vec<SpaceMention>,
-    run_id: String,
-    cancel: CancellationToken,
-) -> &'static str {
+async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static str {
+    let WsState {
+        pool,
+        knowledge,
+        memory,
+        notebook,
+        quizzes,
+        rag_root,
+    } = state;
+    let TutorMessageInput {
+        entry,
+        content,
+        mentions,
+        run_id,
+        cancel,
+    } = input;
     let history_len = pool.history_len(&entry.id).await + 1;
     let user_message_index = next_user_message_index(&pool, &entry.id).await;
     if !mentions.is_empty() {
@@ -486,12 +490,14 @@ async fn run_tutor_message(
             router = router
                 .with_product_tool(Arc::new(ProposeQuizPlanTool))
                 .with_product_tool(Arc::new(CreateQuizTool::new(
-                    quizzes.clone(),
-                    knowledge.clone(),
-                    notebook.clone(),
-                    memory.clone(),
-                    rag_root.clone(),
-                    rag_root.join("workflow-sessions").join("quiz"),
+                    QuizState {
+                        store: quizzes.clone(),
+                        knowledge: knowledge.clone(),
+                        notebook: notebook.clone(),
+                        memory: memory.clone(),
+                        rag_root: rag_root.clone(),
+                        workflow_root: rag_root.join("workflow-sessions").join("quiz"),
+                    },
                     entry.kb.clone(),
                     create_quiz_llm_config_for_session(entry.llm.clone()),
                 )));

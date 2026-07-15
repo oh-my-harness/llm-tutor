@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(result.details["topic"], "llm-harness-runtime");
         assert_eq!(result.details["source_preferences"][0], "official docs");
         assert_eq!(result.details["use_notebook"], true);
-        assert_eq!(result.terminate, false);
+        assert!(!result.terminate);
     }
 
     #[test]

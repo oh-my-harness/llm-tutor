@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{
@@ -166,16 +166,16 @@ async fn start_memory_run(
             }
         });
 
-        let result = run_memory_change_set(
-            task_state.store.clone(),
-            &task_state.workflow_root,
+        let result = run_memory_change_set(MemoryChangeRun {
+            store: task_state.store.clone(),
+            workflow_root: &task_state.workflow_root,
             file,
-            req.action,
-            req.output_language,
-            &llm,
+            action: req.action,
+            output_language: req.output_language,
+            llm: &llm,
             tracker,
-            task_run_id.clone(),
-        )
+            run_id: task_run_id.clone(),
+        })
         .await;
         let _ = activity_task.await;
         match result {
@@ -271,7 +271,7 @@ async fn list_memory_runs(
         .filter(|run| !active_only || matches!(run.status.as_str(), "running" | "awaiting_review"))
         .cloned()
         .collect::<Vec<_>>();
-    runs.sort_by(|left, right| right.started_at.cmp(&left.started_at));
+    runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
     (StatusCode::OK, Json(serde_json::json!({ "runs": runs }))).into_response()
 }
 
@@ -387,16 +387,28 @@ async fn record_evidence_activity(
     update_run_stage(runs, run_id, &activity.stage, "done", &activity.summary).await;
 }
 
-async fn run_memory_change_set(
+struct MemoryChangeRun<'a> {
     store: Arc<MemoryStore>,
-    workflow_root: &PathBuf,
+    workflow_root: &'a Path,
     file: MemoryFile,
     action: MemoryAssistAction,
     output_language: MemoryOutputLanguage,
-    llm: &LlmConfig,
+    llm: &'a LlmConfig,
     tracker: MemoryEvidenceTracker,
     run_id: String,
-) -> Result<MemoryChangeSet, String> {
+}
+
+async fn run_memory_change_set(run: MemoryChangeRun<'_>) -> Result<MemoryChangeSet, String> {
+    let MemoryChangeRun {
+        store,
+        workflow_root,
+        file,
+        action,
+        output_language,
+        llm,
+        tracker,
+        run_id,
+    } = run;
     let context = store
         .agent_context(&file.path, &file.markdown)
         .map_err(|err| err.to_string())?;
@@ -656,15 +668,15 @@ fn workflow_output_to_change_set(
 }
 
 fn validate_target_refs(target_path: &str, refs: &[String]) -> Result<(), String> {
-    if target_path.starts_with("L3/") && target_path != "L3/recent.md" {
-        if let Some(reference) = refs
+    if target_path.starts_with("L3/")
+        && target_path != "L3/recent.md"
+        && let Some(reference) = refs
             .iter()
             .find(|reference| !reference.starts_with("memory:L2/"))
-        {
-            return Err(format!(
-                "ordinary L3 memory change must cite read L2 evidence, not `{reference}`"
-            ));
-        }
+    {
+        return Err(format!(
+            "ordinary L3 memory change must cite read L2 evidence, not `{reference}`"
+        ));
     }
     Ok(())
 }
@@ -813,7 +825,7 @@ fn build_llm_config(config: MemoryLlmConfig) -> Result<LlmConfig, String> {
 
 async fn run_memory_runtime_workflow_with_tools(
     llm: &LlmConfig,
-    workflow_root: &PathBuf,
+    workflow_root: &Path,
     input: &tutor_agent::memory::MemoryWorkflowInput,
     tools: Vec<Arc<dyn llm_harness_types::Tool>>,
 ) -> tutor_agent::Result<tutor_agent::memory::MemoryWorkflowRun> {

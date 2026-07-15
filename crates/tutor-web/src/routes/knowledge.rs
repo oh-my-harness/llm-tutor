@@ -242,13 +242,15 @@ async fn upload_document(
         tokio::spawn(async move {
             let result = ingest_upload_document(
                 &task_state,
-                &job_id,
-                &kb,
-                &file_name,
-                size_bytes,
-                bytes.to_vec(),
-                content_type,
-                normalized_content_type,
+                UploadDocumentInput {
+                    job_id: &job_id,
+                    kb: &kb,
+                    source: &file_name,
+                    size_bytes,
+                    original_bytes: bytes.to_vec(),
+                    content_type,
+                    mime_type: normalized_content_type,
+                },
             )
             .await;
             finish_job(&task_state.jobs, &job_id, result);
@@ -431,16 +433,29 @@ async fn ingest_text_document(
     Ok((view, chunks))
 }
 
-async fn ingest_upload_document(
-    state: &KnowledgeState,
-    job_id: &str,
-    kb: &str,
-    source: &str,
+struct UploadDocumentInput<'a> {
+    job_id: &'a str,
+    kb: &'a str,
+    source: &'a str,
     size_bytes: usize,
     original_bytes: Vec<u8>,
     content_type: Option<String>,
     mime_type: Option<String>,
+}
+
+async fn ingest_upload_document(
+    state: &KnowledgeState,
+    input: UploadDocumentInput<'_>,
 ) -> anyhow::Result<(KnowledgeBaseView, usize)> {
+    let UploadDocumentInput {
+        job_id,
+        kb,
+        source,
+        size_bytes,
+        original_bytes,
+        content_type,
+        mime_type,
+    } = input;
     update_job(
         state.jobs.as_ref(),
         job_id,

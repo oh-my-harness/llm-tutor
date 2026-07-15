@@ -336,11 +336,7 @@ fn result_with_score(
 }
 
 fn duckduckgo_region(query: &str) -> &'static str {
-    if query.chars().any(|ch| !ch.is_ascii()) {
-        "cn-zh"
-    } else {
-        "wt-wt"
-    }
+    if !query.is_ascii() { "cn-zh" } else { "wt-wt" }
 }
 
 fn normalize_text(text: &str) -> String {
@@ -690,13 +686,12 @@ fn normalize_duckduckgo_url(url: &str) -> String {
         return parsed.to_string();
     }
 
-    if let Ok(parsed) = reqwest::Url::parse(&format!("https://duckduckgo.com{url}")) {
-        if let Some(uddg) = parsed
+    if let Ok(parsed) = reqwest::Url::parse(&format!("https://duckduckgo.com{url}"))
+        && let Some(uddg) = parsed
             .query_pairs()
             .find_map(|(key, value)| (key == "uddg").then_some(value.into_owned()))
-        {
-            return uddg;
-        }
+    {
+        return uddg;
     }
 
     url.trim().to_string()

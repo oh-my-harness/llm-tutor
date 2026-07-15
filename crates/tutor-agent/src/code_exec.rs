@@ -195,10 +195,10 @@ async fn run_code_exec_inner(
             AgentHarnessEvent::Agent(AgentEvent::Error(err)) => {
                 last_error = Some(err.to_string());
             }
-            AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
-                if last_text.is_empty() {
-                    last_text = last_assistant_text(new_messages).unwrap_or_default();
-                }
+            AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages })
+                if last_text.is_empty() =>
+            {
+                last_text = last_assistant_text(new_messages).unwrap_or_default();
             }
             AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
             _ => {}

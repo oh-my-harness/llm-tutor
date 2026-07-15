@@ -228,7 +228,7 @@ impl NotebookStore {
             .filter(|item| space_id.is_none_or(|space_id| item.space_id == space_id))
             .cloned()
             .collect();
-        items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        items.sort_by_key(|item| std::cmp::Reverse(item.updated_at));
         items
     }
 

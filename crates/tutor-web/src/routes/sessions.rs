@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::knowledge_store::KnowledgeStore;
 use crate::session::{
-    LlmSessionConfig, SearchSessionConfig, SessionPool, message_role, message_text,
+    LlmSessionConfig, SearchSessionConfig, SessionCreateConfig, SessionPool, message_role,
+    message_text,
 };
 use crate::tutor_store::{TutorProfile, TutorStore};
 
@@ -156,12 +157,14 @@ async fn create_session(
     match pool
         .create_with_tutor(
             tutor.as_ref().map(|item| item.id.clone()),
-            &capability,
-            kb,
-            notebook_enabled,
-            llm,
-            search,
-            embedding,
+            SessionCreateConfig {
+                capability,
+                kb,
+                notebook_enabled,
+                llm,
+                search,
+                embedding,
+            },
         )
         .await
     {
@@ -375,22 +378,22 @@ async fn get_session(
                 });
                 if role == "user" {
                     user_message_index += 1;
-                    if let Some(mentions) = mentions_by_user_index.get(&user_message_index) {
-                        if let Some(map) = value.as_object_mut() {
-                            map.insert("mentions".into(), serde_json::Value::Array(mentions.clone()));
-                        }
+                    if let Some(mentions) = mentions_by_user_index.get(&user_message_index)
+                        && let Some(map) = value.as_object_mut()
+                    {
+                        map.insert("mentions".into(), serde_json::Value::Array(mentions.clone()));
                     }
                 } else if role == "assistant" {
                     assistant_message_index += 1;
-                    if let Some(citations) = citations_by_assistant_index.get(&assistant_message_index) {
-                        if let Some(map) = value.as_object_mut() {
-                            map.insert("citations".into(), serde_json::Value::Array(citations.clone()));
-                        }
+                    if let Some(citations) = citations_by_assistant_index.get(&assistant_message_index)
+                        && let Some(map) = value.as_object_mut()
+                    {
+                        map.insert("citations".into(), serde_json::Value::Array(citations.clone()));
                     }
-                    if let Some(artifacts) = artifacts_by_assistant_index.get(&assistant_message_index) {
-                        if let Some(map) = value.as_object_mut() {
-                            map.insert("artifacts".into(), serde_json::Value::Array(artifacts.clone()));
-                        }
+                    if let Some(artifacts) = artifacts_by_assistant_index.get(&assistant_message_index)
+                        && let Some(map) = value.as_object_mut()
+                    {
+                        map.insert("artifacts".into(), serde_json::Value::Array(artifacts.clone()));
                     }
                 }
                 Some(value)
@@ -648,34 +651,32 @@ async fn append_session_messages(
         }
     };
 
-    if let Some(user) = req.user.filter(|value| !value.trim().is_empty()) {
-        if let Err(err) = session
+    if let Some(user) = req.user.filter(|value| !value.trim().is_empty())
+        && let Err(err) = session
             .append_message(tutor_agent::chat::user_message(&user))
             .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
-                .into_response();
-        }
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response();
     }
 
-    if let Some(assistant) = req.assistant.filter(|value| !value.trim().is_empty()) {
-        if let Err(err) = session
+    if let Some(assistant) = req.assistant.filter(|value| !value.trim().is_empty())
+        && let Err(err) = session
             .append_message(tutor_agent::chat::assistant_message(&assistant))
             .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
-                .into_response();
-        }
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response();
     }
 
-    if let Some(quiz_id) = req.quiz_id.filter(|value| !value.trim().is_empty()) {
-        if let Err(err) = state
+    if let Some(quiz_id) = req.quiz_id.filter(|value| !value.trim().is_empty())
+        && let Err(err) = state
             .pool
             .append_trace(
                 &id,
@@ -686,13 +687,12 @@ async fn append_session_messages(
                 }),
             )
             .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
-                .into_response();
-        }
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response();
     }
 
     if let Some(citations) = req.assistant_citations.filter(|items| !items.is_empty()) {

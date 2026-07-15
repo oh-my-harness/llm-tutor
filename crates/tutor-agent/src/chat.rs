@@ -212,7 +212,7 @@ async fn run_chat_inner(
         .retriever
         .clone()
         .map(RagSearchTool::with_retriever)
-        .unwrap_or_else(RagSearchTool::new);
+        .unwrap_or_default();
     let rag_tool = match &router.associated_kb {
         Some(kb) => rag_tool.with_associated_kb(kb.clone()),
         None => rag_tool,
@@ -396,10 +396,10 @@ async fn run_chat_inner(
             AgentHarnessEvent::Agent(AgentEvent::Error(err)) => {
                 last_error = Some(err.to_string());
             }
-            AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages }) => {
-                if last_text.is_empty() {
-                    last_text = last_assistant_text(new_messages).unwrap_or_default();
-                }
+            AgentHarnessEvent::Agent(AgentEvent::AgentEnd { new_messages })
+                if last_text.is_empty() =>
+            {
+                last_text = last_assistant_text(new_messages).unwrap_or_default();
             }
             AgentHarnessEvent::Settled | AgentHarnessEvent::Aborted => break,
             _ => {}
