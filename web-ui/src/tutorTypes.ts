@@ -80,7 +80,8 @@ async function mutateTutor(url: string, method: 'POST' | 'PATCH', body: unknown)
   })
   const data = await readJson(response)
   if (!response.ok) throw new Error(apiError(data, response.status))
-  return data as unknown as TutorProfile
+  assertTutorMutationContract(data)
+  return normalizeTutorProfile(data)
 }
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
@@ -99,6 +100,12 @@ export function normalizeTutorProfile(value: unknown): TutorProfile {
     ? profile.soul_markdown
     : legacyTutorSoul(profile.role)
   return { ...profile, soul_markdown: soul } as unknown as TutorProfile
+}
+
+export function assertTutorMutationContract(value: Record<string, unknown>) {
+  if (typeof value.soul_markdown !== 'string') {
+    throw new Error('当前后端版本不支持导师 Soul，请重启 Tutor Agent 后再保存。')
+  }
 }
 
 function legacyTutorSoul(role: unknown) {

@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const module = { exports: {} }
 Function('module', 'exports', compiled)(module, module.exports)
-const { normalizeTutorProfile } = module.exports
+const { assertTutorMutationContract, normalizeTutorProfile } = module.exports
 
 test('keeps native Soul Markdown unchanged', () => {
   const profile = normalizeTutorProfile({ soul_markdown: '# Identity\n\nTeach visually.' })
@@ -22,4 +22,12 @@ test('maps only stable legacy role fields into Soul Markdown', () => {
   const profile = normalizeTutorProfile({ role: 'Teach math', goal: 'Learn algebra' })
   assert.match(profile.soul_markdown, /Teach math/)
   assert.doesNotMatch(profile.soul_markdown, /Learn algebra/)
+})
+
+test('rejects writes acknowledged by a legacy Tutor backend', () => {
+  assert.throws(
+    () => assertTutorMutationContract({ role: 'Old role', goal: 'Old goal' }),
+    /重启 Tutor Agent/,
+  )
+  assert.doesNotThrow(() => assertTutorMutationContract({ soul_markdown: '# Identity' }))
 })
