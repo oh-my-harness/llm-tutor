@@ -414,6 +414,7 @@ export function MemoryPage({
             modelOptions={modelOptions}
             selectedModelId={selectedModelId}
             onBack={() => setLayer('overview')}
+            onLayerChange={openLayer}
             onSelectFile={setActivePath}
             onDraftChange={setDraft}
             onViewModeChange={setViewMode}
@@ -569,6 +570,7 @@ function LayerWorkspace({
   modelOptions,
   selectedModelId,
   onBack,
+  onLayerChange,
   onSelectFile,
   onDraftChange,
   onViewModeChange,
@@ -597,6 +599,7 @@ function LayerWorkspace({
   modelOptions: MemoryModelOption[]
   selectedModelId: string
   onBack: () => void
+  onLayerChange: (layer: 'L2' | 'L3') => void
   onSelectFile: (path: string) => void
   onDraftChange: (value: string) => void
   onViewModeChange: (mode: ViewMode) => void
@@ -624,9 +627,14 @@ function LayerWorkspace({
           {(['L2', 'L3'] as const).map((item) => (
             <button
               key={item}
-              className={`rounded px-2.5 py-1 text-xs ${item === layer ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}
+              className={`rounded px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-200 ${
+                item === layer
+                  ? 'bg-blue-50 font-medium text-blue-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+              }`}
               type="button"
-              disabled
+              aria-pressed={item === layer}
+              onClick={() => onLayerChange(item)}
             >
               {item}
             </button>
