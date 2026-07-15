@@ -166,8 +166,6 @@ fn build_research_engine(
             product_instruction: router.product_instruction.clone(),
         }),
     )
-    .with_tool(Arc::new(router.read_memory_tool()))
-    .with_tool(Arc::new(router.write_memory_tool()))
     .with_tool(Arc::new(rag_search_tool(router)))
     .with_tool(Arc::new(match router.web_search.clone() {
         Some(config) => WebSearchTool::with_config(config),
@@ -178,6 +176,10 @@ fn build_research_engine(
         None => WebFetchTool::new(),
     }))
     .with_max_retries(1);
+
+    for tool in router.learner_memory_tools() {
+        engine = engine.with_tool(tool);
+    }
 
     for tool in &router.product_tools {
         engine = engine.with_tool(tool.clone());

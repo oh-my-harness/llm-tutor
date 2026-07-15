@@ -9,11 +9,13 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::settings_store::SettingsStore;
 use crate::tutor_store::{CreateTutorProfile, TutorStore, TutorStoreError, UpdateTutorProfile};
 
 #[derive(Clone)]
 struct TutorsState {
     store: Arc<TutorStore>,
+    settings: Arc<SettingsStore>,
 }
 
 #[derive(Default, Deserialize)]
@@ -22,7 +24,7 @@ struct ListQuery {
     include_archived: bool,
 }
 
-pub fn tutors_router(store: Arc<TutorStore>) -> Router {
+pub fn tutors_router(store: Arc<TutorStore>, settings: Arc<SettingsStore>) -> Router {
     Router::new()
         .route("/api/tutors", get(list_tutors).post(create_tutor))
         .route(
@@ -30,7 +32,7 @@ pub fn tutors_router(store: Arc<TutorStore>) -> Router {
             get(get_tutor).patch(update_tutor).delete(delete_tutor),
         )
         .route("/api/tutors/{id}/reset-profile", post(reset_profile))
-        .with_state(TutorsState { store })
+        .with_state(TutorsState { store, settings })
 }
 
 async fn list_tutors(
@@ -46,6 +48,13 @@ async fn create_tutor(
     State(state): State<TutorsState>,
     Json(input): Json<CreateTutorProfile>,
 ) -> impl IntoResponse {
+    if let Some(config_id) = input.default_model_config_id.as_deref()
+        && !state.settings.has_llm_config(config_id)
+    {
+        return store_error(TutorStoreError::Validation(
+            "default model configuration does not exist".into(),
+        ));
+    }
     match state.store.create(input) {
         Ok(tutor) => (StatusCode::CREATED, Json(serde_json::json!(tutor))).into_response(),
         Err(error) => store_error(error),
@@ -64,6 +73,13 @@ async fn update_tutor(
     Path(id): Path<String>,
     Json(input): Json<UpdateTutorProfile>,
 ) -> impl IntoResponse {
+    if let Some(Some(config_id)) = input.default_model_config_id.as_ref()
+        && !state.settings.has_llm_config(config_id)
+    {
+        return store_error(TutorStoreError::Validation(
+            "default model configuration does not exist".into(),
+        ));
+    }
     match state.store.update(&id, input) {
         Ok(tutor) => (StatusCode::OK, Json(serde_json::json!(tutor))).into_response(),
         Err(error) => store_error(error),
@@ -112,7 +128,12 @@ mod tests {
     #[tokio::test]
     async fn tutor_routes_create_update_and_archive() {
         let dir = tempfile::tempdir().unwrap();
-        let app = tutors_router(Arc::new(TutorStore::new_with_root(dir.path())));
+        let app = tutors_router(
+            Arc::new(TutorStore::new_with_root(dir.path())),
+            Arc::new(SettingsStore::new_with_path(
+                dir.path().join("settings.json"),
+            )),
+        );
 
         let create = app
             .clone()
@@ -146,6 +167,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(update.status(), StatusCode::OK);
+
+        let dangling_model = app
+            .clone()
+            .oneshot(
+                Request::post("/api/tutors")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r##"{"name":"Invalid","soul_markdown":"# Identity\n\nTeach","default_model_config_id":"missing"}"##,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dangling_model.status(), StatusCode::BAD_REQUEST);
 
         let delete = app
             .oneshot(

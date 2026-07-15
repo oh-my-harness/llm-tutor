@@ -32,6 +32,7 @@ export interface TutorSummary {
 export interface TutorDraft {
   name: string
   soul_markdown: string
+  default_model_config_id: string | null
   default_capability: string
   allowed_capabilities: string[]
   learner_memory_access: boolean

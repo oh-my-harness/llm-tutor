@@ -13,6 +13,8 @@ import { MarkdownMessage } from './MarkdownMessage'
 
 interface Props {
   tutors: TutorProfile[]
+  modelConfigs: Array<{ id: string; name: string; model: string }>
+  knowledgeBases: Array<{ id: string; name: string }>
   onChanged: () => Promise<void>
   onStartConversation: (tutorId: string) => void
 }
@@ -37,6 +39,7 @@ const emptyDraft: TutorDraft = {
 
 - 不记录敏感个人信息。
 - 不在证据不足时评价学习者的能力。`,
+  default_model_config_id: null,
   default_capability: 'chat',
   allowed_capabilities: ['chat', 'deep_solve', 'quiz', 'research', 'organize'],
   learner_memory_access: true,
@@ -44,7 +47,7 @@ const emptyDraft: TutorDraft = {
   resource_permissions: { knowledge_base_ids: [], notebook: true, space: true },
 }
 
-export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
+export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onStartConversation }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(tutors[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState<TutorDraft>(emptyDraft)
@@ -175,7 +178,7 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
 
           {(creating || selected) && (
             <div className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-3">
                 <Field label="导师名称">
                   <input className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
                 </Field>
@@ -183,6 +186,18 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
                   <select className={inputClass} value={draft.default_capability} onChange={(event) => setDraft({ ...draft, default_capability: event.target.value })}>
                     {tutorCapabilities.filter((item) => draft.allowed_capabilities.includes(item)).map((item) => (
                       <option key={item} value={item}>{capabilityLabel(item)}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="默认模型">
+                  <select
+                    className={inputClass}
+                    value={draft.default_model_config_id ?? ''}
+                    onChange={(event) => setDraft({ ...draft, default_model_config_id: event.target.value || null })}
+                  >
+                    <option value="">跟随全局默认</option>
+                    {modelConfigs.map((config) => (
+                      <option key={config.id} value={config.id}>{config.name} · {config.model}</option>
                     ))}
                   </select>
                 </Field>
@@ -253,6 +268,51 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
                   <input type="checkbox" checked={draft.autonomous_memory} onChange={(event) => setDraft({ ...draft, autonomous_memory: event.target.checked })} />
                   允许自主维护导师记忆
                 </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draft.resource_permissions.notebook}
+                    onChange={(event) => setDraft({
+                      ...draft,
+                      resource_permissions: { ...draft.resource_permissions, notebook: event.target.checked },
+                    })}
+                  />
+                  允许访问 Notebook
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draft.resource_permissions.space}
+                    onChange={(event) => setDraft({
+                      ...draft,
+                      resource_permissions: { ...draft.resource_permissions, space: event.target.checked },
+                    })}
+                  />
+                  允许访问空间
+                </label>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-medium text-gray-800">允许访问的知识库</div>
+                {knowledgeBases.length === 0 ? (
+                  <p className="text-sm text-gray-500">当前没有知识库。</p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {knowledgeBases.map((knowledgeBase) => {
+                      const checked = draft.resource_permissions.knowledge_base_ids.includes(knowledgeBase.id)
+                      return (
+                        <label key={knowledgeBase.id} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${checked ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-600'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setDraft(toggleKnowledgeBase(draft, knowledgeBase.id))}
+                          />
+                          <span className="truncate">{knowledgeBase.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3">
@@ -285,6 +345,7 @@ function profileToDraft(profile: TutorProfile): TutorDraft {
   return {
     name: profile.name,
     soul_markdown: profile.soul_markdown,
+    default_model_config_id: profile.default_model_config_id ?? null,
     default_capability: profile.default_capability,
     allowed_capabilities: [...profile.allowed_capabilities],
     learner_memory_access: profile.learner_memory_access,
@@ -293,6 +354,19 @@ function profileToDraft(profile: TutorProfile): TutorDraft {
       knowledge_base_ids: [...profile.resource_permissions.knowledge_base_ids],
       notebook: profile.resource_permissions.notebook,
       space: profile.resource_permissions.space,
+    },
+  }
+}
+
+function toggleKnowledgeBase(draft: TutorDraft, knowledgeBaseId: string): TutorDraft {
+  const selected = draft.resource_permissions.knowledge_base_ids.includes(knowledgeBaseId)
+  return {
+    ...draft,
+    resource_permissions: {
+      ...draft.resource_permissions,
+      knowledge_base_ids: selected
+        ? draft.resource_permissions.knowledge_base_ids.filter((id) => id !== knowledgeBaseId)
+        : [...draft.resource_permissions.knowledge_base_ids, knowledgeBaseId],
     },
   }
 }

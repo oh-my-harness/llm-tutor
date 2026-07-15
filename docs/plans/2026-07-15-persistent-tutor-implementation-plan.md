@@ -4,13 +4,13 @@
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
-Implementation progress (2026-07-15): the Phase 0/1 identity loop and the Soul
-portion of Phase 2 are implemented. Tutor CRUD, General Tutor seeding, immutable
-session binding, the optional Chat chooser, session restoration, Tutor
-management, and bounded Soul injection across Chat, Research, Quiz, and Deep
-Solve are working. Resource-tool enforcement, tutor default-model resolution,
-private Tutor Memory, the continuity workspace, recent-tutor ranking, avatar
-presentation, and handoff remain pending.
+Implementation progress (2026-07-15): the Phase 0/1 identity loop, bounded Soul
+runtime context, tutor default-model resolution, and server-enforced resource
+policy are implemented. Tutor CRUD, General Tutor seeding, immutable session
+binding, the optional Chat chooser, session restoration, and Tutor management
+are working. Private Tutor Memory, the continuity workspace, recent-tutor
+ranking, avatar presentation, handoff, and settings-deletion protection for a
+model referenced by a tutor remain pending.
 
 ## 1. Objective
 
@@ -162,8 +162,10 @@ Backend tasks:
   retention choice.
 - [x] Generate stable unique IDs and reject blank Souls and unknown
   capabilities.
-- [ ] Reject dangling model configuration IDs once tutor default-model
-  selection is connected to Settings.
+- [x] Reject dangling model configuration IDs on Tutor create/update and
+  session resolution.
+- [ ] Prevent Settings from deleting a model configuration still referenced by
+  a tutor, or require an explicit replacement/clear operation.
 - [x] Add `crates/tutor-web/src/routes/tutors.rs` and mount it from `main.rs`.
 - [x] Expose `GET/POST /api/tutors` and
   `GET/PATCH/DELETE /api/tutors/:id`.
@@ -197,7 +199,7 @@ Backend tasks:
 - [x] Extend `POST /api/sessions` with optional `tutor_id` and validate it against
   `TutorStore`.
 - [x] Resolve tutor default capability only during session creation.
-- [ ] Resolve tutor default model only during session creation.
+- [x] Resolve tutor default model only during session creation.
 - [x] Reject disallowed capabilities before creating a runtime session.
 - [x] Restore `tutor_id` through `SessionPool::ensure_entry` after restart.
 - [x] Return tutor summary data with session list items to avoid frontend N+1
@@ -220,8 +222,8 @@ Tests:
 
 - [x] Session metadata round trip with and without `tutor_id`.
 - [x] Unknown tutor request test.
-- [ ] Complete disallowed-capability request coverage for creation, updates,
-  and runtime execution.
+- [x] Reject disallowed capability and resource requests during session create,
+  session update, and runtime execution.
 - [x] Frontend helper tests for tutor selection and create-session payloads.
 - [ ] Regression test proving existing unbound sessions still open normally.
 
@@ -246,7 +248,9 @@ Backend tasks:
 - [x] Apply bounded Tutor Soul Markdown as stable product instructions.
 - [x] Keep current learning goals and plans in Tutor Memory rather than the
   stable tutor profile.
-- [ ] Filter mounted product tools according to capability and resource policy.
+- [x] Filter mounted product tools according to capability and resource policy,
+  including Learner Memory, Notebook, Space, Quiz sources, and Deep Solve
+  workflow declarations.
 - [x] Validate runtime capability changes against the bound tutor policy.
 - [x] Record `tutor_id` in relevant trace/run metadata for diagnosis without
   exposing private memory contents.
@@ -256,8 +260,11 @@ Backend tasks:
 Tests:
 
 - [x] Boundary test that Soul reaches the runtime instruction layer once.
-- [ ] Tool-mount matrix tests for Tutor, Temporary Assistant, and denied access.
-- [ ] Capability-change rejection test on an existing tutor session.
+- [ ] Complete the tool-mount matrix for Tutor, Temporary Assistant, and denied
+  access. Learner Memory, session-resource denial, and direct Quiz source
+  bypass cases are covered.
+- [x] Capability and resource changes on existing Tutor sessions are validated
+  server-side.
 - [ ] Research and Quiz workflow trigger regression tests under a tutor-bound
   session.
 
@@ -277,7 +284,7 @@ Frontend tasks:
 - [ ] Add the tutor conversation list and compact continuity panel.
 - [x] Add create/edit forms for Markdown Soul, default capability, allowed
   capabilities, and memory policy.
-- [ ] Add default-model and resource-permission controls.
+- [x] Add default-model and resource-permission controls.
 - [ ] Show active/background run state beside tutor conversations.
 - [ ] Add quick actions for continuing a recent conversation and resetting the
   built-in profile. Starting a conversation and editing are implemented.
@@ -354,8 +361,8 @@ Goal: finish controlled resource access and safe tutor switching.
 
 Backend tasks:
 
-- [ ] Enforce Knowledge allowlists and Notebook, Space, and Learner Memory
-  booleans at every product-tool boundary.
+- [x] Enforce Knowledge allowlists and Notebook, Space, and Learner Memory
+  booleans at current product-tool boundaries.
 - [ ] Add an API that previews effective permissions before saving a tutor.
 - [ ] Add handoff preview and execute endpoints.
 - [ ] Use runtime session summary/compaction APIs to prepare a bounded handoff;
@@ -368,7 +375,7 @@ Backend tasks:
 
 Frontend tasks:
 
-- [ ] Add permission controls to Tutor settings using existing model and
+- [x] Add permission controls to Tutor settings using existing model and
   resource selectors.
 - [ ] Add handoff preview with destination tutor, bounded summary, open loops,
   and artifact selection.

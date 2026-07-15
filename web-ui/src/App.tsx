@@ -152,6 +152,7 @@ interface SessionDetailResponse {
   capability?: Capability
   kb?: string | null
   notebook_enabled?: boolean
+  llm?: { model?: string | null } | null
   messages?: Array<{
     role: 'user' | 'assistant'
     text: string
@@ -190,6 +191,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('chat')
   const [capability, setCapability] = useState<Capability>('chat')
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
+  const [selectedLlmConfigId, setSelectedLlmConfigId] = useState<string | null>(() => loadLlmSettings().activeLlmConfigId)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [selectedTutorId, setSelectedTutorId] = useState<string | null>(null)
   const [tutors, setTutors] = useState<TutorProfile[]>([])
@@ -620,7 +622,7 @@ export default function App() {
             ...tutorBinding,
             kb,
             notebook_enabled: selectedNotebookEnabled,
-            llm: settingsForSession(llmSettings),
+            llm: settingsForSession(llmSettings, selectedLlmConfigId),
             search: searchForSession(llmSettings),
           }),
         })
@@ -653,7 +655,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [sessionId, selectedTutorId, tutors, capability, llmSettings, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, activateSession])
+  }, [sessionId, selectedTutorId, tutors, capability, llmSettings, selectedLlmConfigId, selectedKnowledgeBaseId, selectedNotebookEnabled, send, pushStatus, activateSession])
 
   const handleStopGeneration = useCallback(() => {
     if (!running) return
@@ -710,7 +712,7 @@ export default function App() {
           ...tutorBindingForCreate(selectedTutorId),
           kb: selectedKnowledgeBaseId || null,
           notebook_enabled: selectedNotebookEnabled,
-          llm: settingsForSession(llmSettings),
+          llm: settingsForSession(llmSettings, selectedLlmConfigId),
           search: searchForSession(llmSettings),
         }),
       })
@@ -749,7 +751,7 @@ export default function App() {
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
       setRunning(false)
     }
-  }, [capability, llmSettings, messages, pushStatus, running, selectedKnowledgeBaseId, selectedNotebookEnabled, selectedTutorId, tutors, send, sessionId, activateSession])
+  }, [capability, llmSettings, selectedLlmConfigId, messages, pushStatus, running, selectedKnowledgeBaseId, selectedNotebookEnabled, selectedTutorId, tutors, send, sessionId, activateSession])
 
   const updateQuizInMessages = useCallback((quiz: QuizSession) => {
     setMessages((prev) =>
@@ -951,6 +953,13 @@ export default function App() {
 
   const handleSettingsChange = (nextSettings: typeof llmSettings) => {
     setLlmSettings(nextSettings)
+    const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
+    const tutorModelExists = tutor?.default_model_config_id
+      ? nextSettings.llmConfigs.some((config) => config.id === tutor.default_model_config_id)
+      : false
+    setSelectedLlmConfigId(
+      tutorModelExists ? tutor?.default_model_config_id ?? nextSettings.activeLlmConfigId : nextSettings.activeLlmConfigId,
+    )
     persistSettings(nextSettings)
     if (settingsRequireSessionReset(llmSettings, nextSettings)) {
       activateSession(null)
@@ -961,6 +970,7 @@ export default function App() {
   const startNewChat = useCallback(() => {
     activateSession(null)
     setSelectedTutorId(null)
+    setSelectedLlmConfigId(llmSettings.activeLlmConfigId)
     setMessages([])
     setStreamingText('')
     streamingRef.current = ''
@@ -977,17 +987,25 @@ export default function App() {
     setBudgetWarning(false)
     setRunning(false)
     setView('chat')
-  }, [activateSession])
+  }, [activateSession, llmSettings.activeLlmConfigId])
 
   const handleTutorSelect = useCallback((tutorId: string | null) => {
     setSelectedTutorId(tutorId)
+    const tutor = tutorId ? tutors.find((item) => item.id === tutorId) : null
+    setSelectedLlmConfigId(tutor?.default_model_config_id ?? llmSettings.activeLlmConfigId)
+    if (tutor) {
+      setSelectedKnowledgeBaseId((current) => (
+        tutor.resource_permissions.knowledge_base_ids.includes(current) ? current : ''
+      ))
+      if (!tutor.resource_permissions.notebook) setSelectedNotebookEnabled(false)
+    }
     const nextCapability = tutorId
-      ? tutors.find((item) => item.id === tutorId)?.default_capability
+      ? tutor?.default_capability
       : 'chat'
     if (nextCapability && isCapability(nextCapability)) {
       setCapability(nextCapability)
     }
-  }, [tutors])
+  }, [llmSettings.activeLlmConfigId, tutors])
 
   const handleNavigate = useCallback((nextView: AppView) => {
     if (nextView === 'chat') {
@@ -999,6 +1017,15 @@ export default function App() {
 
   const handleCapabilityChange = useCallback(async (nextCapability: Capability) => {
     if (running) return
+    const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
+    if (tutor && !tutor.allowed_capabilities.includes(nextCapability)) {
+      pushStatus({ kind: 'error', label: '模式不可用', detail: '当前导师未启用此能力。' })
+      return
+    }
+    if (nextCapability === 'organize' && tutor && !tutor.resource_permissions.notebook) {
+      pushStatus({ kind: 'error', label: 'Notebook 不可用', detail: '当前导师没有 Notebook 权限。' })
+      return
+    }
 
     setCapability(nextCapability)
     if (nextCapability === 'organize') {
@@ -1023,10 +1050,15 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
     }
-  }, [running, sessionId])
+  }, [pushStatus, running, selectedTutorId, sessionId, tutors])
 
   const handleKnowledgeBaseChange = useCallback(async (nextKb: string) => {
     if (running) return
+    const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
+    if (nextKb && tutor && !tutor.resource_permissions.knowledge_base_ids.includes(nextKb)) {
+      pushStatus({ kind: 'error', label: '知识库不可用', detail: '当前导师没有该知识库的权限。' })
+      return
+    }
     setSelectedKnowledgeBaseId(nextKb)
     setSelectedNotebookEnabled(false)
     if (!sessionId) return
@@ -1044,10 +1076,15 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
     }
-  }, [running, sessionId])
+  }, [pushStatus, running, selectedTutorId, sessionId, tutors])
 
   const handleNotebookEnabledChange = useCallback(async (enabled: boolean) => {
     if (running) return
+    const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
+    if (enabled && tutor && !tutor.resource_permissions.notebook) {
+      pushStatus({ kind: 'error', label: 'Notebook 不可用', detail: '当前导师没有 Notebook 权限。' })
+      return
+    }
     setSelectedNotebookEnabled(enabled)
     if (enabled) setSelectedKnowledgeBaseId('')
     if (!sessionId) return
@@ -1065,12 +1102,13 @@ export default function App() {
       const message = err instanceof Error ? err.message : String(err)
       setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${message}` }])
     }
-  }, [running, sessionId])
+  }, [pushStatus, running, selectedTutorId, sessionId, tutors])
 
   const handleLlmConfigChange = useCallback(async (id: string) => {
     if (running) return
     const nextSettings = { ...llmSettings, activeLlmConfigId: id }
     setLlmSettings(nextSettings)
+    setSelectedLlmConfigId(id)
     persistSettings(nextSettings)
     if (!sessionId) return
 
@@ -1148,6 +1186,10 @@ export default function App() {
         setTraceEntries(restoredTrace)
         setLatestUsage(data.latest_usage ?? null)
         setSelectedTutorId(data.tutor_id ?? null)
+        const restoredModelConfig = data.llm?.model
+          ? llmSettings.llmConfigs.find((config) => config.model === data.llm?.model)
+          : null
+        setSelectedLlmConfigId(restoredModelConfig?.id ?? llmSettings.activeLlmConfigId)
         if (data.active_run) {
           setRunning(true)
           pushStatus({
@@ -1368,8 +1410,10 @@ export default function App() {
                   contextStats={contextStats}
                   capability={capability}
                   llmConfigs={llmSettings.llmConfigs}
-                  activeLlmConfigId={llmSettings.activeLlmConfigId}
-                  knowledgeBases={knowledgeBases}
+                  activeLlmConfigId={selectedLlmConfigId}
+                  knowledgeBases={activeTutor
+                    ? knowledgeBases.filter((item) => activeTutor.resource_permissions.knowledge_base_ids.includes(item.id))
+                    : knowledgeBases}
                   selectedKnowledgeBaseId={selectedKnowledgeBaseId}
                   selectedNotebookEnabled={selectedNotebookEnabled}
                   tutors={tutors}
@@ -1422,14 +1466,12 @@ export default function App() {
         {view === 'tutor' && (
           <TutorPage
             tutors={tutors}
+            modelConfigs={llmSettings.llmConfigs}
+            knowledgeBases={knowledgeBases}
             onChanged={refreshTutors}
             onStartConversation={(tutorId) => {
               startNewChat()
-              const tutor = tutors.find((item) => item.id === tutorId)
-              setSelectedTutorId(tutorId)
-              if (tutor?.default_capability && isCapability(tutor.default_capability)) {
-                setCapability(tutor.default_capability)
-              }
+              handleTutorSelect(tutorId)
             }}
           />
         )}

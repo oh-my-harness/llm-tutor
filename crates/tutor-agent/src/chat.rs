@@ -220,8 +220,6 @@ async fn run_chat_inner(
     };
 
     let mut tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
-        Arc::new(router.read_memory_tool()),
-        Arc::new(router.write_memory_tool()),
         Arc::new(rag_tool),
         Arc::new(match router.web_search.clone() {
             Some(config) => WebSearchTool::with_config(config),
@@ -233,6 +231,7 @@ async fn run_chat_inner(
         }),
         Arc::new(CodeExecTool::new()),
     ];
+    tools.extend(router.learner_memory_tools());
     tools.extend(router.product_tools.iter().cloned());
 
     let client = router.make_client();

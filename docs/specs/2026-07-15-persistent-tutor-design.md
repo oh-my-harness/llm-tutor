@@ -199,8 +199,10 @@ appropriate capability as the task develops.
 ## 9. UI Shape
 
 The current Tutor page provides a compact tutor rail and a profile editor for
-name, Markdown Soul, default capability, allowed capabilities, and memory
-policy. Soul supports edit and rendered-preview modes.
+name, Markdown Soul, default model, default and allowed capabilities, resource
+permissions, and memory policy. Soul supports edit and rendered-preview modes.
+The server applies the resolved model at session creation and revalidates
+resource permissions for session changes and every runtime turn.
 
 The target Tutor workspace extends that surface with:
 

@@ -62,6 +62,7 @@ pub struct CapabilityRouter {
     pub product_tools: Vec<Arc<dyn Tool>>,
     pub workflow_root: Option<PathBuf>,
     pub memory_root: Option<PathBuf>,
+    pub learner_memory_access: bool,
     pub product_instruction: Option<String>,
     client: Option<Arc<dyn Provider>>,
 }
@@ -79,6 +80,7 @@ impl CapabilityRouter {
             product_tools: vec![],
             workflow_root: None,
             memory_root: None,
+            learner_memory_access: true,
             product_instruction: None,
             client: None,
         }
@@ -129,6 +131,11 @@ impl CapabilityRouter {
         self
     }
 
+    pub fn with_learner_memory_access(mut self, allowed: bool) -> Self {
+        self.learner_memory_access = allowed;
+        self
+    }
+
     pub fn with_product_instruction(mut self, instruction: impl Into<String>) -> Self {
         let instruction = instruction.into().trim().to_string();
         if !instruction.is_empty() {
@@ -153,6 +160,16 @@ impl CapabilityRouter {
             .clone()
             .map(WriteMemoryTool::with_root)
             .unwrap_or_default()
+    }
+
+    pub(crate) fn learner_memory_tools(&self) -> Vec<Arc<dyn Tool>> {
+        if !self.learner_memory_access {
+            return vec![];
+        }
+        vec![
+            Arc::new(self.read_memory_tool()),
+            Arc::new(self.write_memory_tool()),
+        ]
     }
 
     /// Returns the injected client or builds one from `LlmConfig`.
@@ -193,6 +210,7 @@ impl CapabilityRouter {
                 .with_web_search(self.web_search.clone())
                 .with_workflow_root(self.workflow_root.clone())
                 .with_memory_root(self.memory_root.clone())
+                .with_learner_memory_access(self.learner_memory_access)
                 .with_product_instruction(self.product_instruction.clone())
                 .with_client(client);
                 orchestrator.run(None).await
@@ -336,6 +354,15 @@ fn agent_message_text(message: &AgentMessage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llm_harness_loop::test_utils::NoOpEnv;
+
+    fn test_router() -> CapabilityRouter {
+        CapabilityRouter::new(
+            Arc::new(NoOpEnv),
+            LlmConfig::anthropic("test-model", ""),
+            GovernanceConfig::new(1.0, None, false),
+        )
+    }
 
     #[test]
     fn capability_from_str() {
@@ -376,6 +403,21 @@ mod tests {
             apply_product_instruction("Base", None),
             "Base",
             "temporary assistant should not receive tutor instructions"
+        );
+    }
+
+    #[test]
+    fn learner_memory_tools_follow_explicit_access_policy() {
+        let allowed = test_router().learner_memory_tools();
+        assert_eq!(
+            allowed.iter().map(|tool| tool.name()).collect::<Vec<_>>(),
+            vec!["read_memory", "write_memory"]
+        );
+        assert!(
+            test_router()
+                .with_learner_memory_access(false)
+                .learner_memory_tools()
+                .is_empty()
         );
     }
 }

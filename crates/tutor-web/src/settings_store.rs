@@ -31,6 +31,19 @@ impl SettingsStore {
         self.value.lock().unwrap().clone()
     }
 
+    pub fn has_llm_config(&self, id: &str) -> bool {
+        self.value
+            .lock()
+            .unwrap()
+            .get("llmConfigs")
+            .and_then(Value::as_array)
+            .is_some_and(|configs| {
+                configs
+                    .iter()
+                    .any(|config| config.get("id").and_then(Value::as_str) == Some(id))
+            })
+    }
+
     pub fn replace(&self, value: Value) -> Result<Value> {
         let value = if value.is_object() {
             value

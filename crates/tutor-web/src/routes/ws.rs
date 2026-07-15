@@ -507,11 +507,23 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         let mut router = CapabilityRouter::new(env, llm, governance)
             .with_event_sink(sink)
             .with_workflow_root(rag_root.join("workflow-sessions"))
-            .with_memory_root(memory.root_path().to_path_buf())
-            .with_product_tool(Arc::new(ReadSpaceItemTool::new(
+            .with_memory_root(memory.root_path().to_path_buf());
+        let learner_memory_allowed = bound_tutor
+            .as_ref()
+            .is_none_or(|tutor| tutor.learner_memory_access);
+        let notebook_allowed = bound_tutor
+            .as_ref()
+            .is_none_or(|tutor| tutor.resource_permissions.notebook);
+        let space_allowed = bound_tutor
+            .as_ref()
+            .is_none_or(|tutor| tutor.resource_permissions.space);
+        router = router.with_learner_memory_access(learner_memory_allowed);
+        if space_allowed {
+            router = router.with_product_tool(Arc::new(ReadSpaceItemTool::new(
                 notebook.clone(),
                 quizzes.clone(),
             )));
+        }
         if let Some(tutor) = bound_tutor.as_ref() {
             if !tutor
                 .allowed_capabilities
@@ -525,32 +537,64 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
             router = router.with_product_instruction(tutor_product_instruction(tutor));
         }
         if entry.capability == "quiz" {
+            let quiz_tool = CreateQuizTool::new(
+                QuizState {
+                    store: quizzes.clone(),
+                    knowledge: knowledge.clone(),
+                    notebook: notebook.clone(),
+                    memory: memory.clone(),
+                    rag_root: rag_root.clone(),
+                    workflow_root: rag_root.join("workflow-sessions").join("quiz"),
+                },
+                entry.kb.clone(),
+                create_quiz_llm_config_for_session(entry.llm.clone()),
+            );
+            let quiz_tool = match bound_tutor.as_ref() {
+                Some(tutor) => quiz_tool.with_resource_policy(
+                    tutor.resource_permissions.knowledge_base_ids.clone(),
+                    tutor.resource_permissions.notebook,
+                ),
+                None => quiz_tool,
+            };
             router = router
                 .with_product_tool(Arc::new(ProposeQuizPlanTool))
-                .with_product_tool(Arc::new(CreateQuizTool::new(
-                    QuizState {
-                        store: quizzes.clone(),
-                        knowledge: knowledge.clone(),
-                        notebook: notebook.clone(),
-                        memory: memory.clone(),
-                        rag_root: rag_root.clone(),
-                        workflow_root: rag_root.join("workflow-sessions").join("quiz"),
-                    },
-                    entry.kb.clone(),
-                    create_quiz_llm_config_for_session(entry.llm.clone()),
-                )));
+                .with_product_tool(Arc::new(quiz_tool));
         }
-        if entry.notebook_enabled {
+        if entry.notebook_enabled && notebook_allowed {
             router = router
                 .with_product_tool(Arc::new(ListNotebookTreeTool::new(notebook.clone())))
                 .with_product_tool(Arc::new(SearchNotebookTool::new(notebook.clone())));
         }
-        if entry.capability == "organize" {
+        if entry.capability == "organize" && notebook_allowed {
             router =
                 router.with_product_tool(Arc::new(ProposeNotebookEditTool::new(notebook.clone())));
         }
         if let Some(search) = web_search_config_for_session(entry.search.clone()) {
             router = router.with_web_search(search);
+        }
+        let knowledge_allowed = entry.kb.as_ref().is_none_or(|kb| {
+            bound_tutor.as_ref().is_none_or(|tutor| {
+                tutor
+                    .resource_permissions
+                    .knowledge_base_ids
+                    .iter()
+                    .any(|allowed| allowed == kb)
+            })
+        });
+        if !knowledge_allowed {
+            return Err(tutor_agent::TutorError::Internal(
+                "bound tutor no longer has access to this Knowledge Base".into(),
+            ));
+        }
+        if entry.notebook_enabled && !notebook_allowed {
+            return Err(tutor_agent::TutorError::Internal(
+                "bound tutor no longer has Notebook access".into(),
+            ));
+        }
+        if !mentions.is_empty() && !space_allowed {
+            return Err(tutor_agent::TutorError::Internal(
+                "bound tutor does not have Space access".into(),
+            ));
         }
         if let Some(embedding) = entry.embedding.clone() {
             let retriever = tutor_rag::LanceDbRag::new(rag_root, embedding);

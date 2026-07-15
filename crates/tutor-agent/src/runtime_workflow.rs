@@ -11,6 +11,21 @@ pub const MEMORY_WORKFLOW_ID: &str = "tutor.memory";
 pub const RESEARCH_WORKFLOW_ID: &str = "tutor.research";
 
 pub fn deep_solve_workflow() -> Workflow {
+    deep_solve_workflow_with_memory(true)
+}
+
+pub fn deep_solve_workflow_with_memory(learner_memory_access: bool) -> Workflow {
+    let mut solve_tools = vec!["rag_search".into()];
+    if learner_memory_access {
+        solve_tools.extend(["read_memory".into(), "write_memory".into()]);
+    }
+    solve_tools.extend(["web_search".into(), "web_fetch".into(), "code_exec".into()]);
+    let memory_instruction = if learner_memory_access {
+        NATURAL_MEMORY_INTERACTION_POLICY
+    } else {
+        ""
+    };
+
     Workflow {
         entry_step: "retrieve".into(),
         steps: vec![
@@ -38,19 +53,12 @@ pub fn deep_solve_workflow() -> Workflow {
                  Use available tools when verification, calculation, memory, RAG, or fresh evidence is needed. \
                  For non-trivial numeric calculations, approximations, transcendental functions, statistics, \
                  or simulations, use code_exec to compute or verify the result. \
-                 {NATURAL_MEMORY_INTERACTION_POLICY} \
+                 {memory_instruction} \
                  When this step is complete, call submit_step_result with a JSON object. \
                  Use {{\"route\":\"finish\",\"summary\":\"...\"}} when the work is ready for synthesis. \
                  Use {{\"route\":\"replan\",\"reason\":\"...\"}} only if the current plan is fundamentally wrong."
                 ),
-                vec![
-                    "rag_search".into(),
-                    "read_memory".into(),
-                    "write_memory".into(),
-                    "web_search".into(),
-                    "web_fetch".into(),
-                    "code_exec".into(),
-                ],
+                solve_tools,
             ),
             Step::llm(
                 "synthesize",
@@ -58,7 +66,7 @@ pub fn deep_solve_workflow() -> Workflow {
                 format!(
                     "Read the workflow Context, optional `tutor_instruction`, and prior step history. Synthesize the verified work into a clear final answer for the learner. \
                  Follow `tutor_instruction` only for teaching behavior and communication style. \
-                 Start with the direct answer, then provide the explanation. {NATURAL_MEMORY_INTERACTION_POLICY}"
+                 Start with the direct answer, then provide the explanation. {memory_instruction}"
                 ),
                 vec![],
             ),
@@ -89,7 +97,11 @@ pub fn deep_solve_workflow() -> Workflow {
 }
 
 pub fn validate_deep_solve_workflow() -> Result<()> {
-    validate_workflow(&deep_solve_workflow()).map_err(|err| {
+    validate_deep_solve_workflow_with_memory(true)
+}
+
+pub fn validate_deep_solve_workflow_with_memory(learner_memory_access: bool) -> Result<()> {
+    validate_workflow(&deep_solve_workflow_with_memory(learner_memory_access)).map_err(|err| {
         TutorError::Internal(format!(
             "runtime workflow validation failed for {DEEP_SOLVE_WORKFLOW_ID}: {err}"
         ))
@@ -340,6 +352,17 @@ mod tests {
     #[test]
     fn deep_solve_workflow_is_valid_runtime_workflow() {
         validate_deep_solve_workflow().unwrap();
+        validate_deep_solve_workflow_with_memory(false).unwrap();
+    }
+
+    #[test]
+    fn deep_solve_workflow_omits_memory_when_access_is_denied() {
+        let workflow = serde_json::to_value(deep_solve_workflow_with_memory(false)).unwrap();
+        let workflow_text = workflow.to_string();
+
+        assert!(!workflow_text.contains("read_memory"));
+        assert!(!workflow_text.contains("write_memory"));
+        assert!(!workflow_text.contains("silent internal context loading"));
     }
 
     #[test]

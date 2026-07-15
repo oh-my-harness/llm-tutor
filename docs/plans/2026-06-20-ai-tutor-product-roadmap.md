@@ -275,13 +275,14 @@ matrix, and release gates are defined in
   resource-permission configuration.
 - [x] Apply bounded Soul instructions across Chat, Research, Quiz, and Deep
   Solve without creating a parallel agent or workflow engine.
-- [ ] Resolve tutor model defaults and enforce resource permissions at every
-  mounted product-tool boundary.
+- [x] Resolve tutor model defaults and enforce resource permissions at current
+  mounted product-tool boundaries.
 - [x] Add tutor selection to the new-conversation empty state and retain a
   Temporary Assistant path.
 - [x] Bind each tutor conversation to an immutable `tutor_id` and runtime
   session ID.
-- [ ] Let authorized tutors read shared Learner Memory.
+- [x] Let authorized tutors read shared Learner Memory and omit those tools
+  when access is disabled.
 - [ ] Add private Tutor Memory for commitments, open loops, lesson plans,
   reflections, and strategy.
 - [x] Add initial tutor management for Soul, capability policy, and memory
@@ -313,11 +314,11 @@ After the MVP loop works, consider larger DeepTutor-like surfaces:
 
 Recommended next implementation order:
 
-1. Finish Tutor default-model resolution and server-enforced resource/tool
-   permissions.
-2. Add isolated, typed Tutor Memory and its continuity tools.
-3. Extend the Tutor page with conversations, run state, open loops, and memory
+1. Add isolated, typed Tutor Memory and its continuity tools.
+2. Extend the Tutor page with conversations, run state, open loops, and memory
    management.
+3. Protect tutor-referenced model configurations during Settings deletion and
+   complete the Tutor/Temporary Assistant tool-mount test matrix.
 4. Improve source/citation quality for Research, Quiz, and memory claims.
 5. Upgrade RAG chunking from basic character chunks to paragraph/token-aware
    chunks.

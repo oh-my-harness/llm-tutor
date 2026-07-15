@@ -18,7 +18,8 @@ use crate::governance::GovernanceConfig;
 use crate::llm_provider::LlmConfig;
 use crate::runtime_engine::{RuntimeDeclarativeJudge, build_workflow_engine_config};
 use crate::runtime_workflow::{
-    DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow, validate_deep_solve_workflow,
+    DEEP_SOLVE_WORKFLOW_ID, deep_solve_workflow_with_memory,
+    validate_deep_solve_workflow_with_memory,
 };
 use tutor_tools::WebSearchConfig;
 
@@ -33,6 +34,7 @@ pub struct SolveOrchestrator {
     client: Option<Arc<dyn Provider>>,
     workflow_root: Option<PathBuf>,
     memory_root: Option<PathBuf>,
+    learner_memory_access: bool,
     product_instruction: Option<String>,
 }
 
@@ -53,6 +55,7 @@ impl SolveOrchestrator {
             client: None,
             workflow_root: None,
             memory_root: None,
+            learner_memory_access: true,
             product_instruction: None,
         }
     }
@@ -83,6 +86,11 @@ impl SolveOrchestrator {
         self
     }
 
+    pub fn with_learner_memory_access(mut self, allowed: bool) -> Self {
+        self.learner_memory_access = allowed;
+        self
+    }
+
     pub fn with_product_instruction(mut self, instruction: Option<String>) -> Self {
         self.product_instruction = instruction;
         self
@@ -97,8 +105,8 @@ impl SolveOrchestrator {
 
     /// Run the full pipeline: [Pre-retrieve] -> Plan -> (Solve -> [REPLAN])* -> Synthesize.
     pub async fn run(&mut self, kb: Option<&str>) -> Result<String> {
-        validate_deep_solve_workflow()?;
-        let workflow = deep_solve_workflow();
+        validate_deep_solve_workflow_with_memory(self.learner_memory_access)?;
+        let workflow = deep_solve_workflow_with_memory(self.learner_memory_access);
         emit_trace(
             &self.event_sink,
             "workflow_validated",
@@ -194,15 +202,7 @@ impl SolveOrchestrator {
             WriteMemoryTool,
         };
 
-        vec![
-            Arc::new(match self.memory_root.clone() {
-                Some(root) => ReadMemoryTool::with_root(root),
-                None => ReadMemoryTool::new(),
-            }),
-            Arc::new(match self.memory_root.clone() {
-                Some(root) => WriteMemoryTool::with_root(root),
-                None => WriteMemoryTool::new(),
-            }),
+        let mut tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(RagSearchTool::new()),
             Arc::new(match self.web_search.clone() {
                 Some(config) => WebSearchTool::with_config(config),
@@ -213,7 +213,18 @@ impl SolveOrchestrator {
                 None => WebFetchTool::new(),
             }),
             Arc::new(CodeExecTool::new()),
-        ]
+        ];
+        if self.learner_memory_access {
+            tools.push(Arc::new(match self.memory_root.clone() {
+                Some(root) => ReadMemoryTool::with_root(root),
+                None => ReadMemoryTool::new(),
+            }));
+            tools.push(Arc::new(match self.memory_root.clone() {
+                Some(root) => WriteMemoryTool::with_root(root),
+                None => WriteMemoryTool::new(),
+            }));
+        }
+        tools
     }
 }
 

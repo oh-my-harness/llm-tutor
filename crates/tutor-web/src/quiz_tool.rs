@@ -13,6 +13,8 @@ pub(crate) struct CreateQuizTool {
     state: QuizState,
     default_kb_id: Option<String>,
     llm: Option<CreateLlmConfig>,
+    allowed_kb_ids: Option<Vec<String>>,
+    notebook_allowed: bool,
 }
 
 impl CreateQuizTool {
@@ -25,7 +27,19 @@ impl CreateQuizTool {
             state,
             default_kb_id,
             llm,
+            allowed_kb_ids: None,
+            notebook_allowed: true,
         }
+    }
+
+    pub(crate) fn with_resource_policy(
+        mut self,
+        allowed_kb_ids: Vec<String>,
+        notebook_allowed: bool,
+    ) -> Self {
+        self.allowed_kb_ids = Some(allowed_kb_ids);
+        self.notebook_allowed = notebook_allowed;
+        self
     }
 }
 
@@ -163,10 +177,19 @@ impl Tool for CreateQuizTool {
         _ctx: &'a ToolContext,
     ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
         Box::pin(async move {
+            let requested_kb =
+                optional_string(&args, "kb_id").or_else(|| self.default_kb_id.clone());
+            let notebook_entry_id = optional_string(&args, "notebook_entry_id");
+            validate_quiz_resource_policy(
+                self.allowed_kb_ids.as_deref(),
+                self.notebook_allowed,
+                requested_kb.as_deref(),
+                notebook_entry_id.as_deref(),
+            )?;
             let request = CreateQuizRequest {
                 title: optional_string(&args, "title"),
-                kb_id: optional_string(&args, "kb_id").or_else(|| self.default_kb_id.clone()),
-                notebook_entry_id: optional_string(&args, "notebook_entry_id"),
+                kb_id: requested_kb,
+                notebook_entry_id,
                 source_text: optional_string(&args, "source_text"),
                 source_label: optional_string(&args, "source_label"),
                 topic: optional_string(&args, "topic"),
@@ -208,6 +231,27 @@ impl Tool for CreateQuizTool {
     }
 }
 
+fn validate_quiz_resource_policy(
+    allowed_kb_ids: Option<&[String]>,
+    notebook_allowed: bool,
+    requested_kb_id: Option<&str>,
+    notebook_entry_id: Option<&str>,
+) -> Result<(), ToolError> {
+    if let (Some(allowed), Some(kb_id)) = (allowed_kb_ids, requested_kb_id)
+        && !allowed.iter().any(|id| id == kb_id)
+    {
+        return Err(ToolError::Execution(
+            "Tutor is not allowed to use this Knowledge Base".into(),
+        ));
+    }
+    if notebook_entry_id.is_some() && !notebook_allowed {
+        return Err(ToolError::Execution(
+            "Tutor is not allowed to use Notebook entries".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn optional_string(args: &serde_json::Value, key: &str) -> Option<String> {
     args[key]
         .as_str()
@@ -224,5 +268,31 @@ fn parse_difficulty(value: &str) -> Result<QuizDifficulty, ToolError> {
         other => Err(ToolError::InvalidArguments(format!(
             "unsupported difficulty `{other}`"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quiz_resource_policy_rejects_direct_tool_bypass() {
+        let allowed = vec!["approved-kb".to_string()];
+
+        assert!(
+            validate_quiz_resource_policy(Some(&allowed), true, Some("other-kb"), None,).is_err()
+        );
+        assert!(
+            validate_quiz_resource_policy(
+                Some(&allowed),
+                false,
+                Some("approved-kb"),
+                Some("note-1"),
+            )
+            .is_err()
+        );
+        assert!(
+            validate_quiz_resource_policy(Some(&allowed), true, Some("approved-kb"), None,).is_ok()
+        );
     }
 }
