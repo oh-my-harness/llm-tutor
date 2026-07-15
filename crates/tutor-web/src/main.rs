@@ -92,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
             memory.clone(),
             notebook.clone(),
             quizzes.clone(),
+            tutors.clone(),
             rag_root,
         ))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

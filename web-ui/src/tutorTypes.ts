@@ -7,8 +7,7 @@ export interface TutorResourcePermissions {
 export interface TutorProfile {
   id: string
   name: string
-  role: string
-  goal: string
+  soul_markdown: string
   avatar?: string | null
   default_model_config_id?: string | null
   default_capability: string
@@ -32,8 +31,7 @@ export interface TutorSummary {
 
 export interface TutorDraft {
   name: string
-  role: string
-  goal: string
+  soul_markdown: string
   default_capability: string
   allowed_capabilities: string[]
   learner_memory_access: boolean
@@ -43,11 +41,19 @@ export interface TutorDraft {
 
 export const tutorCapabilities = ['chat', 'deep_solve', 'quiz', 'research', 'organize'] as const
 
+export function tutorSoulSummary(markdown: string) {
+  const line = markdown
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find((item) => item && !item.startsWith('#') && !item.startsWith('-'))
+  return line ?? '尚未设置导师 Soul'
+}
+
 export async function fetchTutors(): Promise<TutorProfile[]> {
   const response = await fetch('/api/tutors')
   const data = await readJson(response)
   if (!response.ok) throw new Error(apiError(data, response.status))
-  return Array.isArray(data.tutors) ? data.tutors as TutorProfile[] : []
+  return Array.isArray(data.tutors) ? data.tutors.map(normalizeTutorProfile) : []
 }
 
 export async function createTutor(draft: TutorDraft): Promise<TutorProfile> {
@@ -83,4 +89,21 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 
 function apiError(data: Record<string, unknown>, status: number) {
   return typeof data.error === 'string' ? data.error : `HTTP ${status}`
+}
+
+export function normalizeTutorProfile(value: unknown): TutorProfile {
+  const profile = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {}
+  const soul = typeof profile.soul_markdown === 'string' && profile.soul_markdown.trim()
+    ? profile.soul_markdown
+    : legacyTutorSoul(profile.role)
+  return { ...profile, soul_markdown: soul } as unknown as TutorProfile
+}
+
+function legacyTutorSoul(role: unknown) {
+  const identity = typeof role === 'string' && role.trim()
+    ? role.trim()
+    : '请根据学习者的需要提供清晰、可靠的教学帮助。'
+  return `# 核心身份\n\n${identity}`
 }

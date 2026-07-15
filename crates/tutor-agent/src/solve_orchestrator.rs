@@ -33,6 +33,7 @@ pub struct SolveOrchestrator {
     client: Option<Arc<dyn Provider>>,
     workflow_root: Option<PathBuf>,
     memory_root: Option<PathBuf>,
+    product_instruction: Option<String>,
 }
 
 impl SolveOrchestrator {
@@ -52,6 +53,7 @@ impl SolveOrchestrator {
             client: None,
             workflow_root: None,
             memory_root: None,
+            product_instruction: None,
         }
     }
 
@@ -78,6 +80,11 @@ impl SolveOrchestrator {
 
     pub fn with_memory_root(mut self, root: Option<PathBuf>) -> Self {
         self.memory_root = root;
+        self
+    }
+
+    pub fn with_product_instruction(mut self, instruction: Option<String>) -> Self {
+        self.product_instruction = instruction;
         self
     }
 
@@ -133,6 +140,7 @@ impl SolveOrchestrator {
                     "tutor.deep_solve.retrieve",
                     Arc::new(DeepSolveRetrieveExecutor {
                         question,
+                        product_instruction: self.product_instruction.clone(),
                         kb: kb.map(str::to_string),
                         event_sink: self.event_sink.clone(),
                         governance: self.governance.clone(),
@@ -283,6 +291,7 @@ fn deep_solve_stage_for_step(step_id: &str) -> deep_events::DeepSolveStage {
 
 struct DeepSolveRetrieveExecutor {
     question: String,
+    product_instruction: Option<String>,
     kb: Option<String>,
     event_sink: Option<SharedEventSink>,
     governance: GovernanceConfig,
@@ -317,6 +326,11 @@ impl StepExecutor for DeepSolveRetrieveExecutor {
                 context
                     .variables
                     .insert("question".into(), serde_json::json!(self.question.clone()));
+                if let Some(instruction) = self.product_instruction.as_deref() {
+                    context
+                        .variables
+                        .insert("tutor_instruction".into(), serde_json::json!(instruction));
+                }
                 context
                     .variables
                     .insert("kb_summary".into(), serde_json::json!(kb_summary.clone()));

@@ -33,6 +33,7 @@ use crate::space_tool::{
     ListNotebookTreeTool, ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool,
 };
 use crate::stream::StreamEvent;
+use crate::tutor_store::{TutorProfile, TutorStore};
 
 #[derive(Clone)]
 struct WsState {
@@ -41,6 +42,7 @@ struct WsState {
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
+    tutors: Arc<TutorStore>,
     rag_root: PathBuf,
 }
 
@@ -52,6 +54,7 @@ struct PersistedEventSink {
     streamed_content: Arc<AtomicBool>,
     research_report_started: Arc<AtomicBool>,
     run_id: String,
+    tutor_id: Option<String>,
 }
 
 impl EventSink for PersistedEventSink {
@@ -63,9 +66,13 @@ impl EventSink for PersistedEventSink {
         let session_id = self.session_id.clone();
         let stream = self.stream.clone();
         let run_id = self.run_id.clone();
+        let tutor_id = self.tutor_id.clone();
         Box::pin(async move {
             if let Some(map) = data.as_object_mut() {
                 map.insert("run_id".into(), serde_json::Value::String(run_id.clone()));
+                if let Some(tutor_id) = tutor_id {
+                    map.insert("tutor_id".into(), serde_json::Value::String(tutor_id));
+                }
             }
             if let Some(stage) = run_stage_from_trace(&kind, &data)
                 && let Some(run) = pool.update_active_run_stage(&session_id, &run_id, &stage)
@@ -373,6 +380,7 @@ pub fn ws_router(
     memory: Arc<MemoryStore>,
     notebook: Arc<NotebookStore>,
     quizzes: Arc<QuizStore>,
+    tutors: Arc<TutorStore>,
     rag_root: impl Into<PathBuf>,
 ) -> Router {
     let state = WsState {
@@ -381,6 +389,7 @@ pub fn ws_router(
         memory,
         notebook,
         quizzes,
+        tutors,
         rag_root: rag_root.into(),
     };
     Router::new()
@@ -395,6 +404,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         memory,
         notebook,
         quizzes,
+        tutors,
         rag_root,
     } = state;
     let TutorMessageInput {
@@ -405,6 +415,20 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         cancel,
     } = input;
     let history_len = pool.history_len(&entry.id).await + 1;
+    let bound_tutor = match entry.tutor_id.as_deref() {
+        Some(tutor_id) => match tutors.get_available(tutor_id) {
+            Some(tutor) => Some(tutor),
+            None => {
+                let message = "bound tutor is unavailable";
+                let _ = entry
+                    .stream
+                    .status("error", serde_json::json!({ "message": message }))
+                    .await;
+                return "error";
+            }
+        },
+        None => None,
+    };
     let user_message_index = next_user_message_index(&pool, &entry.id).await;
     if !mentions.is_empty() {
         let _ = pool
@@ -426,6 +450,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
                 "capability": entry.capability,
                 "run_id": run_id,
                 "history_len": history_len,
+                "tutor_id": entry.tutor_id.clone(),
             }),
         )
         .await;
@@ -477,6 +502,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
             streamed_content: streamed_content.clone(),
             research_report_started: research_report_started.clone(),
             run_id: run_id.clone(),
+            tutor_id: entry.tutor_id.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance)
             .with_event_sink(sink)
@@ -486,6 +512,18 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
                 notebook.clone(),
                 quizzes.clone(),
             )));
+        if let Some(tutor) = bound_tutor.as_ref() {
+            if !tutor
+                .allowed_capabilities
+                .iter()
+                .any(|allowed| allowed == &entry.capability)
+            {
+                return Err(tutor_agent::TutorError::UnsupportedCapability(
+                    entry.capability.clone(),
+                ));
+            }
+            router = router.with_product_instruction(tutor_product_instruction(tutor));
+        }
         if entry.capability == "quiz" {
             router = router
                 .with_product_tool(Arc::new(ProposeQuizPlanTool))
@@ -638,6 +676,14 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
             "failed"
         }
     }
+}
+
+fn tutor_product_instruction(tutor: &TutorProfile) -> String {
+    format!(
+        "Tutor name: {}\n\n## Tutor Soul (user-authored Markdown)\n\n{}",
+        tutor.name.trim(),
+        tutor.soul_markdown.trim()
+    )
 }
 
 fn should_record_chat_memory(capability: &str, research_report_started: bool) -> bool {

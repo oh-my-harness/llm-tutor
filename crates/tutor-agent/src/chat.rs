@@ -189,6 +189,7 @@ async fn run_chat_inner(
     session: Option<Session>,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
+    let system_prompt = router.apply_product_instruction(&system_prompt);
     emit_trace(
         &router.event_sink,
         "phase_start",

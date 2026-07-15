@@ -1,6 +1,6 @@
 # Persistent Tutor Design
 
-> Status: planned | Date: 2026-07-15 | Product surface: 辅导机器人
+> Status: in progress | Date: 2026-07-15 | Product surface: 辅导机器人
 
 Implementation plan:
 `../plans/2026-07-15-persistent-tutor-implementation-plan.md`.
@@ -8,9 +8,10 @@ Implementation plan:
 ## 1. Product Decision
 
 The Tutor surface shall represent persistent tutor entities, not another Chat
-mode. A tutor owns a role, goal, capability policy, resource permissions,
+mode. A tutor owns a Markdown Soul, capability policy, resource permissions,
 conversation collection, and private continuity memory. New conversations
-begin by choosing who the user wants to learn with; that tutor may then use
+may choose who the user wants to learn with; without a selection they use the
+Temporary Assistant. A persistent tutor may then use
 Chat, Research, Quiz, Deep Solve, Notebook, Knowledge, Space, and Memory as
 parts of one learning relationship.
 
@@ -32,7 +33,7 @@ split by ownership:
 | --- | --- | --- | --- |
 | L1 evidence | Product workspace | What happened in Chat, Quiz, Notebook, and Knowledge | Shared product evidence |
 | Learner Memory | Learner | Profile, scope, preferences, strengths, weaknesses, and recent learning state | Readable by authorized tutors |
-| Tutor configuration | User | Tutor identity, role, specialty, goals, defaults, and permissions | Belongs to one tutor |
+| Tutor configuration | User | Tutor identity, Markdown Soul, defaults, and permissions | Belongs to one tutor |
 | Tutor Memory | Tutor relationship | Commitments, open loops, lesson plans, reflections, and next actions | Private to one tutor by default |
 
 Learner Memory answers “what is known about the learner.” Tutor Memory answers
@@ -80,7 +81,7 @@ improves continuity. They may not store credentials, sensitive personal data,
 external factual claims, or unsupported personality judgments. Tutor Memory is
 visible, editable, removable, and resettable by the user.
 
-## 4. Tutor Entity
+## 4. Tutor Entity and Soul
 
 A tutor profile contains at least:
 
@@ -88,8 +89,7 @@ A tutor profile contains at least:
 {
   "id": "transformer-tutor",
   "name": "Transformer 导师",
-  "role": "帮助用户系统掌握 Transformer 架构",
-  "goal": "从注意力机制推进到可独立阅读论文",
+  "soul_markdown": "# 核心身份\n\n你是一位帮助学习者系统掌握 Transformer 架构的导师。\n\n# 教学风格\n\n- 先建立直觉，再介绍公式。",
   "default_model_config_id": "...",
   "default_capability": "chat",
   "allowed_capabilities": ["chat", "research", "quiz", "deep_solve"],
@@ -103,12 +103,22 @@ A tutor profile contains at least:
 }
 ```
 
-The role and permissions are explicit product configuration. They are not
-silently rewritten by the model.
+`soul_markdown` is the stable, user-owned definition of who the tutor is and
+how it teaches. It may describe identity, teaching style, specialties,
+principles, and boundaries. It must not become a task list, learner profile, or
+copy of current conversation state.
+
+The current learning goal, next lesson, commitments, and unresolved work belong
+to Tutor Memory because they change over time. Model selection, capabilities,
+resource access, and safety policy remain structured configuration and are
+never inferred by parsing Soul Markdown. Soul cannot override enforced product
+permissions or runtime safety instructions.
 
 ## 5. New Conversation Entry
 
-The empty Chat state becomes a tutor chooser centered on the question:
+The empty Chat state keeps the normal greeting and exposes a compact tutor
+chooser beneath the composer. Temporary Assistant is the default when no tutor
+is selected.
 
 > 这次想和哪位导师交流？
 
@@ -116,23 +126,24 @@ It shows:
 
 - recently used tutors;
 - all configured tutors;
-- each tutor's role, current goal, last progress, and open-loop count;
+- each tutor's Soul summary, current goal, last progress, and open-loop count;
 - create-tutor action;
-- a Temporary Assistant entry for one-off work.
+- a clear Temporary Assistant state for one-off work without duplicating it as
+  a persistent-tutor list item.
 
 Selecting a tutor immediately creates or opens a conversation. A configured
 default or last-used tutor may support a one-click quick start so the chooser
 does not become repeated friction.
 
 Temporary Assistant preserves today's lightweight Chat behavior. It may read
-authorized Learner Memory but has no persistent role, private Tutor Memory, or
+authorized Learner Memory but has no persistent Soul, private Tutor Memory, or
 long-term tutor plan.
 
 ## 6. Session Binding and Handoff
 
 Every persistent conversation stores a stable `tutor_id` beside its runtime
 session mapping. The binding does not change in place because changing tutor
-identity would replace role instructions and private memory inside an existing
+identity would replace Soul instructions and private memory inside an existing
 runtime history.
 
 To change tutors, the product creates a new conversation through a handoff:
@@ -151,7 +162,7 @@ For a tutor-bound turn, product code supplies thin, explicit context mappings
 to the runtime:
 
 ```text
-tutor role and permissions
+tutor Soul and permissions
   + relevant Learner Memory
   + relevant private Tutor Memory
   + runtime session history
@@ -179,8 +190,9 @@ into every prompt.
 - Learner Memory is shared user context.
 - Tutor Memory preserves relationship-specific plans and commitments.
 
-The user chooses a tutor before choosing tools. The tutor chooses or proposes
-the appropriate capability as the task develops.
+The user may choose a tutor before the first message. Without a selection, the
+conversation uses Temporary Assistant. The tutor chooses or proposes the
+appropriate capability as the task develops.
 
 ## 9. UI Shape
 
@@ -189,7 +201,7 @@ The Tutor page is an operational workspace:
 - left rail: tutor list, selection, and run state;
 - main area: the selected tutor's conversations;
 - compact side area: current goal, next plan, commitments, and open loops;
-- settings: role, model defaults, capabilities, resource permissions, and
+- settings: Markdown Soul, model defaults, capabilities, resource permissions, and
   autonomous-memory policy;
 - memory management: inspect, edit, close, delete, or reset private entries.
 
@@ -204,7 +216,7 @@ first step of the new-conversation empty state.
 - Add a built-in General Tutor.
 - Add tutor selection to the new-conversation screen.
 - Persist immutable `tutor_id` on sessions.
-- Apply tutor role, default model, and capability permissions.
+- Apply tutor Soul, default model, and capability permissions.
 
 ### Phase 2: Private Continuity Memory
 
@@ -222,7 +234,7 @@ first step of the new-conversation empty state.
 ## 11. Acceptance Criteria
 
 - A user can create or select a tutor before starting a conversation.
-- A tutor-bound session restores the same role and private memory after restart.
+- A tutor-bound session restores the same Soul and private memory after restart.
 - Two tutors can share Learner Memory while keeping commitments and plans
   private from one another.
 - A tutor can continue an unresolved learning thread across sessions.

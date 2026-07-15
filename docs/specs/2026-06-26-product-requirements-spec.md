@@ -59,14 +59,16 @@
 
 - REQ-060: The Tutor surface shall manage persistent tutor entities rather
   than act as another capability mode. Status: planned.
-- REQ-061: A tutor shall own an explicit role, learning goal, default model,
+- REQ-061: A tutor shall own a user-editable Markdown Soul, default model,
   allowed capabilities, resource permissions, conversation collection, and
-  private Tutor Memory. Status: planned.
-- REQ-062: The new-conversation empty state shall let the user choose which
-  tutor to talk with before entering Chat. Status: planned.
-- REQ-063: The product shall retain a Temporary Assistant entry for one-off
-  conversations without persistent tutor identity or private Tutor Memory.
-  Status: planned.
+  private Tutor Memory. Soul defines stable identity and teaching behavior;
+  changing learning goals belong to Tutor Memory. Status: in progress.
+- REQ-062: The new-conversation empty state shall let the user optionally choose
+  a tutor before the first message. Status: implemented.
+- REQ-063: When no tutor is selected, the product shall use Temporary Assistant
+  for a one-off conversation without persistent identity or private Tutor
+  Memory. Temporary Assistant need not appear as a duplicate tutor-list item.
+  Status: implemented.
 - REQ-064: Tutor identity and capability mode shall remain separate concepts:
   the tutor is who accompanies the learner, while Chat, Research, Quiz, and
   Deep Solve describe what it is doing. Status: planned.
@@ -80,9 +82,12 @@
   source-linked, and lifecycle-aware. It shall not duplicate the complete
   learner profile or store sensitive data and external factual claims.
   Status: planned.
-- REQ-068: Tutor context shall combine role and permissions, relevant Learner
+- REQ-068: Tutor context shall combine Soul and permissions, relevant Learner
   Memory, relevant private Tutor Memory, runtime session history, and current
   resources through thin mappings to runtime APIs. Status: planned.
+- REQ-068A: Soul Markdown shall be injected only as bounded product-owned
+  runtime instruction. It shall not be parsed to grant capabilities, tools, or
+  resource access and cannot override safety policy. Status: planned.
 - REQ-069: Deleting or resetting a tutor shall not implicitly delete global
   Learner Memory, Notebook, Knowledge, Quiz, or Space assets. Status: planned.
 - REQ-069A: The detailed product contract and MVP sequence shall follow

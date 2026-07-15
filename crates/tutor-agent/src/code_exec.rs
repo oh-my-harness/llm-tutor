@@ -80,12 +80,13 @@ async fn run_code_exec_inner(
                 model: router.llm.model.clone(),
                 model_info: router.llm.model_info(8192),
                 tools,
-                system_prompt: "You are a code execution tutor. When the user asks to run code, \
+                system_prompt: router.apply_product_instruction(
+                    "You are a code execution tutor. When the user asks to run code, \
              call code_exec with the correct language and code, then explain stdout, stderr, \
              and exit code clearly. For non-trivial numeric calculations or approximations, \
              call code_exec with Python to compute or verify the result before answering. If no \
-             runnable code or computable task is provided, ask for the missing details."
-                    .into(),
+             runnable code or computable task is provided, ask for the missing details.",
+                ),
                 final_answer_mode: FinalAnswerMode::tool_with_text_fallback(),
                 before_tool_call,
                 prepare_next_turn: vec![],

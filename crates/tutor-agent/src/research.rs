@@ -161,7 +161,10 @@ fn build_research_engine(
     .map_err(|err| TutorError::Internal(format!("research workflow initialization failed: {err}")))?
     .with_executor(
         "tutor.research.prepare",
-        Arc::new(PrepareResearchWorkflowExecutor { input }),
+        Arc::new(PrepareResearchWorkflowExecutor {
+            input,
+            product_instruction: router.product_instruction.clone(),
+        }),
     )
     .with_tool(Arc::new(router.read_memory_tool()))
     .with_tool(Arc::new(router.write_memory_tool()))
@@ -196,6 +199,7 @@ fn rag_search_tool(router: &CapabilityRouter) -> RagSearchTool {
 
 struct PrepareResearchWorkflowExecutor {
     input: ResearchWorkflowInput,
+    product_instruction: Option<String>,
 }
 
 impl StepExecutor for PrepareResearchWorkflowExecutor {
@@ -210,6 +214,11 @@ impl StepExecutor for PrepareResearchWorkflowExecutor {
                     "research_request".into(),
                     serde_json::json!(self.input.request.clone()),
                 );
+                if let Some(instruction) = self.product_instruction.as_deref() {
+                    context
+                        .variables
+                        .insert("tutor_instruction".into(), serde_json::json!(instruction));
+                }
             }
             Ok(workflow_step_result(
                 "research request prepared".into(),

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const GENERAL_TUTOR_ID: &str = "general-tutor";
+pub const MAX_SOUL_CHARS: usize = 16_000;
 
 const SUPPORTED_CAPABILITIES: &[&str] = &[
     "chat",
@@ -39,8 +40,7 @@ impl Default for TutorResourcePermissions {
 pub struct TutorProfile {
     pub id: String,
     pub name: String,
-    pub role: String,
-    pub goal: String,
+    pub soul_markdown: String,
     #[serde(default)]
     pub avatar: Option<String>,
     #[serde(default)]
@@ -64,9 +64,7 @@ pub struct TutorProfile {
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateTutorProfile {
     pub name: String,
-    pub role: String,
-    #[serde(default)]
-    pub goal: String,
+    pub soul_markdown: String,
     #[serde(default)]
     pub avatar: Option<String>,
     #[serde(default)]
@@ -86,8 +84,7 @@ pub struct CreateTutorProfile {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct UpdateTutorProfile {
     pub name: Option<String>,
-    pub role: Option<String>,
-    pub goal: Option<String>,
+    pub soul_markdown: Option<String>,
     pub avatar: Option<Option<String>>,
     pub default_model_config_id: Option<Option<String>>,
     pub default_capability: Option<String>,
@@ -129,13 +126,15 @@ impl TutorStore {
         let root = root.into();
         fs::create_dir_all(&root).expect("failed to create tutor store directory");
         let path = root.join("tutors.json");
-        let mut value = fs::read_to_string(&path)
+        let (mut value, migrated) = fs::read_to_string(&path)
             .ok()
-            .and_then(|text| serde_json::from_str::<TutorFile>(&text).ok())
+            .and_then(|text| load_file(&text).ok())
             .unwrap_or_default();
         if !value.tutors.iter().any(|item| item.id == GENERAL_TUTOR_ID) {
             value.tutors.push(general_tutor());
             save_file(&path, &value).expect("failed to seed General Tutor");
+        } else if migrated {
+            save_file(&path, &value).expect("failed to migrate tutor store");
         }
         Self {
             root,
@@ -182,8 +181,7 @@ impl TutorStore {
         let profile = TutorProfile {
             id: uuid::Uuid::new_v4().to_string(),
             name: clean_required(input.name, "tutor name")?,
-            role: clean_required(input.role, "tutor role")?,
-            goal: input.goal.trim().to_string(),
+            soul_markdown: clean_soul(input.soul_markdown)?,
             avatar: clean_optional(input.avatar),
             default_model_config_id: clean_optional(input.default_model_config_id),
             default_capability: input.default_capability.trim().to_string(),
@@ -217,11 +215,8 @@ impl TutorStore {
         if let Some(name) = input.name {
             profile.name = clean_required(name, "tutor name")?;
         }
-        if let Some(role) = input.role {
-            profile.role = clean_required(role, "tutor role")?;
-        }
-        if let Some(goal) = input.goal {
-            profile.goal = goal.trim().to_string();
+        if let Some(soul_markdown) = input.soul_markdown {
+            profile.soul_markdown = clean_soul(soul_markdown)?;
         }
         if let Some(avatar) = input.avatar {
             profile.avatar = clean_optional(avatar);
@@ -307,8 +302,7 @@ fn general_tutor() -> TutorProfile {
     TutorProfile {
         id: GENERAL_TUTOR_ID.into(),
         name: "通用导师".into(),
-        role: "根据学习目标提供清晰讲解、追问、练习与阶段性建议。".into(),
-        goal: "帮助用户理解当前问题并持续推进学习。".into(),
+        soul_markdown: default_general_soul(),
         avatar: None,
         default_model_config_id: None,
         default_capability: "chat".into(),
@@ -333,12 +327,78 @@ fn save_file(path: &PathBuf, value: &TutorFile) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn load_file(text: &str) -> anyhow::Result<(TutorFile, bool)> {
+    let mut value = serde_json::from_str::<serde_json::Value>(text)?;
+    let mut migrated = false;
+    if let Some(tutors) = value
+        .get_mut("tutors")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for tutor in tutors {
+            let Some(profile) = tutor.as_object_mut() else {
+                continue;
+            };
+            let missing_soul = profile
+                .get("soul_markdown")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|soul| soul.trim().is_empty());
+            if missing_soul {
+                let role = profile
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                profile.insert(
+                    "soul_markdown".into(),
+                    serde_json::Value::String(legacy_soul(&role)),
+                );
+                migrated = true;
+            }
+            migrated |= profile.remove("role").is_some();
+            migrated |= profile.remove("goal").is_some();
+        }
+    }
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(2)
+    {
+        value["schema_version"] = serde_json::json!(2);
+        migrated = true;
+    }
+    Ok((serde_json::from_value(value)?, migrated))
+}
+
 fn clean_required(value: String, label: &str) -> Result<String, TutorStoreError> {
     let value = value.trim().to_string();
     if value.is_empty() {
         return Err(TutorStoreError::Validation(format!("{label} is required")));
     }
     Ok(value)
+}
+
+fn clean_soul(value: String) -> Result<String, TutorStoreError> {
+    let value = clean_required(value, "tutor soul")?;
+    if value.chars().count() > MAX_SOUL_CHARS {
+        return Err(TutorStoreError::Validation(format!(
+            "tutor soul exceeds {MAX_SOUL_CHARS} characters"
+        )));
+    }
+    Ok(value)
+}
+
+fn legacy_soul(role: &str) -> String {
+    let role = role.trim();
+    if role.is_empty() {
+        "# 核心身份\n\n请根据学习者的需要提供清晰、可靠的教学帮助。".into()
+    } else {
+        format!("# 核心身份\n\n{role}")
+    }
+}
+
+fn default_general_soul() -> String {
+    "# 核心身份\n\n你是一位通用学习导师，帮助学习者理解当前问题并持续推进学习。\n\n# 教学风格\n\n- 先确认学习者真正想解决的问题。\n- 使用清晰解释、追问和练习促进理解。\n- 根据学习者的反馈调整讲解深度与节奏。\n\n# 教学原则\n\n- 区分事实、推测和建议。\n- 不假装学习者已经理解。\n- 复杂问题先建立直觉，再展开细节。\n\n# 边界\n\n- 不记录敏感个人信息。\n- 不在证据不足时评价学习者的能力。"
+        .into()
 }
 
 fn clean_optional(value: Option<String>) -> Option<String> {
@@ -403,7 +463,7 @@ fn default_true() -> bool {
 }
 
 fn schema_version() -> u32 {
-    1
+    2
 }
 
 fn default_capability() -> String {
@@ -424,8 +484,7 @@ mod tests {
     fn test_input(name: &str) -> CreateTutorProfile {
         CreateTutorProfile {
             name: name.into(),
-            role: "Teach carefully".into(),
-            goal: "Learn".into(),
+            soul_markdown: "# Identity\n\nTeach carefully.".into(),
             avatar: None,
             default_model_config_id: None,
             default_capability: "chat".into(),
@@ -457,7 +516,7 @@ mod tests {
             .update(
                 &created.id,
                 UpdateTutorProfile {
-                    goal: Some("Master algebra".into()),
+                    soul_markdown: Some("# Identity\n\nTeach algebra carefully.".into()),
                     ..Default::default()
                 },
             )
@@ -465,7 +524,13 @@ mod tests {
         drop(store);
 
         let reopened = TutorStore::new_with_root(dir.path());
-        assert_eq!(reopened.get(&created.id).unwrap().goal, "Master algebra");
+        assert!(
+            reopened
+                .get(&created.id)
+                .unwrap()
+                .soul_markdown
+                .contains("algebra")
+        );
         reopened.archive(&created.id).unwrap();
         assert!(reopened.get_available(&created.id).is_none());
         assert!(
@@ -491,5 +556,28 @@ mod tests {
             store.archive(GENERAL_TUTOR_ID),
             Err(TutorStoreError::BuiltInTutor)
         ));
+    }
+
+    #[test]
+    fn migrates_only_stable_legacy_role_to_soul_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now().to_rfc3339();
+        fs::write(
+            dir.path().join("tutors.json"),
+            format!(
+                r#"{{"schema_version":1,"tutors":[{{"id":"legacy","name":"Legacy","role":"Teach math","goal":"Learn algebra","default_capability":"chat","allowed_capabilities":["chat"],"created_at":"{now}","updated_at":"{now}"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let store = TutorStore::new_with_root(dir.path());
+        let tutor = store.get("legacy").unwrap();
+        assert!(tutor.soul_markdown.contains("Teach math"));
+        assert!(!tutor.soul_markdown.contains("Learn algebra"));
+
+        let persisted = fs::read_to_string(dir.path().join("tutors.json")).unwrap();
+        assert!(persisted.contains("soul_markdown"));
+        assert!(!persisted.contains("\"role\""));
+        assert!(!persisted.contains("\"goal\""));
     }
 }

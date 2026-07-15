@@ -37,8 +37,9 @@
 | Memory | L1 事件证据、L2 分模块摘要与 L3 跨模块记忆；支持模型/模式可选的更新、检查、去重 workflow，以及逐项 diff 审核。 |
 | Desktop | Tauri 原生窗口、托管 `tutor-web` sidecar、系统文件对话框、桌面剪贴板/右键菜单、外部链接。 |
 | Appearance | `cool-light` 与 `graphite-dark` 主题，中英文界面。 |
+| Tutor | 持久导师身份、Markdown Soul、不可变会话绑定、基础能力策略和导师管理。 |
 
-“辅导机器人”独立页面目前仍是占位入口，后续定位为结合学习目标、记忆、资料和测验反馈的持久化个性化导师。原 Books 能力已经移除，Research 报告只保存到 Notebook。
+“辅导机器人”现在支持创建和管理持久导师。每位导师通过 Markdown Soul 定义稳定身份与教学方式；独立 Tutor Memory、完整资源权限和导师交接仍在后续阶段。原 Books 能力已经移除，Research 报告只保存到 Notebook。
 
 ## 快速开始
 
@@ -247,7 +248,7 @@ GitHub 发布工作流在 `v*` 标签和手动 `workflow_dispatch` 下构建 Win
 ## 当前限制
 
 - 单用户、本地优先；没有账号、权限、云同步或协作。
-- 辅导机器人独立页面仍是占位页。
+- 辅导机器人已支持持久身份与 Soul；私有 Tutor Memory、完整资源权限和导师交接尚未实现。
 - 运行中的 workflow 在应用进程重启后尚不能保证从中断点续跑。
 - API Key 暂存于本地 JSON，系统钥匙串尚未实现。
 - Linux 安装包和自动更新尚未实现。

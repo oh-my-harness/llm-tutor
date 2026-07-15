@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, Check, ChevronDown, Settings2, UserRound } from 'lucide-react'
 import { useI18n } from '../i18n'
-import type { TutorProfile } from '../tutorTypes'
+import { tutorSoulSummary, type TutorProfile } from '../tutorTypes'
 
 interface Props {
   tutors: TutorProfile[]
@@ -18,7 +18,9 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
     ? tutors.find((tutor) => tutor.id === selectedTutorId) ?? null
     : null
   const selectedName = selectedTutor?.name ?? t('chat.tutor.temporary')
-  const selectedDescription = selectedTutor?.goal || selectedTutor?.role || t('chat.tutor.temporary.description')
+  const selectedDescription = selectedTutor
+    ? tutorSoulSummary(selectedTutor.soul_markdown)
+    : t('chat.tutor.temporary.description')
 
   useEffect(() => {
     if (!open) return
@@ -80,7 +82,7 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
               key={tutor.id}
               selected={selectedTutorId === tutor.id}
               title={tutor.name}
-              description={tutor.goal || tutor.role}
+              description={tutorSoulSummary(tutor.soul_markdown)}
               icon={<Bot size={17} />}
               onClick={() => select(selectedTutorId === tutor.id ? null : tutor.id)}
             />

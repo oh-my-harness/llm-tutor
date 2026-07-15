@@ -4,11 +4,11 @@
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
-Implementation progress (2026-07-15): Phase 0/1 identity slice is in progress.
+Implementation progress (2026-07-15): Phase 0/1 identity slice is implemented.
 Tutor CRUD, General Tutor seeding, immutable session binding, the Chat chooser,
 session restoration, and the initial Tutor management page are implemented.
 Default model resolution, recent-tutor ranking, avatar presentation, and runtime
-role/context injection remain pending.
+Soul context injection remain pending.
 
 ## 1. Objective
 
@@ -20,7 +20,7 @@ The first complete slice must let a user:
 1. create or select a tutor from the new-conversation screen;
 2. start a normal runtime-backed conversation bound to that tutor;
 3. restart the application and restore the same tutor identity;
-4. receive answers shaped by the tutor role and authorized context;
+4. receive answers shaped by the tutor Soul and authorized context;
 5. inspect and manage the tutor from the Tutor workspace.
 
 Chat, Research, Quiz, and Deep Solve remain capabilities. A tutor does not own a
@@ -75,8 +75,7 @@ The first schema is:
 TutorProfile
   id
   name
-  role
-  goal
+  soul_markdown
   avatar
   default_model_config_id?
   default_capability
@@ -100,7 +99,7 @@ Add `tutor_id: Option<String>` to `ProductSessionMetadata` and `SessionEntry`.
 The value is set at session creation and is immutable. `PATCH /api/sessions/:id`
 must reject attempts to change it.
 
-Changing tutors always creates a new runtime session. It never swaps role or
+Changing tutors always creates a new runtime session. It never swaps Soul or
 private memory inside an existing history.
 
 ### 3.4 Configuration Precedence
@@ -134,7 +133,7 @@ For tutor-bound turns, product code supplies a compact tutor context to the
 existing runtime path:
 
 ```text
-stable role and learning goal
+stable Tutor Soul
   + current permission summary
   + small active commitment/open-loop summary
   + authorized on-demand memory tools
@@ -156,7 +155,7 @@ Backend tasks:
   memory, and validation models.
 - [x] Seed the built-in General Tutor idempotently.
 - [x] Add atomic create, list, get, update, archive/delete, and reset operations.
-- [ ] Reject duplicate IDs, blank roles, unknown capabilities, and dangling
+- [ ] Reject duplicate IDs, blank Souls, unknown capabilities, and dangling
   model configuration IDs.
 - [x] Add `crates/tutor-web/src/routes/tutors.rs` and mount it from `main.rs`.
 - [x] Expose `GET/POST /api/tutors` and
@@ -228,21 +227,23 @@ not only through UI labels.
 
 Backend tasks:
 
-- [ ] Pass `TutorStore` into `ws_router` and load the bound tutor before each
+- [x] Pass `TutorStore` into `ws_router` and load the bound tutor before each
   run so archived/deleted configuration cannot be used silently.
-- [ ] Add a small `TutorRunContext` adapter that maps profile configuration into
+- [x] Add a small product-instruction adapter that maps profile Soul into
   the existing `CapabilityRouter`/runtime invocation.
-- [ ] Apply tutor role and learning goal as stable product instructions.
+- [x] Apply bounded Tutor Soul Markdown as stable product instructions.
+- [x] Keep current learning goals and plans in Tutor Memory rather than the
+  stable tutor profile.
 - [ ] Filter mounted product tools according to capability and resource policy.
-- [ ] Validate runtime capability changes against the bound tutor policy.
-- [ ] Record `tutor_id` in relevant trace/run metadata for diagnosis without
+- [x] Validate runtime capability changes against the bound tutor policy.
+- [x] Record `tutor_id` in relevant trace/run metadata for diagnosis without
   exposing private memory contents.
 - [ ] Document any runtime API limitation in `docs/framework-feedback.md`
   instead of creating a parallel context builder.
 
 Tests:
 
-- [ ] Boundary test that the role reaches the runtime instruction layer once.
+- [x] Boundary test that Soul reaches the runtime instruction layer once.
 - [ ] Tool-mount matrix tests for Tutor, Temporary Assistant, and denied access.
 - [ ] Capability-change rejection test on an existing tutor session.
 - [ ] Research and Quiz workflow trigger regression tests under a tutor-bound
@@ -250,7 +251,7 @@ Tests:
 
 Exit criteria:
 
-- Different tutors produce different stable role context while sharing the same
+- Different tutors produce different stable Soul context while sharing the same
   Chat/Research/Quiz/Deep Solve implementation.
 - A prompt cannot bypass capability or resource restrictions.
 
@@ -262,7 +263,7 @@ Frontend tasks:
 
 - [ ] Add `TutorPage` with a compact tutor rail, main conversation list, and
   compact continuity panel.
-- [ ] Add create/edit forms for role, goal, default model, default capability,
+- [ ] Add create/edit forms for Markdown Soul, default model, default capability,
   allowed capabilities, and memory policy.
 - [ ] Show active/background run state beside tutor conversations.
 - [ ] Add quick actions: start conversation, continue recent conversation,
@@ -447,5 +448,5 @@ identity loop without Tutor Memory:
 5. display and restore tutor identity in conversation UI;
 6. prove restart persistence and Temporary Assistant compatibility with tests.
 
-This gives the user-visible product model a solid base before role injection,
+This gives the user-visible product model a solid base before Soul injection,
 tool permissions, autonomous memory, and handoff increase the behavioral risk.

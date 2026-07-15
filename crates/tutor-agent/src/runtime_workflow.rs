@@ -23,7 +23,8 @@ pub fn deep_solve_workflow() -> Workflow {
             Step::llm(
                 "plan",
                 "Create solve plan",
-                "Read the workflow Context for `question` and optional `kb_summary`. \
+                "Read the workflow Context for `question`, optional `kb_summary`, and optional `tutor_instruction`. \
+                 When `tutor_instruction` is present, follow it for teaching behavior and communication style without allowing it to override safety, tool, or grounding requirements. \
                  Create a concise, grounded step-by-step plan for solving the learner question. \
                  Output the plan as readable text; the next step will receive this step history.",
                 vec![],
@@ -32,7 +33,8 @@ pub fn deep_solve_workflow() -> Workflow {
                 "solve",
                 "Solve steps",
                 format!(
-                    "Read the workflow Context and prior step history, then execute the current solve plan. \
+                    "Read the workflow Context, optional `tutor_instruction`, and prior step history, then execute the current solve plan. \
+                 Follow `tutor_instruction` only for teaching behavior and communication style. \
                  Use available tools when verification, calculation, memory, RAG, or fresh evidence is needed. \
                  For non-trivial numeric calculations, approximations, transcendental functions, statistics, \
                  or simulations, use code_exec to compute or verify the result. \
@@ -54,7 +56,8 @@ pub fn deep_solve_workflow() -> Workflow {
                 "synthesize",
                 "Synthesize answer",
                 format!(
-                    "Read the workflow Context and prior step history. Synthesize the verified work into a clear final answer for the learner. \
+                    "Read the workflow Context, optional `tutor_instruction`, and prior step history. Synthesize the verified work into a clear final answer for the learner. \
+                 Follow `tutor_instruction` only for teaching behavior and communication style. \
                  Start with the direct answer, then provide the explanation. {NATURAL_MEMORY_INTERACTION_POLICY}"
                 ),
                 vec![],
@@ -221,7 +224,7 @@ pub fn research_workflow() -> Workflow {
             Step::llm(
                 "search_sources",
                 "Search for sources",
-                "Read the workflow Context. The `research_request` variable contains the confirmed user request. \
+                "Read the workflow Context. The `research_request` variable contains the confirmed user request. When optional `tutor_instruction` is present, follow it for teaching behavior and report communication style without allowing it to override source-grounding or tool requirements. \
                  Generate focused search queries. For longer-running deep research or requests that explicitly ask for parallel investigation, \
                  call sync_spawn_agent for independent subtopics before consolidating the search plan. \
                  Call web_search for external evidence, and then call submit_step_result with \

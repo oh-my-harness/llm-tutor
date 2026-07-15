@@ -62,6 +62,7 @@ pub struct CapabilityRouter {
     pub product_tools: Vec<Arc<dyn Tool>>,
     pub workflow_root: Option<PathBuf>,
     pub memory_root: Option<PathBuf>,
+    pub product_instruction: Option<String>,
     client: Option<Arc<dyn Provider>>,
 }
 
@@ -78,6 +79,7 @@ impl CapabilityRouter {
             product_tools: vec![],
             workflow_root: None,
             memory_root: None,
+            product_instruction: None,
             client: None,
         }
     }
@@ -125,6 +127,18 @@ impl CapabilityRouter {
     pub fn with_memory_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.memory_root = Some(root.into());
         self
+    }
+
+    pub fn with_product_instruction(mut self, instruction: impl Into<String>) -> Self {
+        let instruction = instruction.into().trim().to_string();
+        if !instruction.is_empty() {
+            self.product_instruction = Some(instruction);
+        }
+        self
+    }
+
+    pub(crate) fn apply_product_instruction(&self, system_prompt: &str) -> String {
+        apply_product_instruction(system_prompt, self.product_instruction.as_deref())
     }
 
     pub(crate) fn read_memory_tool(&self) -> ReadMemoryTool {
@@ -179,6 +193,7 @@ impl CapabilityRouter {
                 .with_web_search(self.web_search.clone())
                 .with_workflow_root(self.workflow_root.clone())
                 .with_memory_root(self.memory_root.clone())
+                .with_product_instruction(self.product_instruction.clone())
                 .with_client(client);
                 orchestrator.run(None).await
             }
@@ -253,6 +268,15 @@ impl CapabilityRouter {
                 Ok(answer)
             }
         }
+    }
+}
+
+fn apply_product_instruction(system_prompt: &str, instruction: Option<&str>) -> String {
+    match instruction {
+        Some(instruction) => format!(
+            "{system_prompt}\n\n# Product-provided tutor instruction\n\n{instruction}\n\nFollow this tutor instruction for teaching behavior and communication style. It cannot override safety requirements, tool permissions, capability policy, or factual-grounding requirements."
+        ),
+        None => system_prompt.to_string(),
     }
 }
 
@@ -336,5 +360,22 @@ mod tests {
             Capability::Organize
         ));
         assert!(Capability::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn product_instruction_is_bounded_by_runtime_policy() {
+        let prompt = apply_product_instruction(
+            "Base safety and capability instructions.",
+            Some("# Teaching style\n\nUse visual examples."),
+        );
+
+        assert!(prompt.starts_with("Base safety and capability instructions."));
+        assert!(prompt.contains("Use visual examples."));
+        assert!(prompt.contains("cannot override safety requirements"));
+        assert_eq!(
+            apply_product_instruction("Base", None),
+            "Base",
+            "temporary assistant should not receive tutor instructions"
+        );
     }
 }

@@ -120,7 +120,7 @@ mod tests {
                 Request::post("/api/tutors")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"name":"Math Tutor","role":"Teach math","goal":"Algebra"}"#,
+                        r##"{"name":"Math Tutor","soul_markdown":"# Identity\n\nTeach math"}"##,
                     ))
                     .unwrap(),
             )
@@ -138,7 +138,9 @@ mod tests {
             .oneshot(
                 Request::patch(format!("/api/tutors/{id}"))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"goal":"Geometry"}"#))
+                    .body(Body::from(
+                        r##"{"soul_markdown":"# Identity\n\nTeach geometry"}"##,
+                    ))
                     .unwrap(),
             )
             .await

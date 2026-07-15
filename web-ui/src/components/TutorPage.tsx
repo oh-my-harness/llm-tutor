@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Bot, MessageSquare, Plus, Save, Trash2 } from 'lucide-react'
+import { Bot, Eye, MessageSquare, Pencil, Plus, Save, Trash2 } from 'lucide-react'
 import {
   archiveTutor,
   createTutor,
   tutorCapabilities,
+  tutorSoulSummary,
   updateTutor,
   type TutorDraft,
   type TutorProfile,
 } from '../tutorTypes'
+import { MarkdownMessage } from './MarkdownMessage'
 
 interface Props {
   tutors: TutorProfile[]
@@ -17,8 +19,24 @@ interface Props {
 
 const emptyDraft: TutorDraft = {
   name: '',
-  role: '',
-  goal: '',
+  soul_markdown: `# 核心身份
+
+你是一位帮助学习者持续进步的导师。
+
+# 教学风格
+
+- 先建立直觉，再展开细节。
+- 根据学习者反馈调整讲解方式。
+
+# 教学原则
+
+- 区分事实、推测和建议。
+- 不假装学习者已经理解。
+
+# 边界
+
+- 不记录敏感个人信息。
+- 不在证据不足时评价学习者的能力。`,
   default_capability: 'chat',
   allowed_capabilities: ['chat', 'deep_solve', 'quiz', 'research', 'organize'],
   learner_memory_access: true,
@@ -32,6 +50,7 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
   const [draft, setDraft] = useState<TutorDraft>(emptyDraft)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
+  const [soulView, setSoulView] = useState<'edit' | 'preview'>('edit')
   const selected = tutors.find((item) => item.id === selectedId) ?? null
 
   useEffect(() => {
@@ -49,6 +68,7 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
     setSelectedId(tutor.id)
     setDraft(profileToDraft(tutor))
     setStatus('')
+    setSoulView('edit')
   }
 
   const startCreate = () => {
@@ -56,11 +76,12 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
     setSelectedId(null)
     setDraft({ ...emptyDraft, resource_permissions: { ...emptyDraft.resource_permissions } })
     setStatus('')
+    setSoulView('edit')
   }
 
   const save = async () => {
-    if (!draft.name.trim() || !draft.role.trim()) {
-      setStatus('请填写导师名称和角色说明。')
+    if (!draft.name.trim() || !draft.soul_markdown.trim()) {
+      setStatus('请填写导师名称和 Soul。')
       return
     }
     setBusy(true)
@@ -126,7 +147,7 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
               <Bot size={17} className="shrink-0 text-blue-600" />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{tutor.name}</span>
-                <span className="block truncate text-xs text-gray-500">{tutor.goal || '尚未设置目标'}</span>
+                <span className="block truncate text-xs text-gray-500">{tutorSoulSummary(tutor.soul_markdown)}</span>
               </span>
             </button>
           ))}
@@ -138,7 +159,7 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
           <div className="mb-6 flex items-start justify-between gap-4 border-b border-gray-200 pb-5">
             <div>
               <h2 className="text-xl font-semibold text-gray-900">{creating ? '新建导师' : selected?.name ?? '选择导师'}</h2>
-              <p className="mt-1 text-sm text-gray-500">设置导师的长期角色、学习目标和可使用的能力。</p>
+              <p className="mt-1 text-sm text-gray-500">设置导师的长期 Soul、默认行为和可使用的能力。</p>
             </div>
             {selected && !creating && (
               <button
@@ -166,12 +187,43 @@ export function TutorPage({ tutors, onChanged, onStartConversation }: Props) {
                   </select>
                 </Field>
               </div>
-              <Field label="角色说明">
-                <textarea className={`${inputClass} min-h-24 resize-y`} value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value })} />
-              </Field>
-              <Field label="当前学习目标">
-                <textarea className={`${inputClass} min-h-20 resize-y`} value={draft.goal} onChange={(event) => setDraft({ ...draft, goal: event.target.value })} />
-              </Field>
+              <div>
+                <div className="mb-2 flex items-end justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">导师 Soul</div>
+                    <p className="mt-1 text-xs text-gray-500">用 Markdown 定义稳定身份、教学风格、原则和边界。当前学习目标由导师记忆维护。</p>
+                  </div>
+                  <div className="flex shrink-0 rounded-md bg-gray-100 p-0.5">
+                    <button
+                      type="button"
+                      className={`inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs ${soulView === 'edit' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                      onClick={() => setSoulView('edit')}
+                    >
+                      <Pencil size={14} />
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      className={`inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs ${soulView === 'preview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                      onClick={() => setSoulView('preview')}
+                    >
+                      <Eye size={14} />
+                      预览
+                    </button>
+                  </div>
+                </div>
+                {soulView === 'edit' ? (
+                  <textarea
+                    className={`${inputClass} min-h-80 resize-y font-mono leading-6`}
+                    value={draft.soul_markdown}
+                    onChange={(event) => setDraft({ ...draft, soul_markdown: event.target.value })}
+                  />
+                ) : (
+                  <div className="min-h-80 rounded-md border border-gray-200 bg-gray-50 px-5 py-4">
+                    <MarkdownMessage text={draft.soul_markdown} />
+                  </div>
+                )}
+              </div>
 
               <div>
                 <div className="mb-2 text-sm font-medium text-gray-800">可用能力</div>
@@ -232,8 +284,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function profileToDraft(profile: TutorProfile): TutorDraft {
   return {
     name: profile.name,
-    role: profile.role,
-    goal: profile.goal,
+    soul_markdown: profile.soul_markdown,
     default_capability: profile.default_capability,
     allowed_capabilities: [...profile.allowed_capabilities],
     learner_memory_access: profile.learner_memory_access,
