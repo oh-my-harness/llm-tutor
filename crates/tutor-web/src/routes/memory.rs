@@ -196,36 +196,25 @@ async fn start_memory_run(
                     "Built a structured memory change set",
                 )
                 .await;
-                let has_changes = !change_set.changes.is_empty();
-                let summary = if has_changes {
-                    format!("{} changes ready for review", change_set.changes.len())
+                let summary = if change_set.changes.is_empty() {
+                    "No changes were needed; review the result and finish".to_string()
                 } else {
-                    "No memory changes were needed".to_string()
+                    format!("{} changes ready for review", change_set.changes.len())
                 };
                 let mut runs = task_state.runs.write().await;
                 if let Some(run) = runs.get_mut(&task_run_id) {
+                    run.current_stage = "awaiting_review".into();
+                    run.status = "awaiting_review".into();
                     run.flow.push(MemoryRunFlowItem {
                         stage: "validating_changes".into(),
                         status: "done".into(),
                         summary: "Change anchors and evidence references validated".into(),
                     });
-                    if has_changes {
-                        run.current_stage = "awaiting_review".into();
-                        run.status = "awaiting_review".into();
-                        run.flow.push(MemoryRunFlowItem {
-                            stage: "awaiting_review".into(),
-                            status: "waiting".into(),
-                            summary,
-                        });
-                    } else {
-                        run.current_stage = "completed".into();
-                        run.status = "completed".into();
-                        run.flow.push(MemoryRunFlowItem {
-                            stage: "completed".into(),
-                            status: "done".into(),
-                            summary,
-                        });
-                    }
+                    run.flow.push(MemoryRunFlowItem {
+                        stage: "awaiting_review".into(),
+                        status: "waiting".into(),
+                        summary,
+                    });
                     run.change_set = Some(change_set);
                 }
             }
