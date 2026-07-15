@@ -1416,11 +1416,12 @@ function ConfigHeader({
       </div>
       <button
         type="button"
-        className="ml-auto inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+        className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-50 hover:text-gray-900"
         onClick={onDelete}
+        title="删除配置"
+        aria-label="删除配置"
       >
         <Trash2 size={15} />
-        删除
       </button>
     </div>
   )
