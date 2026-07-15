@@ -267,6 +267,10 @@ Acceptance:
 Goal: make tutor identity the entry point that connects conversations,
 capabilities, resources, and memory.
 
+Status: planned. The executable task breakdown, architecture boundaries, test
+matrix, and release gates are defined in
+`2026-07-15-persistent-tutor-implementation-plan.md`.
+
 - [ ] Add persistent tutor profiles with role, goal, model defaults, capability
   policy, and resource permissions.
 - [ ] Add tutor selection to the new-conversation empty state and retain a

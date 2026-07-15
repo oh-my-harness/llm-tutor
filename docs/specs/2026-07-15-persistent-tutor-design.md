@@ -2,6 +2,9 @@
 
 > Status: planned | Date: 2026-07-15 | Product surface: 辅导机器人
 
+Implementation plan:
+`../plans/2026-07-15-persistent-tutor-implementation-plan.md`.
+
 ## 1. Product Decision
 
 The Tutor surface shall represent persistent tutor entities, not another Chat
@@ -227,4 +230,3 @@ first step of the new-conversation empty state.
   duplicate tutor types.
 - Temporary Assistant remains available for one-off conversations.
 - Resetting a tutor does not destroy global learning assets or Learner Memory.
-
