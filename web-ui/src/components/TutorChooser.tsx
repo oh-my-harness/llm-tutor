@@ -17,12 +17,8 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
   const selectedTutor = selectedTutorId
     ? tutors.find((tutor) => tutor.id === selectedTutorId) ?? null
     : null
-  const selectedName = selectedTutorId === undefined
-    ? t('chat.tutor.select')
-    : selectedTutor?.name ?? t('chat.tutor.temporary')
-  const selectedDescription = selectedTutorId === undefined
-    ? t('chat.tutor.select.description')
-    : selectedTutor?.goal || selectedTutor?.role || t('chat.tutor.temporary.description')
+  const selectedName = selectedTutor?.name ?? t('chat.tutor.temporary')
+  const selectedDescription = selectedTutor?.goal || selectedTutor?.role || t('chat.tutor.temporary.description')
 
   useEffect(() => {
     if (!open) return
@@ -48,7 +44,7 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
         onClick={() => setOpen((value) => !value)}
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-          {selectedTutorId === null ? <UserRound size={16} /> : <Bot size={16} />}
+          {selectedTutorId == null ? <UserRound size={16} /> : <Bot size={16} />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
@@ -86,12 +82,12 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
               title={tutor.name}
               description={tutor.goal || tutor.role}
               icon={<Bot size={17} />}
-              onClick={() => select(tutor.id)}
+              onClick={() => select(selectedTutorId === tutor.id ? null : tutor.id)}
             />
           ))}
           {tutors.length > 0 && <div className="my-1 border-t border-gray-100" />}
           <TutorOption
-            selected={selectedTutorId === null}
+            selected={selectedTutorId == null}
             title={t('chat.tutor.temporary')}
             description={t('chat.tutor.temporary.description')}
             icon={<UserRound size={17} />}

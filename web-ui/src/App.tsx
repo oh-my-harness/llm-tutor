@@ -191,7 +191,7 @@ export default function App() {
   const [capability, setCapability] = useState<Capability>('chat')
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [selectedTutorId, setSelectedTutorId] = useState<string | null | undefined>(undefined)
+  const [selectedTutorId, setSelectedTutorId] = useState<string | null>(null)
   const [tutors, setTutors] = useState<TutorProfile[]>([])
   const activeSessionIdRef = useRef<string | null>(null)
   const sessionSelectionVersionRef = useRef(0)
@@ -954,13 +954,13 @@ export default function App() {
     persistSettings(nextSettings)
     if (settingsRequireSessionReset(llmSettings, nextSettings)) {
       activateSession(null)
-      setSelectedTutorId(undefined)
+      setSelectedTutorId(null)
     }
   }
 
   const startNewChat = useCallback(() => {
     activateSession(null)
-    setSelectedTutorId(undefined)
+    setSelectedTutorId(null)
     setMessages([])
     setStreamingText('')
     streamingRef.current = ''
@@ -1235,7 +1235,7 @@ export default function App() {
     setRecentSessions((prev) => prev.filter((item) => item.id !== id))
     if (sessionId === id) {
       activateSession(null)
-      setSelectedTutorId(undefined)
+      setSelectedTutorId(null)
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
@@ -1353,7 +1353,7 @@ export default function App() {
               <div>
                 <h1 className="text-lg font-semibold text-gray-900">{t('chat.title')}</h1>
                 <p className="text-xs text-gray-500">
-                  {selectedTutorId === undefined ? t('chat.subtitle') : activeTutor?.name ?? '临时助手'}
+                  {activeTutor?.name ?? '临时助手'}
                 </p>
               </div>
               <div className="ml-auto">
@@ -1398,7 +1398,7 @@ export default function App() {
                   onQuizAnswer={handleQuizAnswer}
                   onQuizFinish={handleQuizFinish}
                   onSourceNavigate={handleSourceNavigate}
-                  disabled={!sessionId && selectedTutorId === undefined}
+                  disabled={false}
                   running={running}
                 />
               </main>

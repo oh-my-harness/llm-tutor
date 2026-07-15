@@ -18,6 +18,6 @@ test('keeps persistent and temporary tutor session bindings distinct', () => {
   assert.deepEqual(tutorBindingForCreate(null), { tutor_id: null })
 })
 
-test('requires an explicit identity choice before session creation', () => {
-  assert.throws(() => tutorBindingForCreate(undefined), /选择一位导师/)
+test('defaults a missing tutor choice to the temporary assistant', () => {
+  assert.deepEqual(tutorBindingForCreate(undefined), { tutor_id: null })
 })

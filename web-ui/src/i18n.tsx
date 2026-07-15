@@ -34,7 +34,6 @@ export type TranslationKey =
   | 'chat.empty.description'
   | 'chat.tutor.label'
   | 'chat.tutor.select'
-  | 'chat.tutor.select.description'
   | 'chat.tutor.temporary'
   | 'chat.tutor.temporary.description'
   | 'chat.tutor.manage'
@@ -124,10 +123,9 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.subtitle': '提问、运行工具、查看轨迹。',
     'chat.new': '新对话',
     'chat.empty.title': '你想学点什么？',
-    'chat.empty.description': '选择一位导师，开始今天的学习。',
+    'chat.empty.description': '可以选择一位导师，也可以直接开始。',
     'chat.tutor.label': '导师',
     'chat.tutor.select': '选择导师',
-    'chat.tutor.select.description': '导师会随会话保存，陪你继续同一段学习过程。',
     'chat.tutor.temporary': '临时助手',
     'chat.tutor.temporary.description': '适合一次性问题，不保留独立导师身份。',
     'chat.tutor.manage': '管理导师',
@@ -216,10 +214,9 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.subtitle': 'Ask questions, run tools, and inspect traces.',
     'chat.new': 'New chat',
     'chat.empty.title': 'What would you like to learn?',
-    'chat.empty.description': 'Choose a tutor and start learning.',
+    'chat.empty.description': 'Choose a tutor, or start right away.',
     'chat.tutor.label': 'Tutor',
     'chat.tutor.select': 'Choose a tutor',
-    'chat.tutor.select.description': 'Your tutor stays with this conversation as you continue learning.',
     'chat.tutor.temporary': 'Temporary assistant',
     'chat.tutor.temporary.description': 'For one-off questions without a persistent tutor identity.',
     'chat.tutor.manage': 'Manage tutors',
