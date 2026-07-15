@@ -85,14 +85,9 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
               onClick={() => select(selectedTutorId === tutor.id ? null : tutor.id)}
             />
           ))}
-          {tutors.length > 0 && <div className="my-1 border-t border-gray-100" />}
-          <TutorOption
-            selected={selectedTutorId == null}
-            title={t('chat.tutor.temporary')}
-            description={t('chat.tutor.temporary.description')}
-            icon={<UserRound size={17} />}
-            onClick={() => select(null)}
-          />
+          {tutors.length === 0 && (
+            <div className="px-3 py-3 text-sm text-gray-500">{t('chat.tutor.empty')}</div>
+          )}
         </div>
       )}
     </div>

@@ -36,6 +36,7 @@ export type TranslationKey =
   | 'chat.tutor.select'
   | 'chat.tutor.temporary'
   | 'chat.tutor.temporary.description'
+  | 'chat.tutor.empty'
   | 'chat.tutor.manage'
   | 'chat.input.placeholder'
   | 'chat.attachments'
@@ -128,6 +129,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.tutor.select': '选择导师',
     'chat.tutor.temporary': '临时助手',
     'chat.tutor.temporary.description': '适合一次性问题，不保留独立导师身份。',
+    'chat.tutor.empty': '还没有可选导师。',
     'chat.tutor.manage': '管理导师',
     'chat.input.placeholder': '今天我能帮您什么？',
     'chat.attachments': '附件',
@@ -219,6 +221,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'chat.tutor.select': 'Choose a tutor',
     'chat.tutor.temporary': 'Temporary assistant',
     'chat.tutor.temporary.description': 'For one-off questions without a persistent tutor identity.',
+    'chat.tutor.empty': 'No tutors are available yet.',
     'chat.tutor.manage': 'Manage tutors',
     'chat.input.placeholder': 'How can I help today?',
     'chat.attachments': 'Attachments',
