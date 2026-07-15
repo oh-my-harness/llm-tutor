@@ -51,6 +51,29 @@ Tutor Memory must not become a hidden duplicate user profile. New observations
 about the learner continue to enter L1 and the normal Learner Memory
 consolidation path.
 
+### 2.1 Runtime memory routing
+
+Memory instructions are assembled from the tools actually mounted for the
+current turn. A prompt must not name or recommend a memory tool that the
+current tutor is not allowed to use.
+
+- Learner facts, preferences, strengths, weaknesses, scope, and recent state
+  belong to shared Learner Memory. Direct `write_memory` remains limited to an
+  explicit user request or clear approval; ordinary conversation and inferred
+  traits remain L1 evidence for the normal consolidation workflow.
+- Tutor promises, open loops, lesson plans, teaching reflections, strategies,
+  and next actions belong to private Tutor Memory. Autonomous
+  `remember_for_later` and `resolve_tutor_memory` are described only when those
+  tools are mounted for that tutor.
+- One item is written to one owner. The Agent must not duplicate the same item
+  across Learner Memory and Tutor Memory.
+- Research findings, external claims, report prose, Notebook content, quiz
+  questions, and quiz answers remain product artifacts rather than memory
+  records.
+- Both memory types are read as silent internal context. The Agent applies
+  supported memory naturally, asks for confirmation when it is uncertain, and
+  does not claim unsupported recall.
+
 ## 3. Tutor Memory
 
 Each tutor maintains one product-owned structured store:

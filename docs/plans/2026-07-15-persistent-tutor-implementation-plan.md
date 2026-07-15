@@ -338,6 +338,10 @@ Backend tasks:
   but hard content-policy validation remains pending.
 - [x] Provide a compact active commitments/open-loops summary for turn start;
   full content remains tool-read on demand.
+- [x] Build one runtime memory-routing policy from the memory tools actually
+  mounted for Chat, Research, Quiz, Organize, and Deep Solve. Keep learner
+  facts and tutor-owned continuity separate, forbid duplicate writes, and omit
+  unavailable tool names from prompts.
 
 Frontend tasks:
 

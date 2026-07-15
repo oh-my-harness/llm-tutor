@@ -10,7 +10,7 @@ use llm_harness_types::{
 use tokio_util::sync::CancellationToken;
 use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
 
-use crate::capability::{CapabilityRouter, NATURAL_MEMORY_INTERACTION_POLICY};
+use crate::capability::CapabilityRouter;
 use crate::error::{Result, TutorError};
 use crate::event_sink::{emit_content, emit_trace};
 use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
@@ -189,7 +189,7 @@ async fn run_chat_inner(
     session: Option<Session>,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    let system_prompt = router.apply_product_instruction(&system_prompt);
+    let system_prompt = router.apply_runtime_instructions(&system_prompt);
     emit_trace(
         &router.event_sink,
         "phase_start",
@@ -566,13 +566,7 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
 }
 
 fn chat_system_prompt() -> String {
-    with_natural_memory_policy(
-        "You are a knowledgeable tutor. Use read_memory when personalization is relevant, \
-     such as prior weaknesses, learning preferences, recent study state, follow-up teaching, \
-     review, practice, or adapting explanation style. Memory is only learner profile/context; \
-     do not treat it as an external factual source. Use write_memory only when the user explicitly \
-     asks you to remember something or clearly approves recording a durable preference; never infer \
-     private profile facts or silently write ordinary chat content. Use rag_search only when a Knowledge Base is associated. \
+    "You are a knowledgeable tutor. Use rag_search only when a Knowledge Base is associated. \
      Use search_notebook when Notebook is associated and saved Markdown notes may be relevant. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, \
      call read_space_item before relying on their content. Do not guess the contents of a referenced Space item. \
@@ -588,16 +582,13 @@ fn chat_system_prompt() -> String {
      For non-trivial numeric calculations, approximations, transcendental functions, \
      statistics, simulations, or any answer where exact arithmetic matters, call code_exec \
      with Python to compute or verify the result before answering. Answer clearly and \
-     concisely.",
-    )
+     concisely."
+        .into()
 }
 
 fn research_system_prompt() -> String {
-    with_natural_memory_policy(
-        "You are a research tutor. Your job is to help the user clarify research needs and, when appropriate, turn a confirmed topic into a sourced, reusable research report. \
-     Use read_memory only to adapt the report to the learner's preferences, scope, or prior weaknesses; \
-     never use memory as a factual source. Use write_memory only when the user explicitly asks you to remember \
-     a durable preference or approves recording it; research findings belong in reports, not memory. \
+    "You are a research tutor. Your job is to help the user clarify research needs and, when appropriate, turn a confirmed topic into a sourced, reusable research report. \
+     Research findings belong in reports, not memory. \
      Research has two modes: Research Chat and Detailed Research Workflow. \
      In Research Chat, discuss the topic, ask focused clarification questions, and help define goal, scope, source preferences, output format, depth, time range, and whether Notebook or Knowledge Base context should be used. \
      Do not call web_search, web_fetch, or produce a full report when the user's request is ambiguous or they are only discussing scope. \
@@ -605,20 +596,19 @@ fn research_system_prompt() -> String {
      Call create_research_report only when the user explicitly asks to begin, confirms a proposed plan, or gives an unambiguous instruction to produce the report now. \
      Do not start the Detailed Research Workflow through free-form chat text; create_research_report is the workflow boundary. \
      For the Detailed Research Workflow: (1) identify the confirmed research question and scope, \
-     (2) optionally call read_memory when personalization is relevant, (3) call web_search for external facts, \
-     (4) call web_fetch on the most relevant sources before relying on them, (5) call read_space_item when the user references Notebook or Quiz artifacts, (6) optionally call search_notebook when Notebook is associated, (7) optionally call rag_search when a knowledge base is associated, \
-     (8) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
+     (2) call web_search for external facts, (3) call web_fetch on the most relevant sources before relying on them, \
+     (4) call read_space_item when the user references Notebook or Quiz artifacts, (5) optionally call search_notebook when Notebook is associated, (6) optionally call rag_search when a knowledge base is associated, \
+     (7) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
      When create_research_report completes, briefly tell the user the report is ready; the product UI renders the full report from tool metadata. The report must be Markdown with these sections: Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, Sources. \
      Cite factual claims using numbered source references that match the Sources section. \
-     Keep workflow progress brief; the final report is the main deliverable.",
-    )
+     Keep workflow progress brief; the final report is the main deliverable."
+        .into()
 }
 
 fn organize_system_prompt() -> String {
-    with_natural_memory_policy(
-        "You are a Notebook and Space organization assistant. Your job is to help the user search, \
+    "You are a Notebook and Space organization assistant. Your job is to help the user search, \
      inspect, clean up, link, tag, deduplicate, and revise saved Notebook content. Notebook is a \
      plain-text Markdown workspace, not a vector knowledge base. Prefer search_notebook when the \
      user asks about saved notes, prior notes, Notebook contents, organization, tags, links, or \
@@ -628,25 +618,19 @@ fn organize_system_prompt() -> String {
      suggested_links, suggested_tags, or merge_source_entry_ids when relevant. Never claim an edit \
      has been applied because the product UI requires explicit user confirmation. You may use code_exec for parsing or verification if it \
      helps, and web_search only when the user explicitly asks for external/current facts. Keep \
-     organization suggestions concrete and cite the Notebook entries you used.",
-    )
+     organization suggestions concrete and cite the Notebook entries you used."
+        .into()
 }
 
 fn quiz_system_prompt() -> String {
-    with_natural_memory_policy(
-        "You are a quiz design tutor. Quiz mode is a normal conversation first: help the user decide scope, source material, difficulty, question count, and question style. \
+    "You are a quiz design tutor. Quiz mode is a normal conversation first: help the user decide scope, source material, difficulty, question count, and question style. \
      Do not create a quiz just because the user selected Quiz mode. When the user asks for a plan, asks to discuss details, or gives an underspecified quiz request, call propose_quiz_plan and ask for confirmation. \
      Call create_quiz only when the user explicitly asks you to generate questions, create a quiz, test them, or confirms a quiz plan. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, call read_space_item before relying on their content. If Notebook is associated, you may use search_notebook to find relevant saved Markdown notes. \
      If a Knowledge Base is associated and the user wants questions from course documents or indexed material, use rag_search to inspect relevant source chunks before creating the quiz. \
      If the user provides source material in the conversation or attachments, pass the relevant source text to create_quiz with a clear source_label. \
-     Use read_memory only to adapt difficulty or topic emphasis to the learner; memory is not a factual source. \
-     After create_quiz succeeds, briefly tell the user what was generated and invite them to answer it in the rendered quiz card. If you are missing source material or the user's intent is unclear, ask a concise clarifying question instead of calling create_quiz.",
-    )
-}
-
-fn with_natural_memory_policy(prompt: &str) -> String {
-    format!("{prompt} {NATURAL_MEMORY_INTERACTION_POLICY}")
+     After create_quiz succeeds, briefly tell the user what was generated and invite them to answer it in the rendered quiz card. If you are missing source material or the user's intent is unclear, ask a concise clarifying question instead of calling create_quiz."
+        .into()
 }
 
 #[cfg(test)]
@@ -656,15 +640,14 @@ mod tests {
         looks_like_research_report, organize_system_prompt, quiz_system_prompt,
         research_system_prompt, text_delta_route_for_capability,
     };
+    use crate::capability::{append_memory_routing_policy, memory_routing_policy};
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
 
     #[test]
     fn chat_prompt_requires_web_search_for_fact_collection() {
         let prompt = chat_system_prompt();
-        assert!(prompt.contains("Use read_memory when personalization is relevant"));
-        assert!(prompt.contains("do not treat it as an external factual source"));
-        assert!(prompt.contains("Use write_memory only when the user explicitly"));
-        assert!(prompt.contains("never infer"));
+        assert!(!prompt.contains("read_memory"));
+        assert!(!prompt.contains("write_memory"));
         assert!(prompt.contains("call read_space_item"));
         assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("collect facts"));
@@ -681,6 +664,7 @@ mod tests {
             organize_system_prompt(),
             quiz_system_prompt(),
         ] {
+            let prompt = append_memory_routing_policy(&prompt, &memory_routing_policy(true, &[]));
             assert!(prompt.contains("silent internal context loading"));
             assert!(prompt.contains("Never narrate that you are checking"));
             assert!(prompt.contains("refer to it naturally"));
@@ -693,8 +677,8 @@ mod tests {
     #[test]
     fn research_prompt_requires_search_fetch_and_report() {
         let prompt = research_system_prompt();
-        assert!(prompt.contains("Use read_memory only to adapt"));
-        assert!(prompt.contains("research findings belong in reports"));
+        assert!(!prompt.contains("read_memory"));
+        assert!(prompt.contains("Research findings belong in reports"));
         assert!(prompt.contains("Research Chat and Detailed Research Workflow"));
         assert!(prompt.contains("Do not call web_search"));
         assert!(prompt.contains("propose_research_plan"));

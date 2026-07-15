@@ -2,7 +2,7 @@ use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, S
 use llm_harness_runtime::workflow::plan::validate_workflow;
 use llm_harness_types::SYNC_SPAWN_TOOL_NAME;
 
-use crate::capability::NATURAL_MEMORY_INTERACTION_POLICY;
+use crate::capability::{NATURAL_MEMORY_INTERACTION_POLICY, memory_routing_policy};
 use crate::error::{Result, TutorError};
 
 pub const DEEP_SOLVE_WORKFLOW_ID: &str = "tutor.deep_solve";
@@ -32,10 +32,11 @@ pub fn deep_solve_workflow_with_memory_and_tools(
             solve_tools.push(tool.clone());
         }
     }
-    let memory_instruction = if learner_memory_access {
-        NATURAL_MEMORY_INTERACTION_POLICY
-    } else {
+    let memory_instruction = memory_routing_policy(learner_memory_access, additional_tools);
+    let synthesis_memory_instruction = if memory_instruction.is_empty() {
         ""
+    } else {
+        NATURAL_MEMORY_INTERACTION_POLICY
     };
 
     Workflow {
@@ -78,7 +79,7 @@ pub fn deep_solve_workflow_with_memory_and_tools(
                 format!(
                     "Read the workflow Context, optional `tutor_instruction`, and prior step history. Synthesize the verified work into a clear final answer for the learner. \
                  Follow `tutor_instruction` only for teaching behavior and communication style. \
-                 Start with the direct answer, then provide the explanation. {memory_instruction}"
+                 Start with the direct answer, then provide the explanation. {synthesis_memory_instruction}"
                 ),
                 vec![],
             ),
@@ -396,7 +397,27 @@ mod tests {
         ))
         .unwrap();
 
-        assert!(workflow.to_string().contains("read_tutor_memory"));
+        let workflow_text = workflow.to_string();
+        assert!(workflow_text.contains("read_tutor_memory"));
+        assert!(!workflow_text.contains("remember_for_later"));
+    }
+
+    #[test]
+    fn deep_solve_workflow_includes_tutor_memory_write_routing_only_when_mounted() {
+        let workflow = serde_json::to_value(deep_solve_workflow_with_memory_and_tools(
+            true,
+            &[
+                "read_tutor_memory".into(),
+                "remember_for_later".into(),
+                "resolve_tutor_memory".into(),
+            ],
+        ))
+        .unwrap();
+        let workflow_text = workflow.to_string();
+
+        assert!(workflow_text.contains("remember_for_later"));
+        assert!(workflow_text.contains("Never write the same item to both stores"));
+        assert!(workflow_text.contains("product artifacts"));
     }
 
     #[test]
