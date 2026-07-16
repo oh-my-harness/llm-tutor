@@ -441,7 +441,7 @@ Tool availability rules:
 - Explicit `@` references allow the agent to read the mentioned artifact through
   `read_space_item`; they do not grant permission to explore the whole Vault.
 - Notebook maintenance tools are available only in Organize mode.
-- Chat, Quiz, Research, and Deep Solve may answer from explicitly referenced or
+- Chat, Quiz, and Research may answer from explicitly referenced or
   associated Notebook content, but they should not propose Notebook maintenance
   operations unless the session is in Organize mode.
 - Applying Notebook changes remains product-owned and user-confirmed. The agent
@@ -609,7 +609,7 @@ tool set.
 Recommended composer modes:
 
 - `chat`: ordinary tutoring, explanation, and lightweight Q&A.
-- `deep_solve`: multi-step problem solving.
+- `deep_solve`: retired legacy session type; old records remain readable.
 - `quiz`: quiz generation from conversation, attachments, associated source, or
   explicit `@` material.
 - `research`: web/source exploration and report generation.
@@ -620,7 +620,7 @@ Recommended composer modes:
 other modes. The model should use it when computation, verification,
 simulation, parsing, or code execution is needed. This prevents a confusing
 "code mode" that is really just one tool, while keeping code execution useful in
-Chat, Deep Solve, Research, Quiz, and Organize workflows.
+Chat, Research, Quiz, and Organize workflows.
 
 Organize mode defaults:
 

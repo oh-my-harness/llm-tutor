@@ -1,6 +1,11 @@
-# Deep Solve UX Plan
+# Deep Solve UX Plan (Retired)
 
-> Status: complete | Date: 2026-06-23 | Scope: turn Deep Solve from a long chat answer into a structured guided solving workflow.
+> Status: retired on 2026-07-16 | Date: 2026-06-23 | Historical scope: turn Deep Solve from a long chat answer into a structured guided solving workflow.
+>
+> Superseding decision: the standalone Deep Solve capability and fixed workflow
+> were removed. Complex solving now uses ordinary Chat/Tutor interaction with
+> on-demand RAG, web, and code tools. This document is retained only to explain
+> historical trace data and earlier implementation decisions.
 
 ## 1. Goal
 

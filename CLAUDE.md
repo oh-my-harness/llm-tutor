@@ -5,7 +5,7 @@
 ```
 crates/
 ├── tutor-tools/   # RAG 检索、Web 搜索、代码执行工具
-├── tutor-agent/   # Chat + DeepSolve 能力，CLI 入口
+├── tutor-agent/   # Chat、Research、Quiz、Memory 等 Agent 能力与 CLI 入口
 └── tutor-web/     # Web API（Axum，流式响应）
 ```
 
@@ -13,11 +13,11 @@ crates/
 
 | 文件 | 职责 |
 |------|------|
-| `capability.rs` | CapabilityRouter：Chat / DeepSolve / CodeExec 路由 |
+| `capability.rs` | CapabilityRouter：Chat / Research / Quiz / CodeExec 等能力路由 |
 | `llm_provider.rs` | LlmConfig：多 provider 配置（Anthropic / DeepSeek / OpenAI） |
 | `governance.rs` | GovernanceConfig：budget + audit + approval 组装 |
-| `solve_orchestrator.rs` | DeepSolve 四阶段流水线：Pre-retrieve → Plan → Solve → Synthesize |
-| `chat.rs` | Chat 单轮：RAG + Web 搜索 → 回答 |
+| `runtime_workflow.rs` | Research、Quiz、Memory 等固定工作流定义 |
+| `chat.rs` | 普通对话与工具调用 |
 
 ## 测试规范
 
@@ -32,9 +32,8 @@ fn make_router(responses: Vec<MockResponse>, governance: GovernanceConfig) -> Ca
 }
 ```
 
-DeepSolve 单步需要 3 个 response：Plan JSON → `FINISH: ...` → 最终合成文本。
-
-真实 API 测试（`deep_solve_integration.rs`）默认 `#[ignore]`，需要真实 API key。
+独立 Deep Solve 能力已于 2026-07-16 退役。复杂问题由普通 Chat 或
+Tutor 对话处理，必要时调用检索、网页和代码工具；旧会话轨迹仅保留只读兼容。
 
 ## 定位与原则
 

@@ -7,14 +7,7 @@ use thiserror::Error;
 pub const GENERAL_TUTOR_ID: &str = "general-tutor";
 pub const MAX_SOUL_CHARS: usize = 16_000;
 
-const SUPPORTED_CAPABILITIES: &[&str] = &[
-    "chat",
-    "deep_solve",
-    "code_exec",
-    "quiz",
-    "research",
-    "organize",
-];
+const SUPPORTED_CAPABILITIES: &[&str] = &["chat", "code_exec", "quiz", "research", "organize"];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TutorResourcePermissions {
@@ -130,10 +123,11 @@ impl TutorStore {
             .ok()
             .and_then(|text| load_file(&text).ok())
             .unwrap_or_default();
+        let retired_capabilities_migrated = migrate_retired_capabilities(&mut value);
         if !value.tutors.iter().any(|item| item.id == GENERAL_TUTOR_ID) {
             value.tutors.push(general_tutor());
             save_file(&path, &value).expect("failed to seed General Tutor");
-        } else if migrated {
+        } else if migrated || retired_capabilities_migrated {
             save_file(&path, &value).expect("failed to migrate tutor store");
         }
         Self {
@@ -471,10 +465,42 @@ fn default_capability() -> String {
 }
 
 fn default_allowed_capabilities() -> Vec<String> {
-    ["chat", "deep_solve", "quiz", "research", "organize"]
+    ["chat", "quiz", "research", "organize"]
         .into_iter()
         .map(str::to_string)
         .collect()
+}
+
+fn migrate_retired_capabilities(value: &mut TutorFile) -> bool {
+    let mut changed = false;
+    for tutor in &mut value.tutors {
+        let previous_len = tutor.allowed_capabilities.len();
+        tutor
+            .allowed_capabilities
+            .retain(|capability| capability != "deep_solve");
+        changed |= tutor.allowed_capabilities.len() != previous_len;
+        if tutor.allowed_capabilities.is_empty() {
+            tutor.allowed_capabilities.push("chat".into());
+            changed = true;
+        }
+        if tutor.default_capability == "deep_solve"
+            || !tutor
+                .allowed_capabilities
+                .iter()
+                .any(|capability| capability == &tutor.default_capability)
+        {
+            tutor.default_capability = "chat".into();
+            if !tutor
+                .allowed_capabilities
+                .iter()
+                .any(|capability| capability == "chat")
+            {
+                tutor.allowed_capabilities.push("chat".into());
+            }
+            changed = true;
+        }
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -505,6 +531,30 @@ mod tests {
         let reopened = TutorStore::new_with_root(dir.path());
         assert_eq!(reopened.list(false).len(), 1);
         assert!(reopened.get(GENERAL_TUTOR_ID).unwrap().built_in);
+    }
+
+    #[test]
+    fn migrates_retired_deep_solve_capability_to_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut legacy = general_tutor();
+        legacy.default_capability = "deep_solve".into();
+        legacy.allowed_capabilities = vec!["deep_solve".into(), "research".into()];
+        save_file(
+            &dir.path().join("tutors.json"),
+            &TutorFile {
+                schema_version: schema_version(),
+                tutors: vec![legacy],
+            },
+        )
+        .unwrap();
+
+        let store = TutorStore::new_with_root(dir.path());
+        let migrated = store.get(GENERAL_TUTOR_ID).unwrap();
+        assert_eq!(migrated.default_capability, "chat");
+        assert_eq!(
+            migrated.allowed_capabilities,
+            vec!["research".to_string(), "chat".to_string()]
+        );
     }
 
     #[test]

@@ -222,12 +222,6 @@ const modeOptions: Array<{
     icon: <MessageSquare size={21} />,
   },
   {
-    value: 'deep_solve',
-    labelKey: 'cap.deepSolve',
-    descriptionKey: 'cap.deepSolve.description',
-    icon: <Brain size={21} />,
-  },
-  {
     value: 'code_exec',
     labelKey: 'cap.codeExec',
     descriptionKey: 'cap.codeExec.description',

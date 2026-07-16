@@ -47,7 +47,9 @@
 
 - REQ-050: The composer shall allow selecting a capability mode.
 - REQ-051: The system shall support `chat` mode.
-- REQ-052: The system shall support `deep_solve` mode.
+- REQ-052: The former `deep_solve` mode is retired. Complex problem solving
+  shall remain a normal Chat/Tutor behavior with on-demand RAG, web, and code
+  tools. Historical Deep Solve traces may remain read-only.
 - REQ-053: The system shall support `code_exec` mode.
 - REQ-054: The system shall support `quiz` mode.
 - REQ-055: The system shall support `research` mode.
@@ -73,8 +75,9 @@
   Memory. Temporary Assistant need not appear as a duplicate tutor-list item.
   Status: implemented.
 - REQ-064: Tutor identity and capability mode shall remain separate concepts:
-  the tutor is who accompanies the learner, while Chat, Research, Quiz, and
-  Deep Solve describe what it is doing. Status: implemented.
+  the tutor is who accompanies the learner, while Chat, Research, and Quiz
+  describe what it is doing. Complex solving belongs to Chat rather than a
+  separate capability. Status: implemented.
 - REQ-065: Tutor-bound sessions shall persist an immutable `tutor_id` beside
   the runtime session mapping. Changing tutors shall create a new session or a
   bounded handoff rather than replacing identity in place. Status: implemented
@@ -232,19 +235,22 @@
 - REQ-217: The system shall support news/current-events search. Status: planned.
 - REQ-218: The system shall support site-restricted search. Status: planned.
 
-## 11. Deep Solve
+## 11. Complex Problem Solving
 
-- REQ-230: Deep Solve shall render as a structured solving workflow.
-- REQ-231: Deep Solve shall show planning stage.
-- REQ-232: Deep Solve shall show solve steps.
-- REQ-233: Deep Solve shall show verification evidence where available.
-- REQ-234: Deep Solve shall keep the final answer as the main visible result.
-- REQ-235: Deep Solve shall attach relevant tool evidence to stages.
-- REQ-236: Deep Solve shall attach citations to the final answer.
-- REQ-237: Deep Solve trace events shall persist across session reload.
-- REQ-238: Users shall be able to ask follow-up questions about a specific step.
-- REQ-239: Deep Solve shall handle missing plan output gracefully.
-- REQ-240: Deep Solve shall allow stopping a running solve. Status: planned.
+- REQ-230: Complex questions shall be handled through ordinary Chat/Tutor
+  conversation rather than a mandatory fixed workflow.
+- REQ-231: The Agent shall clarify ambiguous questions before starting costly
+  retrieval or computation when clarification materially affects the answer.
+- REQ-232: The Agent may use RAG, web search, web fetch, and code execution on
+  demand without changing the conversation into a separate mode.
+- REQ-233: Answers shall expose citations and tool evidence when those tools
+  materially support the result.
+- REQ-234: Complex answers shall use the same streaming, persistence, session
+  switching, and follow-up behavior as ordinary Chat.
+- REQ-235: The retired Deep Solve workflow, route protocol, and new-run UI
+  entry shall not remain active.
+- REQ-236: Historical Deep Solve messages and traces may remain readable, but
+  reopening them shall continue the session in Chat mode.
 
 ## 12. Code Execution
 
@@ -409,7 +415,8 @@ other generated learning records.
 - REQ-624: Notebook entries shall support chat answer excerpts.
 - REQ-625: Notebook entries shall support source snippets.
 - REQ-626: Notebook entries shall support quiz summaries.
-- REQ-627: Notebook entries shall support Deep Solve results.
+- REQ-627: Notebook shall preserve historical Deep Solve result entries as
+  read-only legacy artifacts; new complex answers use normal Chat save flows.
 - REQ-628: Research reports shall be represented as Notebook entries with `type = research_report`.
 - REQ-629: Notebook entries shall store Markdown content.
 - REQ-630: Notebook entries shall store metadata for source session, source message, query, sources, or generated-by fields where available.
@@ -912,7 +919,8 @@ other generated learning records.
 - REQ-550: A clean clone shall be able to start backend and frontend using README commands.
 - REQ-551: A user shall be able to create a knowledge base and upload a document.
 - REQ-552: A user shall be able to ask a RAG-grounded question and see citations.
-- REQ-553: A user shall be able to run a Deep Solve turn and inspect stages.
+- REQ-553: Retired. Users shall solve complex questions through Chat/Tutor and
+  may inspect ordinary tool traces; no new Deep Solve turn can be started.
 - REQ-554: A user shall be able to generate and answer a Quiz.
 - REQ-555: A user shall be able to run a Research turn and get a sourced report.
 - REQ-556: A user shall be able to save a Research report into Notebook.

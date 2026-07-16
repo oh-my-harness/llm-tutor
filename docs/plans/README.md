@@ -27,7 +27,8 @@ checklists.
 
 - `2026-06-23-quiz-mode-plan.md`: quiz generation and review workflow.
 - `2026-06-25-research-mode-plan.md`: research workflow and report handling.
-- `2026-06-23-deep-solve-ux-plan.md`: Deep Solve UX structure.
+- `2026-06-23-deep-solve-ux-plan.md`: retired Deep Solve UX history; complex
+  solving now belongs to Chat/Tutor.
 
 ## Historical Plans
 

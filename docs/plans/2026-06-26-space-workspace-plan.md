@@ -64,7 +64,7 @@ Notebook entries can include:
 - chat answer excerpts,
 - source snippets,
 - quiz summaries,
-- Deep Solve results.
+- Historical Deep Solve results as read-only legacy entries.
 
 Research reports are treated as a kind of note:
 
@@ -184,7 +184,7 @@ The profile should help answer:
 - What should they do next?
 
 For agent usage, the important path is not the UI card. Quiz, Research, Chat,
-and Deep Solve agents should get access to a `read_memory` tool and decide
+and Chat agents should get access to a `read_memory` tool and decide
 when to read the learner profile before planning or generating.
 
 ## 3. Markdown Memory System
@@ -544,7 +544,7 @@ Do not rush this simplification until Space is useful enough.
 - [x] Add Markdown memory file viewer/editor.
 - [x] Add manual consolidation action for L1/L2/L3 memory.
 - [x] Add `read_memory` tool for agents.
-- [x] Mount `read_memory` for Quiz, Research, Chat, and Deep Solve when memory exists.
+- [x] Mount `read_memory` for Quiz, Research, and Chat when memory exists.
 - [x] Render Student Profile from `L3/profile.md`, `L3/recent.md`, and `L3/teaching_strategy.md`.
 - [x] Derive basic stat cards from Quiz history as supplemental UI.
 - [x] Keep profile explainable and user-editable through Markdown.

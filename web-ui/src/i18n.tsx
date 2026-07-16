@@ -85,8 +85,6 @@ export type TranslationKey =
   | 'settings.language.chinese'
   | 'cap.chat'
   | 'cap.chat.description'
-  | 'cap.deepSolve'
-  | 'cap.deepSolve.description'
   | 'cap.codeExec'
   | 'cap.codeExec.description'
   | 'cap.quiz'
@@ -180,8 +178,6 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.language.chinese': '中文',
     'cap.chat': '聊天',
     'cap.chat.description': '灵活对话，可使用任意工具',
-    'cap.deepSolve': '解题',
-    'cap.deepSolve.description': '多步推理与问题求解',
     'cap.codeExec': '代码',
     'cap.codeExec.description': '运行代码并验证结果',
     'cap.quiz': '测验',
@@ -274,8 +270,6 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.language.chinese': '中文',
     'cap.chat': 'Chat',
     'cap.chat.description': 'Flexible conversation with any available tool',
-    'cap.deepSolve': 'Deep Solve',
-    'cap.deepSolve.description': 'Multi-step reasoning and problem solving',
     'cap.codeExec': 'Code',
     'cap.codeExec.description': 'Run code and verify results',
     'cap.quiz': 'Quiz',

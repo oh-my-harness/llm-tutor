@@ -12,7 +12,7 @@ mode. A tutor owns a Markdown Soul, capability policy, resource permissions,
 conversation collection, and private continuity memory. New conversations
 may choose who the user wants to learn with; without a selection they use the
 Temporary Assistant. A persistent tutor may then use
-Chat, Research, Quiz, Deep Solve, Notebook, Knowledge, Space, and Memory as
+Chat, Research, Quiz, Notebook, Knowledge, Space, and Memory as
 parts of one learning relationship.
 
 The product model is:
@@ -114,7 +114,7 @@ A tutor profile contains at least:
   "soul_markdown": "# 核心身份\n\n你是一位帮助学习者系统掌握 Transformer 架构的导师。\n\n# 教学风格\n\n- 先建立直觉，再介绍公式。",
   "default_model_config_id": "...",
   "default_capability": "chat",
-  "allowed_capabilities": ["chat", "research", "quiz", "deep_solve"],
+  "allowed_capabilities": ["chat", "research", "quiz"],
   "learner_memory_access": true,
   "resource_permissions": {
     "knowledge_base_ids": [],
@@ -206,9 +206,9 @@ into every prompt.
 ## 8. Product Integration
 
 - Chat is the tutor's primary interaction surface.
+- Chat also owns complex explanations, derivations, and tool-assisted solving.
 - Research is a detailed workflow the tutor can start after confirming scope.
 - Quiz checks learning progress and feeds shared Learner Memory evidence.
-- Deep Solve supports difficult explanations and derivations.
 - Notebook stores durable reports and learning material.
 - Knowledge supplies grounded source documents.
 - Space exposes quizzes, notes, profile, and other learning assets.
@@ -295,7 +295,7 @@ summaries, and Tutor-workspace run aggregation remain pending.
 - Two tutors can share Learner Memory while keeping commitments and plans
   private from one another.
 - A tutor can continue an unresolved learning thread across sessions.
-- Chat, Research, Quiz, and Deep Solve remain capabilities rather than becoming
+- Chat, Research, and Quiz remain capabilities rather than becoming
   duplicate tutor types.
 - Temporary Assistant remains available for one-off conversations.
 - Resetting a tutor does not destroy global learning assets or Learner Memory.

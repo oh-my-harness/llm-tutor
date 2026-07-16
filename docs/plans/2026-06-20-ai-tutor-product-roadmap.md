@@ -5,6 +5,11 @@
 > Superseding decision (2026-07-14): Books are retired and Research reports use
 > Notebook as their only durable destination. Historical Book milestones below
 > describe earlier implementation work and are not future product direction.
+>
+> Superseding decision (2026-07-16): the standalone Deep Solve capability and
+> fixed workflow are retired. Complex problem solving is part of Chat/Tutor and
+> uses RAG, web, and code tools on demand. Historical milestones below describe
+> earlier implementation work only.
 
 ## 0. Current Planning Entry Points
 
@@ -54,7 +59,8 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 3. System parses, chunks, embeds, and indexes the documents.
 4. User asks questions against the knowledge base.
 5. System answers with citations and source snippets.
-6. User escalates a hard question into Deep Solve.
+6. Chat/Tutor solves hard questions directly and calls retrieval or computation
+   tools when needed.
 7. User generates quiz questions from the same materials.
 8. User saves important answers, notes, or wrong questions.
 
@@ -64,7 +70,6 @@ This keeps the first product loop narrow enough to ship while leaving room to gr
 |---|---|---|
 | Chat | Main interaction surface | Ask questions with optional RAG grounding |
 | Knowledge Base | User-owned document library | Upload, parse, index, retrieve, show sources |
-| Deep Solve | Guided problem solving | Plan -> solve steps -> synthesize final answer |
 | Quiz | Practice and assessment | Generate questions, collect answer, judge response |
 | Space | Learning workspace | Notebook, quiz bank, and student profile |
 | Settings | Runtime control | LLM provider, model, API key, budget limit |
@@ -88,7 +93,8 @@ The current `llm-tutor` Rust workspace should remain the starting point.
 - Keep `llm-harness-runtime` as the runtime foundation.
 - Keep local JSON stores for MVP product data; consider SQLite when schema churn grows.
 - Use WebSocket for streaming content, trace events, and tool status.
-- Keep capabilities behind a clear router: `chat`, `deep_solve`, `code_exec`, `quiz`, `research`, later `visualize`.
+- Keep capabilities behind a clear router: `chat`, `code_exec`, `quiz`,
+  `research`, `organize`, later `visualize`.
 
 ### Frontend
 
@@ -141,9 +147,9 @@ These items come from the earlier Phase 1-5 plans. They should be closed before 
 - [x] Wire top-level `Capability::CodeExec` instead of returning `UnsupportedCapability`.
 - [x] Decide whether `code_exec` requires approval in CLI, Web, both, or only when configured.
 - [ ] Re-enable runtime budget enforcement once `llm-harness-runtime` exposes a safe app-level budget policy for ordinary one-turn harnesses and workflows. Current code keeps session budget configuration but avoids direct `BudgetControlAdapter` wiring because the latest tested hook semantics can hang Chat/Code Exec mock runs.
-- [x] Emit real `TutorStream::trace` events from Chat and Deep Solve, especially phase transitions, tool calls, and replan events.
+- [x] Historical: emit real `TutorStream::trace` events from Chat and the former Deep Solve workflow.
 - [x] Confirm WebSocket output semantics: final-only response, chunked text stream, or mixed content/trace/status stream.
-- [x] Replace Deep Solve `run_pre_retrieve` stub with either real RAG retrieval or an explicit no-KB branch.
+- [x] Historical: replace the former Deep Solve `run_pre_retrieve` stub with real retrieval or an explicit no-KB branch.
 - [x] Update README with accurate backend port, provider setup, dependency strategy, and known v0.1 limitations.
 - [x] Add or remove the planned `docs/quickstart-deep-solve.md`; avoid stale file references in plans.
 - [ ] Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and either fix warnings or document accepted warnings.
@@ -191,7 +197,7 @@ Acceptance:
 - Refreshing the browser does not lose the conversation.
 - User can resume a previous session and continue with context.
 
-### Phase 3: Deep Solve UX
+### Phase 3: Deep Solve UX (Historical, Retired)
 
 Goal: make long reasoning inspectable and useful.
 
@@ -201,10 +207,10 @@ Goal: make long reasoning inspectable and useful.
 - [ ] Allow user to stop a running solve.
 - [x] Add mock tests for replan and phase event emission.
 
-Acceptance:
-
-- Deep Solve feels like a guided workflow, not a delayed chat response.
-- The user can see what stage the system is in.
+This phase was implemented for the original fixed workflow and retired on
+2026-07-16. Historical trace rendering remains only for old sessions. Current
+acceptance is that complex solving behaves like ordinary streaming Chat and
+supports natural follow-up turns.
 
 ### Phase 4: Quiz and Answer Judging
 
@@ -234,7 +240,7 @@ Goal: make learning outputs reusable.
 - [x] Add Student Profile module.
 - [x] Add Markdown-based Memory module with L1 events, L2 summaries, and L3 learner memory.
 - [x] Add manual memory consolidation from the Memory module.
-- [x] Add `read_memory` tool so Quiz, Research, Chat, and Deep Solve can actively inspect learner memory.
+- [x] Add `read_memory` tool so Quiz, Research, and Chat can actively inspect learner memory.
 - [ ] Save chat answers to Notebook.
 - [ ] Save quiz summaries to Notebook.
 - [ ] Save source snippets.
@@ -296,7 +302,7 @@ Acceptance:
 - A user may choose who to learn with; no selection uses Temporary Assistant.
 - The same tutor can continue its goals, promises, and open learning threads
   across multiple sessions.
-- Chat, Research, Quiz, and Deep Solve remain reusable capabilities rather than
+- Chat, Research, and Quiz remain reusable capabilities rather than
   duplicated tutor types.
 
 ## 5. Later Expansion

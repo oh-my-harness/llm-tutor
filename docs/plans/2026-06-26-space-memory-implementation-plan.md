@@ -335,7 +335,7 @@ the dependency DAG, freshness checks, and remaining hardening stay pending.
 ## 7. Phase 5: `read_memory` Tool
 
 Status: completed for harness-backed modes on 2026-06-26. `read_memory` landed
-in `tutor-tools` and is mounted for Chat, Research, and Deep Solve. Quiz
+in `tutor-tools` and is mounted for Chat and Research. Quiz
 currently remains a structured generation API, so it uses L3 memory as
 personalization context in Phase 6 rather than a real model-decided
 `read_memory` tool call. The runtime gap is recorded in
@@ -365,7 +365,7 @@ sections or use retrieval.
 - [x] Add `read_memory` tool in `tutor-tools`.
 - [x] Return L3 Markdown content.
 - [x] Mount `read_memory` when memory exists.
-- [x] Make the tool available to Chat, Research, and Deep Solve.
+- [x] Make the tool available to Chat and Research.
 - [x] Document the remaining Quiz/runtime structured-tool gap instead of building a parallel orchestration loop.
 - [x] Update prompts to instruct agents when to call it.
 - [x] Ensure memory is not included in prompts by default.

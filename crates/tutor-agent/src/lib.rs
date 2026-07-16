@@ -1,7 +1,6 @@
 pub mod capability;
 pub mod chat;
 pub mod code_exec;
-pub mod deep_solve_events;
 pub mod error;
 pub mod event_sink;
 pub mod governance;
@@ -12,7 +11,6 @@ pub mod research;
 pub mod runtime_engine;
 pub mod runtime_harness;
 pub mod runtime_workflow;
-pub mod solve_orchestrator;
 pub mod terminal_approver;
 
 pub use capability::{Capability, CapabilityRouter};

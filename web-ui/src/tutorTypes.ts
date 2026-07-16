@@ -65,7 +65,7 @@ export interface TutorMemoryDraft {
   next_action?: string | null
 }
 
-export const tutorCapabilities = ['chat', 'deep_solve', 'quiz', 'research', 'organize'] as const
+export const tutorCapabilities = ['chat', 'quiz', 'research', 'organize'] as const
 
 export function tutorSoulSummary(markdown: string) {
   const line = markdown
@@ -190,7 +190,22 @@ export function normalizeTutorProfile(value: unknown): TutorProfile {
   const soul = typeof profile.soul_markdown === 'string' && profile.soul_markdown.trim()
     ? profile.soul_markdown
     : legacyTutorSoul(profile.role)
-  return { ...profile, soul_markdown: soul } as unknown as TutorProfile
+  const allowedCapabilities = Array.isArray(profile.allowed_capabilities)
+    ? profile.allowed_capabilities.filter((capability): capability is string => (
+        typeof capability === 'string' && capability !== 'deep_solve'
+      ))
+    : ['chat']
+  const normalizedAllowed = allowedCapabilities.length > 0 ? allowedCapabilities : ['chat']
+  const defaultCapability = typeof profile.default_capability === 'string'
+    && normalizedAllowed.includes(profile.default_capability)
+    ? profile.default_capability
+    : 'chat'
+  return {
+    ...profile,
+    soul_markdown: soul,
+    default_capability: defaultCapability,
+    allowed_capabilities: normalizedAllowed,
+  } as unknown as TutorProfile
 }
 
 export function assertTutorMutationContract(value: Record<string, unknown>) {

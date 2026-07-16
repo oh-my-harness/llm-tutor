@@ -9,6 +9,17 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+### Changed
+
+- Complex problem solving now stays in ordinary Chat or Tutor conversations,
+  with retrieval, web, and code tools available when needed.
+
+### Removed
+
+- Retired the standalone Deep Solve capability, fixed solve workflow, and new
+  run controls. Historical Deep Solve messages, traces, and Notebook artifacts
+  remain readable.
+
 ## 0.3.2 - 2026-07-16
 
 ### Added

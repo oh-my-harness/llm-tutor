@@ -3,6 +3,11 @@
 > Written after implementing tutor_agent v0.1 (2026-06-13).
 > This document records friction points, missing APIs, and positive validations
 > to inform llm-harness-runtime v0.3 planning.
+>
+> Historical note (2026-07-16): the standalone Deep Solve capability has been
+> retired. References below describe runtime migration work completed while that
+> capability still existed; they are retained as framework integration history,
+> not as the current product architecture.
 
 ## Hooks Used
 

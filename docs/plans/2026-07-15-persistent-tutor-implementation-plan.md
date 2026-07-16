@@ -29,7 +29,8 @@ The first complete slice must let a user:
 4. receive answers shaped by the tutor Soul and authorized context;
 5. inspect and manage the tutor from the Tutor workspace.
 
-Chat, Research, Quiz, and Deep Solve remain capabilities. A tutor does not own a
+Chat, Research, and Quiz remain capabilities. Complex solving is part of Chat
+rather than a separate mode. A tutor does not own a
 parallel message engine, workflow engine, or session store.
 
 ## 2. Current Baseline
@@ -253,7 +254,7 @@ Backend tasks:
 - [x] Keep current learning goals and plans in Tutor Memory rather than the
   stable tutor profile.
 - [x] Filter mounted product tools according to capability and resource policy,
-  including Learner Memory, Notebook, Space, Quiz sources, and Deep Solve
+  including Learner Memory, Notebook, Space, and Quiz sources
   workflow declarations.
 - [x] Validate runtime capability changes against the bound tutor policy.
 - [x] Record `tutor_id` in relevant trace/run metadata for diagnosis without
@@ -275,7 +276,7 @@ Tests:
 Exit criteria:
 
 - Different tutors produce different stable Soul context while sharing the same
-  Chat/Research/Quiz/Deep Solve implementation.
+  Chat/Research/Quiz implementation.
 - A prompt cannot bypass capability or resource restrictions.
 
 ### Phase 3: Tutor Workspace and Conversation UX
@@ -348,7 +349,7 @@ Backend tasks:
 - [x] Provide a compact active commitments/open-loops summary for turn start;
   full content remains tool-read on demand.
 - [x] Build one runtime memory-routing policy from the memory tools actually
-  mounted for Chat, Research, Quiz, Organize, and Deep Solve. Keep learner
+  mounted for Chat, Research, Quiz, and Organize. Keep learner
   facts and tutor-owned continuity separate, forbid duplicate writes, and omit
   unavailable tool names from prompts.
 
@@ -450,7 +451,7 @@ Before declaring the feature complete:
 - run `cargo tauri dev` with a clean temporary data directory;
 - create two tutors and one Temporary Assistant conversation;
 - verify Chat streaming, Research workflow launch, Quiz card restoration, and
-  Deep Solve under tutor-bound sessions;
+  complex tool-assisted solving through Chat under tutor-bound sessions;
 - switch sessions during a background run and verify run markers settle;
 - restart the desktop app and verify tutor/session/private-memory restoration;
 - verify cross-tutor memory and resource denial in both API and UI;

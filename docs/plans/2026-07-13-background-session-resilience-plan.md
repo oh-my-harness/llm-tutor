@@ -8,7 +8,7 @@ Some product actions create UI that is attached to the current live chat stream
 rather than restored from a durable session projection. For example, a generated
 Quiz can be saved into Quiz Bank, but the interactive Quiz card in the Chat
 message can disappear after the user navigates away and returns. Longer-running
-flows such as Research, Deep Solve, and Quiz generation have the same structural
+flows such as Research and Quiz generation have the same structural
 risk: the backend task may still be running, but the UI cannot reliably rejoin
 the in-flight stream or reconstruct the current result surface.
 
@@ -81,7 +81,7 @@ Domain artifacts stay in their existing stores:
 Quiz card attachment -> quiz_session:<quiz_id>
 Research report attachment before save -> runtime_trace:<run_id>
 Research report attachment after save -> notebook_entry:<entry_id>
-Deep solve attachment -> deep_solve_run:<run_id> or message snapshot
+Historical Deep Solve attachment -> legacy trace or message snapshot
 ```
 
 On session load, the UI should hydrate messages first, then resolve attachment
@@ -177,8 +177,7 @@ After an app/sidecar restart, a previously active run is restored as
   and remains answerable.
 - [ ] Research: start a detailed report, switch sessions, return, verify
   current stage and final report attachment.
-- [ ] Deep Solve: start a long solve, switch sessions, return, verify stage
-  progress and final answer.
+- [x] Retire new Deep Solve runs while preserving old trace/message hydration.
 - [ ] Desktop restart: verify completed artifacts are restored and active runs
   resolve to a clear resumed, failed, or unavailable state.
 
@@ -188,7 +187,7 @@ After an app/sidecar restart, a previously active run is restored as
   to the Chat session.
 - The same Quiz is visible in Space / Quiz Bank and the Chat card links to that
   durable quiz record.
-- A long-running Research or Deep Solve task can continue while the user works
+- A long-running Research task can continue while the user works
   in another session.
 - Returning to the original session shows a coherent run state without starting
   a duplicate run.

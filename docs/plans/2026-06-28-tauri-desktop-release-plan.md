@@ -595,7 +595,7 @@ Tasks:
 - [x] Restore interactive Chat attachments, especially Quiz and Research report
       cards, from durable
       message/artifact references after navigation, refresh, or restart.
-- [x] Persist and expose active run state for long-running Research, Deep Solve,
+- [x] Persist and expose active run state for long-running Research,
       and Quiz generation turns.
 - [x] Rejoin active in-process runs by stable run/session identifiers when the user returns
       to the originating session.
@@ -607,7 +607,7 @@ Acceptance:
 
 - A Quiz card generated in Chat remains visible and answerable after leaving and
   returning to that Chat session.
-- A long Research or Deep Solve run shows a coherent running, failed, cancelled,
+- A long Research run shows a coherent running, failed, cancelled,
   or completed state after the user returns.
 - Restarting the desktop app never silently drops completed tool results from
   the visible conversation.

@@ -2,6 +2,10 @@
 
 Date: 2026-07-08
 
+> Historical note (2026-07-16): the standalone Deep Solve capability has been
+> retired. Its references in this audit record the migration state on the audit
+> date and do not describe a capability available for new runs.
+
 ## Current Evidence
 
 - `llm-harness-runtime` main HEAD is `bea5374690192f2e32943073ced10f66c120db91`; the project is pinned to issue #43 fix branch commit `e200c12a69b896a0d9ab70d2752f9dafcbfc07ad`.

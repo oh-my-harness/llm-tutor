@@ -50,7 +50,7 @@ const emptyDraft: TutorDraft = {
 - 不在证据不足时评价学习者的能力。`,
   default_model_config_id: null,
   default_capability: 'chat',
-  allowed_capabilities: ['chat', 'deep_solve', 'quiz', 'research', 'organize'],
+  allowed_capabilities: ['chat', 'quiz', 'research', 'organize'],
   learner_memory_access: true,
   autonomous_memory: true,
   resource_permissions: { knowledge_base_ids: [], notebook: true, space: true },
@@ -644,7 +644,7 @@ function toggleCapability(draft: TutorDraft, capability: string): TutorDraft {
 }
 
 function capabilityLabel(capability: string) {
-  return ({ chat: '聊天', deep_solve: '深度解题', quiz: '测验', research: '调研', organize: '整理' } as Record<string, string>)[capability] ?? capability
+  return ({ chat: '聊天', quiz: '测验', research: '调研', organize: '整理' } as Record<string, string>)[capability] ?? capability
 }
 
 function memoryKindLabel(kind: TutorMemoryKind) {

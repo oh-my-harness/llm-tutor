@@ -1,4 +1,4 @@
-type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research'
+type Capability = 'chat' | 'code_exec' | 'quiz' | 'research'
 
 interface Props {
   value: Capability
@@ -8,7 +8,6 @@ interface Props {
 export function CapabilitySelector({ value, onChange }: Props) {
   const options: { key: Capability; label: string }[] = [
     { key: 'chat', label: 'Chat' },
-    { key: 'deep_solve', label: 'Deep Solve' },
     { key: 'code_exec', label: 'Code Exec' },
     { key: 'quiz', label: 'Quiz' },
     { key: 'research', label: 'Research' },

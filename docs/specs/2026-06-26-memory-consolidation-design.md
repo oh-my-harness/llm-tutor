@@ -768,7 +768,7 @@ results never become citeable merely because they appeared in model context.
 
 `read_memory`:
 
-- Available to Chat, Research, Deep Solve, and Quiz planning.
+- Available to Chat, Research, and Quiz planning.
 - Should be called when personalized teaching, review, quiz targeting, or
   long-running context matters.
 - Should not be called for pure factual questions that do not need learner

@@ -351,7 +351,15 @@ export default function App() {
         })
       }
       if (data.capability && isCapability(data.capability)) {
-        setCapability(data.capability)
+        const restoredCapability = data.capability === 'deep_solve' ? 'chat' : data.capability
+        setCapability(restoredCapability)
+        if (data.capability === 'deep_solve') {
+          void fetch(`/api/sessions/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ capability: 'chat' }),
+          })
+        }
       }
       setSelectedKnowledgeBaseId(data.kb ?? '')
       setSelectedNotebookEnabled(Boolean(data.notebook_enabled))

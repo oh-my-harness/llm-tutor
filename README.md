@@ -4,7 +4,7 @@
 [`llm-harness-runtime`](https://github.com/oh-my-harness/llm-harness-runtime)
 构建的本地优先 AI 学习工作区。桌面产品名为 **Tutor Agent**。
 
-它把多轮聊天、复杂问题求解、联网研究、测验、RAG 知识库、Markdown Notebook 和学习记忆组合在一个可持久化的桌面应用中。
+它把多轮聊天、联网研究、测验、RAG 知识库、Markdown Notebook 和学习记忆组合在一个可持久化的桌面应用中。复杂问题由 Chat/Tutor Agent 按需调用检索、搜索和代码执行工具完成。
 
 > 当前版本：`0.3.2`
 >
@@ -27,8 +27,7 @@
 
 | 模块 | 当前能力 |
 | --- | --- |
-| Chat | runtime session、多轮历史、流式输出、附件、模型/模式/来源选择、`@` 空间引用、消息操作栏、trace。 |
-| Deep Solve | 分步骤复杂问题求解、计划与状态、证据和代码验证。 |
+| Chat | runtime session、多轮历史、流式输出、附件、模型/模式/来源选择、`@` 空间引用、消息操作栏、trace；按需使用 RAG、联网搜索和代码执行解决复杂问题。 |
 | Research | 普通对话确认需求后，通过 `create_research_report` 启动独立 workflow；报告、来源和运行状态可恢复。 |
 | Quiz | 普通对话确认要求后，通过 `create_quiz` 启动独立 workflow；生成可恢复、可继续答题的 Quiz 卡片。 |
 | Knowledge / RAG | 创建知识库、绑定 embedding、PDF/文本入库、LanceDB 检索、引用和来源导航。 |
@@ -125,7 +124,7 @@ Tutor Agent desktop
           -> REST + WebSocket
           -> runtime sessions
           -> tutor-agent
-              -> chat / deep solve
+              -> chat / code execution
               -> quiz / research / memory workflows
               -> llm-harness-runtime / llm-harness-agent
           -> tutor-tools

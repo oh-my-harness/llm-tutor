@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use llm_adapter::provider::Provider;
 use llm_harness_agent::Session;
-use llm_harness_types::{AgentMessage, ContentBlock, ExecutionEnv, Tool};
+use llm_harness_types::{AgentMessage, ExecutionEnv, Tool};
 use tokio_util::sync::CancellationToken;
 use tutor_rag::KnowledgeRetriever;
 
@@ -21,8 +21,6 @@ pub(crate) const NATURAL_MEMORY_INTERACTION_POLICY: &str = "Treat memory reads a
 pub enum Capability {
     /// Conversational Q&A with RAG knowledge base.
     Chat,
-    /// Multi-phase guided problem solving (Pre-retrieve → Plan → Solve → Synthesize).
-    DeepSolve,
     /// Execute user code with explanation.
     CodeExec,
     /// Generate and answer knowledge-base quizzes in the product UI.
@@ -39,7 +37,6 @@ impl FromStr for Capability {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "chat" => Ok(Self::Chat),
-            "deep_solve" => Ok(Self::DeepSolve),
             "code_exec" => Ok(Self::CodeExec),
             "quiz" => Ok(Self::Quiz),
             "research" => Ok(Self::Research),
@@ -208,25 +205,6 @@ impl CapabilityRouter {
             Capability::Research => crate::chat::run_research_with_messages(self, messages).await,
             Capability::Organize => crate::chat::run_organize_with_messages(self, messages).await,
             Capability::Quiz => crate::chat::run_quiz_with_messages(self, messages).await,
-            Capability::DeepSolve => {
-                let question = question_from_messages(&messages);
-                let client = self.make_client();
-                let mut orchestrator = crate::solve_orchestrator::SolveOrchestrator::new(
-                    question,
-                    self.env.clone(),
-                    self.llm.clone(),
-                    self.governance.clone(),
-                )
-                .with_event_sink(self.event_sink.clone())
-                .with_web_search(self.web_search.clone())
-                .with_workflow_root(self.workflow_root.clone())
-                .with_memory_root(self.memory_root.clone())
-                .with_learner_memory_access(self.learner_memory_access)
-                .with_product_instruction(self.product_instruction.clone())
-                .with_additional_tools(self.product_tools.clone())
-                .with_client(client);
-                orchestrator.run(None).await
-            }
             Capability::CodeExec => {
                 crate::code_exec::run_code_exec_with_messages(self, messages).await
             }
@@ -277,25 +255,6 @@ impl CapabilityRouter {
                     abort_token,
                 )
                 .await
-            }
-            Capability::DeepSolve => {
-                let existing = session
-                    .build_context()
-                    .await
-                    .map_err(|err| TutorError::Internal(err.to_string()))?
-                    .messages;
-                let mut messages = existing;
-                messages.push(crate::chat::user_message(question));
-                let answer = self.run_with_messages(capability, messages).await?;
-                session
-                    .append_message(crate::chat::user_message(question))
-                    .await
-                    .map_err(|err| TutorError::Internal(err.to_string()))?;
-                session
-                    .append_message(crate::chat::assistant_message(&answer))
-                    .await
-                    .map_err(|err| TutorError::Internal(err.to_string()))?;
-                Ok(answer)
             }
         }
     }
@@ -364,59 +323,6 @@ fn apply_product_instruction(system_prompt: &str, instruction: Option<&str>) -> 
     }
 }
 
-fn question_from_messages(messages: &[AgentMessage]) -> String {
-    let Some(last_user_text) = messages.iter().rev().find_map(|message| match message {
-        AgentMessage::User(_) => agent_message_text(message),
-        _ => None,
-    }) else {
-        return String::new();
-    };
-
-    if messages.len() <= 1 {
-        return last_user_text;
-    }
-
-    let context = messages
-        .iter()
-        .take(messages.len().saturating_sub(1))
-        .filter_map(|message| match message {
-            AgentMessage::User(_) => {
-                agent_message_text(message).map(|text| format!("User: {text}"))
-            }
-            AgentMessage::Assistant(_) => {
-                agent_message_text(message).map(|text| format!("Assistant: {text}"))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!("Conversation context:\n{context}\n\nCurrent question:\n{last_user_text}")
-}
-
-fn agent_message_text(message: &AgentMessage) -> Option<String> {
-    let content = match message {
-        AgentMessage::User(message) => &message.content,
-        AgentMessage::Assistant(message) => &message.content,
-        _ => return None,
-    };
-
-    let text = content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    if text.trim().is_empty() {
-        None
-    } else {
-        Some(text)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,10 +342,7 @@ mod tests {
             Capability::from_str("chat").unwrap(),
             Capability::Chat
         ));
-        assert!(matches!(
-            Capability::from_str("deep_solve").unwrap(),
-            Capability::DeepSolve
-        ));
+        assert!(Capability::from_str("deep_solve").is_err());
         assert!(matches!(
             Capability::from_str("quiz").unwrap(),
             Capability::Quiz

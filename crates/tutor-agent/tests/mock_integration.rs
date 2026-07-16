@@ -9,7 +9,6 @@ use llm_harness_loop::{
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
 };
 use llm_harness_runtime::observability::audit::AuditSink;
-use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::{AgentMessage, AssistantMessageKind, ExecutionEnv};
 use tempfile::TempDir;
@@ -214,124 +213,6 @@ async fn chat_returns_runtime_final_answer_not_progress_text() {
             .iter()
             .any(|(kind, data)| { kind == "final_answer" && data["capability"] == "chat" }),
         "missing runtime final answer trace: {events:?}"
-    );
-}
-
-#[tokio::test]
-async fn smoke_deep_solve_one_step() {
-    let plan_json =
-        r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;
-    let responses = vec![
-        MockResponse::text(plan_json),
-        MockResponse::tool_use(
-            "submit-solve",
-            "submit_step_result",
-            r#"{"result":{"route":"finish","summary":"the answer is 4"}}"#,
-        ),
-        MockResponse::text("Solved: the answer is 4."),
-        MockResponse::text("The final answer is 4."),
-    ];
-    let router = make_router(responses, make_governance(None));
-    let answer = router
-        .run(Capability::DeepSolve, "what is 2+2?")
-        .await
-        .unwrap();
-    assert!(!answer.is_empty());
-}
-
-#[tokio::test]
-async fn audit_captures_deep_solve_state_transitions() {
-    let dir = TempDir::new().unwrap();
-    let audit_path = dir.path().join("audit.jsonl");
-    let sink: Arc<dyn AuditSink> = Arc::new(JsonlAuditSink::new(audit_path.clone()));
-
-    let plan_json = r#"{"analysis":"simple","steps":[{"id":"s1","goal":"compute the value"}]}"#;
-    let responses = vec![
-        MockResponse::text(plan_json),
-        MockResponse::tool_use(
-            "submit-solve",
-            "submit_step_result",
-            r#"{"result":{"route":"finish","summary":"computed"}}"#,
-        ),
-        MockResponse::text("Solved: computed."),
-        MockResponse::text("The answer is 42."),
-    ];
-    let router = make_router(responses, make_governance(Some(sink)));
-    router
-        .run(Capability::DeepSolve, "what is 6 times 7?")
-        .await
-        .unwrap();
-
-    let content = std::fs::read_to_string(&audit_path).unwrap();
-    assert!(
-        content.contains("\"retrieve\""),
-        "audit missing retrieve phase: {content}"
-    );
-    assert!(
-        content.contains("\"has_kb\""),
-        "audit missing runtime retrieve metadata: {content}"
-    );
-
-    let count = JsonlAuditSink::validate(&audit_path).await.unwrap();
-    assert!(count >= 1, "expected at least 1 audit entry, got {count}");
-}
-
-#[tokio::test]
-async fn deep_solve_emits_structured_ux_events() {
-    let sink = Arc::new(TraceRecorder::default());
-    let plan_json =
-        r#"{"analysis":"simple addition","steps":[{"id":"s1","goal":"compute 2 plus 2"}]}"#;
-    let responses = vec![
-        MockResponse::text(plan_json),
-        MockResponse::tool_use(
-            "submit-solve",
-            "submit_step_result",
-            r#"{"result":{"route":"finish","summary":"the answer is 4"}}"#,
-        ),
-        MockResponse::text("Solved: the answer is 4."),
-        MockResponse::text("The final answer is 4."),
-    ];
-    let router = make_router(responses, make_governance(None)).with_event_sink(sink.clone());
-
-    router
-        .run(Capability::DeepSolve, "what is 2+2?")
-        .await
-        .unwrap();
-
-    let events = sink.events();
-    assert!(
-        events.iter().any(|(kind, data)| {
-            kind == "deep_solve_stage_start"
-                && data["capability"] == "deep_solve"
-                && data["stage"] == "plan"
-        }),
-        "missing plan stage start: {events:?}"
-    );
-    assert!(
-        events.iter().any(|(kind, data)| {
-            kind == "deep_solve_stage_done"
-                && data["stage"] == "solve"
-                && data["summary"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("4"))
-        }),
-        "missing runtime solve stage done: {events:?}"
-    );
-    assert!(
-        events.iter().any(|(kind, data)| {
-            kind == "deep_solve_final"
-                && data["stage"] == "synthesize"
-                && data["summary"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("4"))
-        }),
-        "missing final event: {events:?}"
-    );
-    assert!(
-        events
-            .iter()
-            .any(|(kind, data)| { kind == "runtime_usage" && data["capability"] == "deep_solve" }),
-        "missing deep solve runtime usage trace: {events:?}"
     );
 }
 

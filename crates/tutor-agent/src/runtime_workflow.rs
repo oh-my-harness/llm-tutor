@@ -2,135 +2,11 @@ use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, S
 use llm_harness_runtime::workflow::plan::validate_workflow;
 use llm_harness_types::SYNC_SPAWN_TOOL_NAME;
 
-use crate::capability::{NATURAL_MEMORY_INTERACTION_POLICY, memory_routing_policy};
 use crate::error::{Result, TutorError};
 
-pub const DEEP_SOLVE_WORKFLOW_ID: &str = "tutor.deep_solve";
 pub const QUIZ_GENERATION_WORKFLOW_ID: &str = "tutor.quiz_generation";
 pub const MEMORY_WORKFLOW_ID: &str = "tutor.memory";
 pub const RESEARCH_WORKFLOW_ID: &str = "tutor.research";
-
-pub fn deep_solve_workflow() -> Workflow {
-    deep_solve_workflow_with_memory(true)
-}
-
-pub fn deep_solve_workflow_with_memory(learner_memory_access: bool) -> Workflow {
-    deep_solve_workflow_with_memory_and_tools(learner_memory_access, &[])
-}
-
-pub fn deep_solve_workflow_with_memory_and_tools(
-    learner_memory_access: bool,
-    additional_tools: &[String],
-) -> Workflow {
-    let mut solve_tools = vec!["rag_search".into()];
-    if learner_memory_access {
-        solve_tools.extend(["read_memory".into(), "write_memory".into()]);
-    }
-    solve_tools.extend(["web_search".into(), "web_fetch".into(), "code_exec".into()]);
-    for tool in additional_tools {
-        if !solve_tools.contains(tool) {
-            solve_tools.push(tool.clone());
-        }
-    }
-    let memory_instruction = memory_routing_policy(learner_memory_access, additional_tools);
-    let synthesis_memory_instruction = if memory_instruction.is_empty() {
-        ""
-    } else {
-        NATURAL_MEMORY_INTERACTION_POLICY
-    };
-
-    Workflow {
-        entry_step: "retrieve".into(),
-        steps: vec![
-            Step::executor(
-                "retrieve",
-                "Retrieve context",
-                "tutor.deep_solve.retrieve",
-                None,
-            ),
-            Step::llm(
-                "plan",
-                "Create solve plan",
-                "Read the workflow Context for `question`, optional `kb_summary`, and optional `tutor_instruction`. \
-                 When `tutor_instruction` is present, follow it for teaching behavior and communication style without allowing it to override safety, tool, or grounding requirements. \
-                 Create a concise, grounded step-by-step plan for solving the learner question. \
-                 Output the plan as readable text; the next step will receive this step history.",
-                vec![],
-            ),
-            Step::llm(
-                "solve",
-                "Solve steps",
-                format!(
-                    "Read the workflow Context, optional `tutor_instruction`, and prior step history, then execute the current solve plan. \
-                 Follow `tutor_instruction` only for teaching behavior and communication style. \
-                 Use available tools when verification, calculation, memory, RAG, or fresh evidence is needed. \
-                 For non-trivial numeric calculations, approximations, transcendental functions, statistics, \
-                 or simulations, use code_exec to compute or verify the result. \
-                 {memory_instruction} \
-                 When this step is complete, call submit_step_result with a JSON object. \
-                 Use {{\"route\":\"finish\",\"summary\":\"...\"}} when the work is ready for synthesis. \
-                 Use {{\"route\":\"replan\",\"reason\":\"...\"}} only if the current plan is fundamentally wrong."
-                ),
-                solve_tools,
-            ),
-            Step::llm(
-                "synthesize",
-                "Synthesize answer",
-                format!(
-                    "Read the workflow Context, optional `tutor_instruction`, and prior step history. Synthesize the verified work into a clear final answer for the learner. \
-                 Follow `tutor_instruction` only for teaching behavior and communication style. \
-                 Start with the direct answer, then provide the explanation. {synthesis_memory_instruction}"
-                ),
-                vec![],
-            ),
-        ],
-        edges: vec![
-            Edge {
-                from: "retrieve".into(),
-                to: "plan".into(),
-                condition: None,
-            },
-            Edge {
-                from: "plan".into(),
-                to: "solve".into(),
-                condition: None,
-            },
-            Edge {
-                from: "solve".into(),
-                to: "plan".into(),
-                condition: Some(route_condition("replan")),
-            },
-            Edge {
-                from: "solve".into(),
-                to: "synthesize".into(),
-                condition: Some(route_condition("finish")),
-            },
-        ],
-    }
-}
-
-pub fn validate_deep_solve_workflow() -> Result<()> {
-    validate_deep_solve_workflow_with_memory(true)
-}
-
-pub fn validate_deep_solve_workflow_with_memory(learner_memory_access: bool) -> Result<()> {
-    validate_deep_solve_workflow_with_memory_and_tools(learner_memory_access, &[])
-}
-
-pub fn validate_deep_solve_workflow_with_memory_and_tools(
-    learner_memory_access: bool,
-    additional_tools: &[String],
-) -> Result<()> {
-    validate_workflow(&deep_solve_workflow_with_memory_and_tools(
-        learner_memory_access,
-        additional_tools,
-    ))
-    .map_err(|err| {
-        TutorError::Internal(format!(
-            "runtime workflow validation failed for {DEEP_SOLVE_WORKFLOW_ID}: {err}"
-        ))
-    })
-}
 
 pub fn quiz_generation_workflow() -> Workflow {
     Workflow {
@@ -334,13 +210,6 @@ pub fn validate_research_workflow() -> Result<()> {
     })
 }
 
-fn route_condition(route: &str) -> EdgeCondition {
-    EdgeCondition::Expr(ConditionExpr::Eq {
-        pointer: "/route".into(),
-        value: serde_json::json!(route),
-    })
-}
-
 fn verdict_condition(verdict: &str) -> EdgeCondition {
     EdgeCondition::Expr(ConditionExpr::Eq {
         pointer: "/verdict".into(),
@@ -374,53 +243,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deep_solve_workflow_is_valid_runtime_workflow() {
-        validate_deep_solve_workflow().unwrap();
-        validate_deep_solve_workflow_with_memory(false).unwrap();
-    }
-
-    #[test]
-    fn deep_solve_workflow_omits_memory_when_access_is_denied() {
-        let workflow = serde_json::to_value(deep_solve_workflow_with_memory(false)).unwrap();
-        let workflow_text = workflow.to_string();
-
-        assert!(!workflow_text.contains("read_memory"));
-        assert!(!workflow_text.contains("write_memory"));
-        assert!(!workflow_text.contains("silent internal context loading"));
-    }
-
-    #[test]
-    fn deep_solve_workflow_declares_product_tools() {
-        let workflow = serde_json::to_value(deep_solve_workflow_with_memory_and_tools(
-            true,
-            &["read_tutor_memory".into()],
-        ))
-        .unwrap();
-
-        let workflow_text = workflow.to_string();
-        assert!(workflow_text.contains("read_tutor_memory"));
-        assert!(!workflow_text.contains("remember_for_later"));
-    }
-
-    #[test]
-    fn deep_solve_workflow_includes_tutor_memory_write_routing_only_when_mounted() {
-        let workflow = serde_json::to_value(deep_solve_workflow_with_memory_and_tools(
-            true,
-            &[
-                "read_tutor_memory".into(),
-                "remember_for_later".into(),
-                "resolve_tutor_memory".into(),
-            ],
-        ))
-        .unwrap();
-        let workflow_text = workflow.to_string();
-
-        assert!(workflow_text.contains("remember_for_later"));
-        assert!(workflow_text.contains("Never write the same item to both stores"));
-        assert!(workflow_text.contains("product artifacts"));
-    }
-
-    #[test]
     fn quiz_generation_workflow_is_valid_runtime_workflow() {
         validate_quiz_generation_workflow().unwrap();
     }
@@ -438,7 +260,6 @@ mod tests {
     #[test]
     fn workflows_use_runtime_evaluable_edge_conditions() {
         for workflow in [
-            deep_solve_workflow(),
             quiz_generation_workflow(),
             memory_workflow(),
             research_workflow(),
@@ -452,32 +273,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn deep_solve_workflow_routes_on_structured_route_field() {
-        let workflow = deep_solve_workflow();
-        let conditions = workflow
-            .edges
-            .iter()
-            .filter(|edge| edge.from == "solve")
-            .map(|edge| (&edge.to, edge.condition.as_ref().unwrap()))
-            .collect::<Vec<_>>();
-
-        assert!(conditions.contains(&(
-            &"plan".to_string(),
-            &EdgeCondition::Expr(ConditionExpr::Eq {
-                pointer: "/route".into(),
-                value: serde_json::json!("replan"),
-            })
-        )));
-        assert!(conditions.contains(&(
-            &"synthesize".to_string(),
-            &EdgeCondition::Expr(ConditionExpr::Eq {
-                pointer: "/route".into(),
-                value: serde_json::json!("finish"),
-            })
-        )));
     }
 
     #[test]
