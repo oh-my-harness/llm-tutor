@@ -285,12 +285,12 @@ Goal: replace the Tutor placeholder with a useful management surface.
 Frontend tasks:
 
 - [x] Add the initial `TutorPage` with a compact tutor rail and profile editor.
-- [x] Expose deletion for user-created tutors in the persistent header action
-  area, backed by archive semantics that preserve existing sessions.
+- [x] Expose deletion directly on user-created tutor rows, backed by archive
+  semantics that preserve existing sessions, without duplicating the action in
+  the profile workspace header.
 - [x] Keep the new-conversation tutor chooser fixed-height and render its
   bounded, internally scrolling option list outside the Composer layout.
-- [x] Refine the chooser into a compact searchable identity list and expose
-  delete actions directly on user-created tutor rows.
+- [x] Refine the chooser into a compact searchable identity list.
 - [ ] Add the tutor conversation list and compact continuity panel.
 - [x] Add create/edit forms for Markdown Soul, default capability, allowed
   capabilities, and memory policy.

@@ -320,16 +320,6 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
                 </div>
                 <button
                   type="button"
-                  disabled={busy || selected.built_in}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35"
-                  title={selected.built_in ? '内置导师不可删除' : '删除导师'}
-                  aria-label={selected.built_in ? '内置导师不可删除' : '删除导师'}
-                  onClick={() => void remove()}
-                >
-                  <Trash2 size={16} />
-                </button>
-                <button
-                  type="button"
                   className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
                   onClick={() => onStartConversation(selected.id)}
                 >

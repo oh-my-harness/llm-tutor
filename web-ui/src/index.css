@@ -66,6 +66,11 @@ body {
   color: var(--text-primary);
 }
 
+/* Reserve scrollbar space up front so panes never shift when overflow changes. */
+.app-shell .overflow-y-auto {
+  scrollbar-gutter: stable;
+}
+
 .app-sidebar {
   border-color: var(--surface-border);
   background: var(--app-sidebar);
@@ -101,7 +106,8 @@ body {
   background: var(--chat-canvas);
 }
 
-.chat-scroll-pane {
+.app-shell .chat-scroll-pane {
+  scrollbar-gutter: stable both-edges;
   scrollbar-color: var(--chat-scrollbar-thumb) var(--chat-canvas);
 }
 
