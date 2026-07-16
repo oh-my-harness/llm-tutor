@@ -1,7 +1,7 @@
 # Tauri Desktop Release Plan
 
-> Status: implementation mostly complete; manual desktop QA pending | Date:
-> 2026-06-28 | Scope: build the first usable desktop release of `llm-tutor`
+> Status: release automation validated by `v0.3.1`; clean-install desktop QA pending | Date:
+> 2026-06-28 | Last updated: 2026-07-16 | Scope: build the first usable desktop release of `llm-tutor`
 > with Tauri, bundled React UI, and a managed `tutor-web` backend sidecar.
 
 ## 1. Goal
@@ -44,17 +44,17 @@ llm-tutor desktop app
       -> runs agent, tools, RAG, quiz, memory, and notebook
 ```
 
-Do not rewrite `tutor-web` as Tauri commands for v0.1. The existing Axum
+Do not rewrite `tutor-web` as Tauri commands for desktop packaging. The existing Axum
 backend already owns streaming, sessions, uploads, RAG, tools, and product
 storage. Rewriting those as Tauri commands would add risk without improving the
-first release.
+desktop product.
 
 ## 3. Release Scope
 
 ### In Scope
 
-- Windows desktop release first.
-- macOS desktop artifacts for every future public desktop release.
+- Windows x64 NSIS and MSI desktop artifacts.
+- macOS x64 and arm64 DMG artifacts for every public desktop release.
 - Tauri project added to the repository.
 - Existing `web-ui` bundled into the desktop app.
 - `tutor-web` built as a sidecar binary.
@@ -90,7 +90,7 @@ The backend supports receiving this directory through either:
 - environment variable: `LLM_TUTOR_HOME`,
 - or CLI argument: `--data-dir <path>`.
 
-Current v0.1 implementation:
+Current implementation:
 
 ```text
 Tauri app starts
@@ -109,7 +109,7 @@ Use:
 127.0.0.1:<dynamic port>
 ```
 
-Current v0.1 implementation:
+Current implementation:
 
 1. Tauri finds a free TCP port.
 2. Tauri starts `tutor-web` with `--host 127.0.0.1 --port <port>`.
@@ -255,8 +255,8 @@ macOS artifacts:
 
 Release automation:
 
-- `.github/workflows/release-desktop.yml` exists and is the preferred release
-  path once CI secrets and dependency access are configured.
+- `.github/workflows/release-desktop.yml` is the validated preferred release
+  path. Repository secrets and private dependency access are configured.
 - Pushing a `v*` tag builds Windows and macOS desktop artifacts and uploads
   them to the matching GitHub Release.
 - Manual `workflow_dispatch` builds the same artifacts as workflow artifacts
@@ -328,11 +328,11 @@ Tasks:
 - [x] Add settings/status UI display for current data directory.
 - [x] Add "open data directory" desktop command.
 - [x] Decide whether frontend localStorage settings should remain in WebView
-      storage for v0.1 or move into a backend settings store.
+      storage or move into a backend settings store.
 
 Decision:
 
-- v0.1 stores LLM, embedding, search, budget, and approval settings in the
+- The desktop product stores LLM, embedding, search, budget, and approval settings in the
   backend Settings Store at `<data-dir>/settings.json`.
 - The frontend still writes a localStorage compatibility cache, but startup
   prefers the backend Settings Store and migrates existing localStorage settings
@@ -347,7 +347,8 @@ Acceptance:
 
 ### Phase 4: Release Build Script
 
-Status: implementation complete; pending manual release build QA.
+Status: implementation complete; GitHub release build validated by `v0.3.1`;
+local fallback build QA remains optional for Windows-specific diagnosis.
 
 Tasks:
 
@@ -374,13 +375,19 @@ Acceptance:
 
 ### Phase 5: First Release QA
 
-Status: in progress.
+Status: in progress. The `v0.3.1` tag workflow completed successfully on
+2026-07-16 and published Windows x64 NSIS/MSI plus macOS x64/arm64 DMG assets.
+Clean-profile installation and end-to-end UI QA remain pending.
 
 Tasks:
 
 - [x] Add desktop release QA automation script.
 - [x] Add manual desktop QA checklist.
 - [x] Add changelog and version bump script.
+- [x] Validate the tag-triggered GitHub release workflow with private
+  dependency access.
+- [x] Publish platform-qualified Windows x64 and macOS x64/arm64 assets to one
+  GitHub Release.
 - [ ] Run `scripts/build-desktop.ps1` on a local machine with enough build time.
 - [ ] Run `scripts/qa-desktop.ps1` against the built artifact.
 - [ ] Install or unpack app on a clean Windows machine/profile.
@@ -407,7 +414,7 @@ Automation:
   binary with a temporary data directory to smoke-test `/api/sessions` and
   `/api/knowledge-bases`; it also creates a test knowledge base and verifies
   that `settings.json` can be written through `/api/settings`.
-- `docs/qa/desktop-v0.1.md` tracks the manual UI checks that cannot be safely
+- `docs/qa/desktop-release.md` tracks the manual UI checks that cannot be safely
   completed by a shell script.
 
 ## 11. Risks and Mitigations
@@ -420,7 +427,7 @@ Automation:
 | Data directory mismatch | User data appears lost | Explicit data root and settings display |
 | API keys in local files | Security concern | Keep first version local-only; avoid logs; plan keychain later |
 | Tauri bundling sidecar complexity | Release build blocked | Start with portable/debug bundle if installer takes longer |
-| Windows code signing absent | Installer trust warnings | Accept for internal v0.1; plan signing before public release |
+| Windows code signing absent | Installer trust warnings | Accept for current preview releases; plan signing before broader distribution |
 
 ## 12. Desktop App Feel Follow-up
 
@@ -605,9 +612,9 @@ Acceptance:
 - Restarting the desktop app never silently drops completed tool results from
   the visible conversation.
 
-## 13. Done Criteria for v0.1 Desktop Release
+## 13. Automated Release Baseline
 
-- A Windows desktop artifact exists.
+- Windows x64 NSIS/MSI and macOS x64/arm64 DMG artifacts exist in one GitHub Release.
 - User can launch the app without terminal commands.
 - Backend sidecar starts automatically.
 - Frontend talks to the sidecar over local REST/WebSocket.
@@ -619,17 +626,12 @@ Acceptance:
 
 ## 14. Remaining Implementation Order
 
-1. Run `scripts/build-desktop.ps1` on a local Windows machine with enough build
-   time and record the artifact path.
-2. Run `scripts/qa-desktop.ps1` against that artifact and fix any packaging or
-   sidecar issues it reports.
-3. Complete the manual checklist in `docs/qa/desktop-v0.1.md` on a clean
+1. Complete the manual checklist in `docs/qa/desktop-release.md` on a clean
    Windows profile or clean app data directory.
-4. Validate `.github/workflows/release-desktop.yml` with `workflow_dispatch`
-   once repository secrets and private dependency access are configured.
-5. Decide whether the first shared artifact is a portable build, NSIS installer,
-   MSI, or a combination.
-6. Execute Phase 6 for native-app feel, context menu capability areas,
+2. Use `scripts/build-desktop.ps1` and `scripts/qa-desktop.ps1` when local
+   Windows packaging or sidecar diagnosis is needed.
+3. Execute Phase 6 for native-app feel, context menu capability areas,
    pane-local scrolling, and native file/link behavior.
-7. Execute Phase 7 for durable background runs, session rejoin, and restorable
+4. Execute Phase 7 for durable background runs, session rejoin, and restorable
    interactive Chat attachments.
+5. Add signing/notarization, automatic updates, and broader release hardening.

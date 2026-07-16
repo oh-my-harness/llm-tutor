@@ -1,6 +1,6 @@
 # llm-tutor Product Requirements Spec
 
-> Status: active | Date: 2026-06-26 | Scope: consolidate current and planned product requirements into one itemized spec.
+> Status: active | Date: 2026-06-26 | Last updated: 2026-07-16 | Scope: consolidate current and planned product requirements into one itemized spec.
 
 ## 1. Product Goal
 
@@ -522,58 +522,58 @@ other generated learning records.
 - REQ-676: Student Profile shall summarize recent notebook topics.
 - REQ-677: Student Profile shall recommend next actions.
 - REQ-678: Student Profile shall start with deterministic stats before complex LLM memory. Status: planned.
-- REQ-679: Student Profile shall remain explainable. Status: planned.
-- REQ-680: Student Profile shall eventually be editable or user-correctable. Status: planned.
-- REQ-681: Student Profile shall use Markdown memory documents as the initial durable source of truth. Status: planned.
+- REQ-679: Student Profile shall remain explainable. Status: implemented through source-linked L3 Memory.
+- REQ-680: Student Profile shall eventually be editable or user-correctable. Status: implemented through editable L3 Markdown.
+- REQ-681: Student Profile shall use Markdown memory documents as the initial durable source of truth. Status: implemented.
 - REQ-682: Student Profile may later use a structured cache or projection derived from Markdown memory. Status: planned.
-- REQ-683: Student Profile shall not require a separate hidden student-profile database in the MVP. Status: planned.
+- REQ-683: Student Profile shall not require a separate hidden student-profile database in the MVP. Status: implemented.
 
 ## 20. Memory System
 
-- REQ-690: The product shall provide a Memory module. Status: planned.
-- REQ-691: Memory shall use readable Markdown files as the primary durable representation in the MVP. Status: planned.
-- REQ-692: Memory shall support an L1 raw-event layer. Status: planned.
-- REQ-693: L1 shall include chat events. Status: planned.
-- REQ-694: L1 shall include quiz events. Status: planned.
-- REQ-695: L1 shall include notebook events. Status: planned.
+- REQ-690: The product shall provide a Memory module. Status: implemented.
+- REQ-691: Memory shall use readable Markdown files as the primary durable representation in the MVP. Status: implemented for L2 and L3; L1 remains normalized product evidence.
+- REQ-692: Memory shall support an L1 raw-event layer. Status: implemented.
+- REQ-693: L1 shall include chat events. Status: implemented.
+- REQ-694: L1 shall include quiz events. Status: implemented.
+- REQ-695: L1 shall include notebook events. Status: implemented.
 - REQ-696: The former separate Research L1 event category is retired. Ordinary
   Research-mode clarification and planning conversation shall use Chat L1 with
   `capability = research`;
   workflow traces are not learner-memory evidence, and saved reports enter L1
   through Notebook. Status: implemented.
-- REQ-697: Memory shall support an L2 per-surface summary layer. Status: planned.
-- REQ-698: L2 shall include `chat.md`. Status: planned.
-- REQ-699: L2 shall include `quiz.md`. Status: planned.
-- REQ-700: L2 shall include `notebook.md`. Status: planned.
-- REQ-700A: L2 shall include `knowledge.md`. Status: planned.
+- REQ-697: Memory shall support an L2 per-surface summary layer. Status: implemented.
+- REQ-698: L2 shall include `chat.md`. Status: implemented.
+- REQ-699: L2 shall include `quiz.md`. Status: implemented.
+- REQ-700: L2 shall include `notebook.md`. Status: implemented.
+- REQ-700A: L2 shall include `knowledge.md`. Status: implemented.
 - REQ-701: The former requirement for a separate `research.md` L2 file is
   retired. Durable behavior from explicitly saved Research reports is
   consolidated into `notebook.md`.
-- REQ-702: Memory shall support an L3 cross-surface memory layer. Status: planned.
-- REQ-703: L3 shall include `recent.md`. Status: planned.
-- REQ-704: L3 shall include `profile.md`. Status: planned.
-- REQ-705: L3 shall include `scope.md`. Status: planned.
-- REQ-706: L3 shall include `preferences.md`. Status: planned.
-- REQ-707: L3 shall include `teaching_strategy.md`. Status: planned.
-- REQ-708: Memory entries shall support stable hidden entry ids. Status: planned.
-- REQ-709: Memory entries shall support source references. Status: planned.
-- REQ-710: Memory entries shall be editable by the user. Status: planned.
-- REQ-711: Memory consolidation shall initially be manually triggered from the Memory module. Status: planned.
-- REQ-712: Memory consolidation shall show which source layers or surfaces will be used. Status: planned.
-- REQ-713: Memory consolidation shall write back to Markdown files. Status: planned.
+- REQ-702: Memory shall support an L3 cross-surface memory layer. Status: implemented.
+- REQ-703: L3 shall include `recent.md`. Status: implemented.
+- REQ-704: L3 shall include `profile.md`. Status: implemented.
+- REQ-705: L3 shall include `scope.md`. Status: implemented.
+- REQ-706: L3 shall include `preferences.md`. Status: implemented.
+- REQ-707: L3 shall include `teaching_strategy.md`. Status: implemented.
+- REQ-708: Memory entries shall support stable hidden entry ids. Status: implemented.
+- REQ-709: Memory entries shall support source references. Status: implemented.
+- REQ-710: Memory entries shall be editable by the user. Status: implemented.
+- REQ-711: Memory consolidation shall initially be manually triggered from the Memory module. Status: implemented as explicit update/check/dedupe actions.
+- REQ-712: Memory consolidation shall show which source layers or surfaces will be used. Status: implemented through target-specific workflow tools and visible flow state.
+- REQ-713: Memory consolidation shall write back to Markdown files. Status: implemented after change review.
 - REQ-714: The system may later suggest consolidation after N turns, quiz completion, or research-report saves. Status: planned.
-- REQ-715: The product shall provide a `read_memory` tool for agents. Status: planned.
-- REQ-716: Agents shall call `read_memory` when personalized teaching, quiz generation, review planning, or long-running learning context requires it. Status: planned.
-- REQ-717: Memory shall not be injected wholesale into every prompt by default. Status: planned.
-- REQ-718: `write_memory` shall be limited to explicit user preferences or user-approved facts. Status: planned.
-- REQ-719: Memory content shall guide teaching behavior and personalization, not act as factual source material for external facts. Status: planned.
-- REQ-720: Memory Markdown footnote refs shall render as clickable inline source chips. Status: planned.
-- REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: planned.
+- REQ-715: The product shall provide a `read_memory` tool for agents. Status: implemented.
+- REQ-716: Agents shall call `read_memory` when personalized teaching, quiz generation, review planning, or long-running learning context requires it. Status: implemented through tool-aware runtime instructions.
+- REQ-717: Memory shall not be injected wholesale into every prompt by default. Status: implemented.
+- REQ-718: `write_memory` shall be limited to explicit user preferences or user-approved facts. Status: implemented in runtime policy and tool contract.
+- REQ-719: Memory content shall guide teaching behavior and personalization, not act as factual source material for external facts. Status: implemented.
+- REQ-720: Memory Markdown footnote refs shall render as clickable inline source chips. Status: implemented.
+- REQ-721: Clicking an inline memory source chip shall scroll to the corresponding bottom reference item. Status: implemented.
 - REQ-722: Clicking a bottom memory reference item shall navigate to the related
   Chat, Notebook (including saved Research reports), Quiz, or Knowledge Base
   surface when possible. Book and Research-specific references are no longer
   supported. Status: implemented for current reference targets.
-- REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: planned.
+- REQ-723: Internal memory entry markers such as `<!--m_xxx-->` shall never be displayed in rendered Markdown. Status: implemented by Markdown rendering while remaining available in source/edit mode.
 - REQ-724: The Memory LLM workspace shall require an explicit maintenance mode
   (`update`, `check`, or `dedupe`) and model selection before the user starts a
   run; selecting either control shall not start the workflow by itself. Status:
@@ -884,16 +884,16 @@ other generated learning records.
 ## 29. Desktop Release
 
 - REQ-560: The product shall be packaged as a Tauri desktop application. Status: implemented; manual desktop QA pending.
-- REQ-561: The desktop app shall bundle the React UI production build. Status: implemented; release artifact QA pending.
+- REQ-561: The desktop app shall bundle the React UI production build. Status: implemented and validated by the `v0.3.1` release workflow; clean-install QA remains pending.
 - REQ-562: The desktop app shall start the local Rust backend automatically. Status: implemented; manual desktop QA pending.
 - REQ-563: The desktop app shall not require users to run `npm run dev` or `cargo run` manually. Status: implemented for release builds; manual desktop QA pending.
 - REQ-564: The desktop app shall use an OS-appropriate application data directory by default. Status: implemented.
 - REQ-565: The desktop app shall keep API keys user-configured and shall not bundle provider credentials. Status: implemented.
-- REQ-566: The first desktop release shall prioritize Windows packaging. Status: implemented in build scripts; artifact QA pending.
-- REQ-567: The release process shall support reproducible builds through scripts or CI. Status: implemented; CI secret validation pending.
+- REQ-566: The first desktop release shall prioritize Windows packaging. Status: implemented; `v0.3.1` publishes NSIS and MSI assets.
+- REQ-567: The release process shall support reproducible builds through scripts or CI. Status: implemented and validated with private dependency access in the `v0.3.1` tag workflow.
 - REQ-568: The app shall preserve the local-first storage model in the desktop release. Status: implemented.
 - REQ-569: Desktop packaging details shall be tracked in `docs/plans/2026-06-28-tauri-desktop-release-plan.md`. Status: implemented.
-- REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: planned; GitHub Actions path documented but not validated.
+- REQ-570: Every future public desktop release shall include a macOS artifact, preferably a `.dmg` built on macOS and uploaded to the same GitHub Release as the Windows installers. Status: implemented and validated for both x64 and arm64 in `v0.3.1`.
 - REQ-571: The desktop app shall hide or replace browser-default interactions that make the product feel like an embedded webpage, including visible browser context-menu behavior. Status: in progress; app-owned context menus, native clipboard use, external-link routing, and file-drop interception are implemented.
 - REQ-572: The desktop app shall use a fixed application shell where top-level window scrolling is avoided and scroll behavior is owned by specific panes or work areas. Status: in progress; top-level shell and Chat/Trace panes are hardened, full surface audit remains.
 - REQ-573: The desktop app shall provide product-owned context menu capability

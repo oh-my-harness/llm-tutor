@@ -1,6 +1,6 @@
 # AI Tutor Product Roadmap
 
-> Status: in progress | Date: 2026-06-20 | Last updated: 2026-07-15 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
+> Status: in progress | Date: 2026-06-20 | Last updated: 2026-07-16 | Scope: turn `llm-tutor` from a runtime demo into a usable AI learning workspace.
 
 > Superseding decision (2026-07-14): Books are retired and Research reports use
 > Notebook as their only durable destination. Historical Book milestones below
@@ -267,8 +267,9 @@ Acceptance:
 Goal: make tutor identity the entry point that connects conversations,
 capabilities, resources, and memory.
 
-Status: in progress. The executable task breakdown, architecture boundaries, test
-matrix, and release gates are defined in
+Status: core identity, Soul, permissions, and private memory released in
+`v0.3.1`; workspace aggregation and handoff remain in progress. The executable
+task breakdown, architecture boundaries, test matrix, and release gates are defined in
 `2026-07-15-persistent-tutor-implementation-plan.md`.
 
 - [x] Add persistent tutor profiles with Markdown Soul, capability policy, and

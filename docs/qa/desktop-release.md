@@ -1,4 +1,6 @@
-# Desktop v0.1 QA Checklist
+# Desktop Release QA Checklist
+
+This checklist applies to the current desktop release, including `v0.3.1`.
 
 Use this checklist after running:
 
@@ -10,6 +12,7 @@ Use this checklist after running:
 ## Environment
 
 - Date:
+- Release version/tag:
 - Windows version:
 - Build target:
 - Artifact path:
@@ -31,6 +34,9 @@ Use this checklist after running:
 - [ ] Generate a Quiz from conversation material.
 - [ ] Generate a Quiz from knowledge base material.
 - [ ] Save a Research report to Notebook.
+- [ ] Create or select a persistent Tutor and confirm its Soul affects a new conversation.
+- [ ] Add one Tutor continuity item, restart the app, and confirm it remains isolated to that Tutor.
+- [ ] Confirm Temporary Assistant starts without private Tutor Memory when no Tutor is selected.
 - [ ] Close and restart the app.
 - [ ] Confirm sessions, knowledge bases, notebooks, quizzes, and memory still exist after restart.
 - [ ] Confirm closing the app stops the `tutor-web` sidecar process.

@@ -1,6 +1,6 @@
 # Persistent Tutor Design
 
-> Status: in progress | Date: 2026-07-15 | Product surface: 辅导机器人
+> Status: core identity, Soul, permissions, and private memory released in v0.3.1; workspace aggregation and handoff in progress | Date: 2026-07-15 | Last updated: 2026-07-16 | Product surface: 辅导机器人
 
 Implementation plan:
 `../plans/2026-07-15-persistent-tutor-implementation-plan.md`.
@@ -249,6 +249,8 @@ an optional control in the new-conversation empty state.
 
 ### Phase 1: Persistent Identity
 
+Status: implemented in `v0.3.1`.
+
 - Add tutor store and CRUD API.
 - Add a built-in General Tutor.
 - Add tutor selection to the new-conversation screen.
@@ -257,12 +259,18 @@ an optional control in the new-conversation empty state.
 
 ### Phase 2: Private Continuity Memory
 
+Status: implemented in `v0.3.1`; hard content-policy validation for autonomous
+writes remains pending.
+
 - Add the typed Tutor Memory store and scoped read/write tools.
 - Support commitments, open loops, plans, reflections, and strategy.
 - Show tutor memory in the Tutor workspace.
 - Allow reset without changing Learner Memory.
 
 ### Phase 3: Resources and Handoff
+
+Status: resource permissions are implemented; bounded handoff, recent-tutor
+summaries, and Tutor-workspace run aggregation remain pending.
 
 - Add per-tutor Notebook, Knowledge, Space, and Learner Memory permissions.
 - Add bounded handoff into a new tutor-bound session.

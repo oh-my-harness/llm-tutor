@@ -1,16 +1,17 @@
 # Persistent Tutor Implementation Plan
 
-> Status: in progress | Date: 2026-07-15 | Target: post-0.2.1 development
+> Status: in progress | Date: 2026-07-15 | Last updated: 2026-07-16 | Target: v0.3.1 stabilization and post-release development
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
-Implementation progress (2026-07-15): the Phase 0/1 identity loop, bounded Soul
+Implementation progress (2026-07-16): the Phase 0/1 identity loop, bounded Soul
 runtime context, tutor default-model resolution, and server-enforced resource
 policy are implemented. Tutor CRUD, General Tutor seeding, immutable session
 binding, the optional Chat chooser, session restoration, Tutor management, and
-the first private Tutor Memory slice are working. Private commitments, open
+private Tutor Memory are released in `v0.3.1`. Private commitments, open
 loops, lesson plans, reflections, and strategies are isolated per Tutor,
-tool-readable, and user-manageable in the continuity view. Recent-tutor
+tool-readable, user-manageable in the continuity view, and routed separately
+from shared Learner Memory by tool-aware runtime instructions. Recent-tutor
 ranking, avatar presentation, handoff, stronger autonomous-write content
 policy, and settings-deletion protection for a model referenced by a tutor
 remain pending.
@@ -449,9 +450,11 @@ Before declaring the feature complete:
 - update `README.md`, `MANUAL.md`, PRD status, roadmap checkboxes, and desktop QA
   documentation before release.
 
-## 7. Release Gates
+## 7. Feature Completion Gates
 
-The feature is not release-ready until all of these hold:
+The persistent Tutor roadmap is not complete until all of these hold. The
+`v0.3.1` release contains the implemented core while the remaining gates stay
+visible as post-release hardening work:
 
 - no tutor path creates a product-owned replacement for runtime sessions;
 - existing unbound sessions remain readable as Temporary Assistant sessions;
@@ -464,10 +467,10 @@ The feature is not release-ready until all of these hold:
 - background session behavior remains at least as reliable as current Chat;
 - all automated tests pass and desktop restart behavior is manually verified.
 
-## 8. First Execution Slice
+## 8. Historical First Execution Slice
 
-Begin with Phase 0 and Phase 1 only. The first pull request should deliver the
-identity loop without Tutor Memory:
+The initial implementation began with Phase 0 and Phase 1 only, delivering the
+identity loop before Tutor Memory. This slice is now complete:
 
 1. create `TutorStore` and CRUD routes;
 2. seed General Tutor;
