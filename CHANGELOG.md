@@ -9,6 +9,8 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+## 0.3.3 - 2026-07-16
+
 ### Changed
 
 - Complex problem solving now stays in ordinary Chat or Tutor conversations,
