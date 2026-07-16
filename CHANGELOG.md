@@ -9,6 +9,23 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+## 0.3.2 - 2026-07-16
+
+### Added
+
+- Per-session Chat reading-position persistence that restores the previous
+  viewport after conversation switching or app restart while preserving
+  intentional bottom-follow behavior.
+
+### Fixed
+
+- Prevented in-flight or newly completed assistant messages from disappearing
+  when session history loading races with WebSocket reconnection.
+- Reconciled background run completion so session indicators do not remain
+  stuck in the running state after rapid conversation switching.
+- Rendered LLM-style `\(...\)` and `\[...\]` Markdown formulas through KaTeX
+  without rewriting literal examples inside inline or fenced code.
+
 ## 0.3.1 - 2026-07-15
 
 ### Added
