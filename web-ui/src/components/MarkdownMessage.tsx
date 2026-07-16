@@ -8,6 +8,7 @@ import rehypeExternalLinks from 'rehype-external-links'
 import rehypeKatex from 'rehype-katex'
 import rehypeSlug from 'rehype-slug'
 import remarkMath from 'remark-math'
+import { normalizeLatexMathDelimiters } from '../markdownMath'
 
 interface Props {
   text: string
@@ -293,7 +294,8 @@ function prepareMarkdownWithSourceReferences(
   wikiLinkResolver?: (target: string) => SourceReference | undefined,
 ) {
   const withoutMarkers = stripInternalMemoryMarkers(text)
-  const { markdown, references } = extractFootnoteReferences(withoutMarkers)
+  const mathNormalized = normalizeLatexMathDelimiters(withoutMarkers)
+  const { markdown, references } = extractFootnoteReferences(mathNormalized)
   const labels = new Set(references.map((reference) => reference.label))
   const sourceLinkedMarkdown = markdown.replace(/\[\^([^\]\s]+)\]/g, (match, label: string) => {
     if (!labels.has(label)) return match
