@@ -231,7 +231,9 @@ User-created tutors expose a delete action in the persistent header controls.
 The product presents this as deletion, while storage uses archive semantics so
 existing tutor-bound sessions keep their identity and history. Archived tutors
 are removed from active management and future selection. The built-in General
-Tutor cannot be deleted.
+Tutor cannot be deleted. User-created tutor rows also expose a direct delete
+action; the built-in tutor keeps the header action visible but disabled so the
+restriction is discoverable rather than looking like a missing capability.
 
 The Tutor page also provides a continuity view for private typed memory. Users
 can add, edit, resolve, reopen, delete, and reset entries without changing
@@ -252,7 +254,9 @@ Conversation rows will display their tutor identity. Tutor selection remains
 an optional, fixed-height control in the new-conversation empty state. Its
 options render in a viewport-level, height-bounded overlay that scrolls
 internally; the number of tutors must never increase the empty-state or
-composer height.
+composer height. The overlay remains compact rather than inheriting the full
+composer width, presents tutor identity and Soul summary with a clear selected
+state, and adds search when the tutor collection becomes long.
 
 ## 10. MVP Scope
 

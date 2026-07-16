@@ -23,10 +23,11 @@ const anchorGap = 8
 const preferredMaxHeight = 288
 const minimumUsefulHeight = 144
 const minimumWidth = 280
+const preferredWidth = 480
 
 export function placeTutorChooser(anchor: AnchorRect, viewport: ViewportSize): TutorChooserPlacement {
   const usableWidth = Math.max(0, viewport.width - viewportMargin * 2)
-  const width = Math.min(Math.max(anchor.width, minimumWidth), usableWidth)
+  const width = Math.min(Math.max(Math.min(anchor.width, preferredWidth), minimumWidth), usableWidth)
   const left = Math.min(
     Math.max(viewportMargin, anchor.left),
     Math.max(viewportMargin, viewport.width - viewportMargin - width),

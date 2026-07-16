@@ -150,13 +150,13 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
     }
   }
 
-  const remove = async () => {
-    if (!selected || selected.built_in || !window.confirm(`删除“${selected.name}”？该导师将从列表中移除，已有会话和历史记录仍会保留。`)) return
+  const remove = async (target: TutorProfile | null = selected) => {
+    if (!target || target.built_in || !window.confirm(`删除“${target.name}”？该导师将从列表中移除，已有会话和历史记录仍会保留。`)) return
     setBusy(true)
     try {
-      await archiveTutor(selected.id)
+      await archiveTutor(target.id)
       await onChanged()
-      setSelectedId(null)
+      if (selectedId === target.id) setSelectedId(null)
       setStatus('导师已删除。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -275,20 +275,32 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
         </div>
         <div className="space-y-1">
           {tutors.map((tutor) => (
-            <button
+            <div
               key={tutor.id}
-              type="button"
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left ${
+              className={`flex items-center rounded-md ${
                 !creating && tutor.id === selectedId ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-50'
               }`}
-              onClick={() => choose(tutor)}
             >
-              <Bot size={17} className="shrink-0 text-blue-600" />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{tutor.name}</span>
-                <span className="block truncate text-xs text-gray-500">{tutorSoulSummary(tutor.soul_markdown)}</span>
-              </span>
-            </button>
+              <button type="button" className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left" onClick={() => choose(tutor)}>
+                <Bot size={17} className="shrink-0 text-blue-600" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{tutor.name}</span>
+                  <span className="block truncate text-xs text-gray-500">{tutorSoulSummary(tutor.soul_markdown)}</span>
+                </span>
+              </button>
+              {!tutor.built_in && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                  title={`删除“${tutor.name}”`}
+                  aria-label={`删除“${tutor.name}”`}
+                  onClick={() => void remove(tutor)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </aside>
@@ -306,18 +318,16 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
                   <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('profile')}>配置</button>
                   <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'memory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('memory')}>连续性</button>
                 </div>
-                {!selected.built_in && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                    title="删除导师"
-                    aria-label="删除导师"
-                    onClick={() => void remove()}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={busy || selected.built_in}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35"
+                  title={selected.built_in ? '内置导师不可删除' : '删除导师'}
+                  aria-label={selected.built_in ? '内置导师不可删除' : '删除导师'}
+                  onClick={() => void remove()}
+                >
+                  <Trash2 size={16} />
+                </button>
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"

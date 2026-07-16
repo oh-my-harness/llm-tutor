@@ -289,6 +289,8 @@ Frontend tasks:
   area, backed by archive semantics that preserve existing sessions.
 - [x] Keep the new-conversation tutor chooser fixed-height and render its
   bounded, internally scrolling option list outside the Composer layout.
+- [x] Refine the chooser into a compact searchable identity list and expose
+  delete actions directly on user-created tutor rows.
 - [ ] Add the tutor conversation list and compact continuity panel.
 - [x] Add create/edit forms for Markdown Soul, default capability, allowed
   capabilities, and memory policy.

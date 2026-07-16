@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, Check, ChevronDown, Settings2, UserRound } from 'lucide-react'
+import { Bot, Check, ChevronDown, Search, Settings2, UserRound } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { placeTutorChooser, type TutorChooserPlacement } from '../tutorChooserPlacement'
 import { tutorSoulSummary, type TutorProfile } from '../tutorTypes'
@@ -15,9 +15,11 @@ interface Props {
 export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Props) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [placement, setPlacement] = useState<TutorChooserPlacement | null>(null)
   const chooserRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const selectedTutor = selectedTutorId
     ? tutors.find((tutor) => tutor.id === selectedTutorId) ?? null
     : null
@@ -25,6 +27,10 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
   const selectedDescription = selectedTutor
     ? tutorSoulSummary(selectedTutor.soul_markdown)
     : t('chat.tutor.temporary.description')
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filteredTutors = normalizedQuery
+    ? tutors.filter((tutor) => `${tutor.name}\n${tutorSoulSummary(tutor.soul_markdown)}`.toLocaleLowerCase().includes(normalizedQuery))
+    : tutors
 
   const updatePlacement = useCallback(() => {
     const anchor = chooserRef.current?.getBoundingClientRect()
@@ -41,13 +47,14 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
       return
     }
     updatePlacement()
+    if (tutors.length > 6) window.requestAnimationFrame(() => searchRef.current?.focus())
     window.addEventListener('resize', updatePlacement)
     window.addEventListener('scroll', updatePlacement, true)
     return () => {
       window.removeEventListener('resize', updatePlacement)
       window.removeEventListener('scroll', updatePlacement, true)
     }
-  }, [open, updatePlacement])
+  }, [open, tutors.length, updatePlacement])
 
   useEffect(() => {
     if (!open) return
@@ -69,6 +76,7 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
   const select = (tutorId: string | null) => {
     onSelect(tutorId)
     setOpen(false)
+    setQuery('')
   }
 
   return (
@@ -78,7 +86,10 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
         className="flex min-w-0 flex-1 items-center gap-3 rounded-bl-3xl px-4 py-2 text-left hover:bg-gray-50"
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setOpen((value) => {
+          if (!value) setQuery('')
+          return !value
+        })}
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
           {selectedTutorId == null ? <UserRound size={16} /> : <Bot size={16} />}
@@ -109,24 +120,45 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
       {open && placement && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[100] overflow-y-auto rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl shadow-gray-950/10"
+          className="fixed z-[100] flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl shadow-gray-950/10"
           style={placement}
           role="listbox"
           aria-label={t('chat.tutor.select')}
         >
-          {tutors.map((tutor) => (
-            <TutorOption
-              key={tutor.id}
-              selected={selectedTutorId === tutor.id}
-              title={tutor.name}
-              description={tutorSoulSummary(tutor.soul_markdown)}
-              icon={<Bot size={17} />}
-              onClick={() => select(selectedTutorId === tutor.id ? null : tutor.id)}
-            />
-          ))}
-          {tutors.length === 0 && (
-            <div className="px-3 py-3 text-sm text-gray-500">{t('chat.tutor.empty')}</div>
+          <div className="flex h-11 shrink-0 items-center justify-between border-b border-gray-100 px-3.5">
+            <span className="text-sm font-semibold text-gray-900">{t('chat.tutor.select')}</span>
+            <span className="text-xs text-gray-400">{tutors.length}</span>
+          </div>
+          {tutors.length > 6 && (
+            <label className="relative mx-2.5 mt-2.5 block shrink-0">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="h-9 w-full rounded-md border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-300 focus:bg-white"
+                placeholder={t('chat.tutor.search')}
+                aria-label={t('chat.tutor.search')}
+              />
+            </label>
           )}
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+            {filteredTutors.map((tutor) => (
+              <TutorOption
+                key={tutor.id}
+                selected={selectedTutorId === tutor.id}
+                title={tutor.name}
+                description={tutorSoulSummary(tutor.soul_markdown)}
+                onClick={() => select(selectedTutorId === tutor.id ? null : tutor.id)}
+              />
+            ))}
+            {tutors.length === 0 && (
+              <div className="px-3 py-4 text-center text-sm text-gray-500">{t('chat.tutor.empty')}</div>
+            )}
+            {tutors.length > 0 && filteredTutors.length === 0 && (
+              <div className="px-3 py-4 text-center text-sm text-gray-500">{t('chat.tutor.noMatching')}</div>
+            )}
+          </div>
         </div>,
         document.body,
       )}
@@ -138,13 +170,11 @@ function TutorOption({
   selected,
   title,
   description,
-  icon,
   onClick,
 }: {
   selected: boolean
   title: string
   description: string
-  icon: React.ReactNode
   onClick: () => void
 }) {
   return (
@@ -152,15 +182,19 @@ function TutorOption({
       type="button"
       role="option"
       aria-selected={selected}
-      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left ${
-        selected ? 'bg-blue-50 text-gray-900' : 'text-gray-800 hover:bg-gray-50'
+      className={`group flex w-full items-center gap-3 rounded-md border px-2.5 py-2 text-left ${
+        selected ? 'border-blue-100 bg-blue-50 text-gray-900' : 'border-transparent text-gray-800 hover:bg-gray-50'
       }`}
       onClick={onClick}
     >
-      <span className={selected ? 'text-blue-600' : 'text-gray-500'}>{icon}</span>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+        selected ? 'bg-white text-blue-600 shadow-sm' : 'bg-gray-100 text-gray-500'
+      }`}>
+        <Bot size={17} />
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{title}</span>
-        <span className="block truncate text-xs text-gray-500">{description}</span>
+        <span className="mt-0.5 block truncate text-xs text-gray-500">{description}</span>
       </span>
       <span className="flex h-5 w-5 shrink-0 items-center justify-center text-blue-600">
         {selected && <Check size={16} />}

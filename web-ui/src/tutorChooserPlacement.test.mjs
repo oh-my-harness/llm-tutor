@@ -22,6 +22,7 @@ test('opens above a chooser anchored near the bottom of the chat window', () => 
   assert.equal(placement.bottom, 108)
   assert.equal(placement.top, undefined)
   assert.equal(placement.maxHeight, 288)
+  assert.equal(placement.width, 480)
 })
 
 test('opens below when there is not enough room above', () => {
