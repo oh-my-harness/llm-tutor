@@ -31,6 +31,10 @@ tool results, interactive cards, or final artifacts.
 - Returning to an in-flight session shall restore the assistant text generated
   so far, then continue streaming subsequent deltas without duplication or a
   blank-message reset.
+- Each session shall retain its own last reading position. Returning to a
+  session restores that position; sessions last viewed at the bottom continue
+  following new output, while readers inspecting older messages are not pulled
+  away by background streaming.
 - WebSocket events and session-detail responses shall be applied only to the
   session that produced them. Rapid A/B/A switching must not let a stale socket
   event or slower HTTP response overwrite the currently selected conversation.
@@ -157,6 +161,8 @@ After an app/sidecar restart, a previously active run is restored as
   history loading but before the UI resubscribes.
 - [x] Reconcile durable history with live WebSocket messages received during
   hydration instead of allowing a slower history response to replace them.
+- [x] Persist and restore per-session Chat reading positions without defeating
+  intentional bottom-follow behavior for new messages.
 - [x] Tag WebSocket callbacks with their source session and reject stale events
   after rapid session switching.
 - [x] Guard session-detail hydration against out-of-order HTTP responses.

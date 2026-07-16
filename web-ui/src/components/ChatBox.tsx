@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode, RefObject } from 'react'
 import {
   AlertCircle,
@@ -45,6 +45,12 @@ import { DeepSolveMessage, type DeepSolveTraceEntry } from './DeepSolveMessage'
 import { MarkdownMessage, SourceReferences, sourceTargetFromRaw } from './MarkdownMessage'
 import type { SourceReference, SourceTarget } from './MarkdownMessage'
 import type { TutorProfile } from '../tutorTypes'
+import {
+  loadChatScrollPosition,
+  restoredScrollTop,
+  saveChatScrollPosition,
+  type ChatScrollPosition,
+} from '../chatScrollPosition'
 import { TutorChooser } from './TutorChooser'
 import { ResearchReportMessage, looksLikeResearchReport } from './ResearchReportMessage'
 import { SaveNotebookDialog, SaveNotebookOutcomeDialog } from './SaveNotebookDialog'
@@ -160,6 +166,7 @@ interface Citation {
 }
 
 interface Props {
+  sessionId: string | null
   messages: Message[]
   streamingText: string
   contextStats: ContextStats
@@ -249,6 +256,7 @@ const modeOptions: Array<{
 const visibleModeOptions = modeOptions.filter((mode) => mode.value !== 'code_exec')
 
 export function ChatBox({
+  sessionId,
   messages,
   streamingText,
   contextStats,
@@ -303,12 +311,16 @@ export function ChatBox({
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const copyFeedbackTimerRef = useRef<number | null>(null)
+  const scrollSaveTimerRef = useRef<number | null>(null)
+  const latestScrollPositionRef = useRef<{ sessionId: string; position: ChatScrollPosition } | null>(null)
+  const pendingScrollRestoreRef = useRef<{ sessionId: string; position: ChatScrollPosition | null } | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
 
   const handleSend = () => {
     const readyAttachments = attachments.filter((attachment) => !attachment.error)
     if ((!input.trim() && readyAttachments.length === 0 && mentions.length === 0) || disabled || running) return
+    shouldStickToBottomRef.current = true
     onSend(input.trim(), readyAttachments, mentions)
     setInput('')
     setAttachments([])
@@ -479,7 +491,49 @@ export function ChatBox({
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     shouldStickToBottomRef.current = distanceFromBottom < 80
+    if (!sessionId) return
+
+    latestScrollPositionRef.current = {
+      sessionId,
+      position: {
+        scrollTop: el.scrollTop,
+        atBottom: shouldStickToBottomRef.current,
+      },
+    }
+    if (scrollSaveTimerRef.current !== null) window.clearTimeout(scrollSaveTimerRef.current)
+    scrollSaveTimerRef.current = window.setTimeout(flushScrollPosition, 120)
   }
+
+  const flushScrollPosition = () => {
+    if (scrollSaveTimerRef.current !== null) {
+      window.clearTimeout(scrollSaveTimerRef.current)
+      scrollSaveTimerRef.current = null
+    }
+    const latest = latestScrollPositionRef.current
+    if (latest) saveChatScrollPosition(latest.sessionId, latest.position)
+  }
+
+  useLayoutEffect(() => {
+    if (!sessionId) {
+      pendingScrollRestoreRef.current = null
+      shouldStickToBottomRef.current = true
+      return
+    }
+    const position = loadChatScrollPosition(sessionId)
+    pendingScrollRestoreRef.current = { sessionId, position }
+    shouldStickToBottomRef.current = position?.atBottom ?? true
+  }, [sessionId])
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRestoreRef.current
+    const el = scrollRef.current
+    if (!pending || pending.sessionId !== sessionId || !el) return
+    if (messages.length === 0 && !streamingText) return
+
+    el.scrollTop = restoredScrollTop(pending.position, el.scrollHeight, el.clientHeight)
+    shouldStickToBottomRef.current = pending.position?.atBottom ?? true
+    pendingScrollRestoreRef.current = null
+  }, [messages.length, sessionId, streamingText])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -490,6 +544,7 @@ export function ChatBox({
 
   useEffect(() => () => {
     if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current)
+    flushScrollPosition()
   }, [])
 
   return (
