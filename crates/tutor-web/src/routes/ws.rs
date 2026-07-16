@@ -237,8 +237,20 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
     let (mut event_rx, snapshot) = entry.stream.subscribe_with_snapshot();
 
     let (mut ws_sink, mut ws_stream) = socket.split();
-    if let Some(run) = pool.active_run(&session_id) {
-        let mut initial_events = vec![StreamEvent::Status {
+    let active_run = pool.active_run(&session_id);
+    let mut initial_events = Vec::new();
+    let should_acknowledge_completed = snapshot.completed;
+    let snapshot_generation = snapshot.generation;
+    if snapshot.completed {
+        // The durable runtime history is authoritative once the turn has
+        // settled. Asking the client to rehydrate also restores rich message
+        // attachments that are not represented by the text-only snapshot.
+        initial_events.push(StreamEvent::Status {
+            kind: "history_sync".into(),
+            data: serde_json::json!({}),
+        });
+    } else if let Some(run) = active_run {
+        initial_events.push(StreamEvent::Status {
             kind: "running".into(),
             data: serde_json::json!({
                     "capability": run.capability,
@@ -249,7 +261,7 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                     "started_at": run.started_at,
                     "updated_at": run.updated_at,
             }),
-        }];
+        });
         if !snapshot.content.is_empty() {
             initial_events.push(StreamEvent::Content {
                 text: snapshot.content,
@@ -262,14 +274,17 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                 chunk: false,
             });
         }
-        for event in initial_events {
-            let Ok(json) = serde_json::to_string(&event) else {
-                continue;
-            };
-            if ws_sink.send(Message::Text(json.into())).await.is_err() {
-                return;
-            }
+    }
+    for event in initial_events {
+        let Ok(json) = serde_json::to_string(&event) else {
+            continue;
+        };
+        if ws_sink.send(Message::Text(json.into())).await.is_err() {
+            return;
         }
+    }
+    if should_acknowledge_completed {
+        entry.stream.acknowledge_completed(snapshot_generation);
     }
 
     // Forward events from the agent harness to the WebSocket client

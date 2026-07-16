@@ -11,13 +11,25 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const module = { exports: {} }
 Function('module', 'exports', compiled)(module, module.exports)
-const { isCurrentSessionEvent, isLatestSessionLoad, reconcileSessionRunState } = module.exports
+const {
+  appendCompletedSessionMessage,
+  isCurrentSessionEvent,
+  isLatestSessionHydration,
+  isLatestSessionLoad,
+  reconcileSessionMessages,
+  reconcileSessionRunState,
+} = module.exports
 
 test('rejects events and session loads from a stale selection', () => {
   assert.equal(isCurrentSessionEvent('session-a', 'session-b'), false)
   assert.equal(isCurrentSessionEvent('session-b', 'session-b'), true)
   assert.equal(isLatestSessionLoad(1, 2, 'session-a', 'session-b'), false)
   assert.equal(isLatestSessionLoad(2, 2, 'session-b', 'session-b'), true)
+})
+
+test('rejects an older hydration response for the same selected session', () => {
+  assert.equal(isLatestSessionHydration(2, 2, 4, 5, 'session-a', 'session-a'), false)
+  assert.equal(isLatestSessionHydration(2, 2, 5, 5, 'session-a', 'session-a'), true)
 })
 
 test('reconciles run indicators without changing session order or titles', () => {
@@ -34,4 +46,48 @@ test('reconciles run indicators without changing session order or titles', () =>
   assert.equal(reconciled[0].title, 'Pinned')
   assert.equal(reconciled[0].activeRun.current_stage, 'search')
   assert.equal(reconciled[1].activeRun, null)
+})
+
+test('session hydration preserves messages received while history was loading', () => {
+  const restored = [
+    { role: 'user', text: 'question' },
+  ]
+  const live = [
+    { role: 'status', text: 'Working' },
+    { role: 'assistant', text: 'answer completed during reconnect' },
+  ]
+
+  assert.deepEqual(reconcileSessionMessages(restored, live), [...restored, ...live])
+})
+
+test('session hydration prefers durable copies without collapsing repeated turns', () => {
+  const restored = [
+    { role: 'user', text: 'repeat' },
+    { role: 'assistant', text: 'same answer', citations: [{ id: 1 }] },
+    { role: 'user', text: 'repeat' },
+    { role: 'assistant', text: 'same answer', citations: [{ id: 2 }] },
+  ]
+  const live = [
+    { role: 'assistant', text: 'same answer' },
+    { role: 'assistant', text: 'same answer' },
+  ]
+
+  assert.deepEqual(reconcileSessionMessages(restored, live), restored)
+})
+
+test('completed snapshot replay does not duplicate the latest assistant answer', () => {
+  const messages = [
+    { role: 'user', text: 'question' },
+    { role: 'assistant', text: 'answer' },
+    { role: 'status', text: 'Done' },
+  ]
+
+  assert.equal(
+    appendCompletedSessionMessage(messages, { role: 'assistant', text: 'answer' }),
+    messages,
+  )
+  assert.deepEqual(
+    appendCompletedSessionMessage(messages, { role: 'assistant', text: 'new answer' }),
+    [...messages, { role: 'assistant', text: 'new answer' }],
+  )
 })

@@ -1,6 +1,6 @@
 # Background Session Resilience Plan
 
-> Status: partially implemented | Date: 2026-07-13 | Last updated: 2026-07-14 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
+> Status: partially implemented | Date: 2026-07-13 | Last updated: 2026-07-16 | Scope: preserve long-running agent tasks, interactive chat cards, and workflow progress when the user leaves and later returns to a session.
 
 ## 1. Problem
 
@@ -152,6 +152,11 @@ After an app/sidecar restart, a previously active run is restored as
 - [x] Keep an in-process per-session stream snapshot and atomically pair snapshot
   capture with live subscription so generated assistant text can be restored
   after switching away and back.
+- [x] Mark completed stream snapshots and use a one-shot canonical history
+  resync across the narrow handoff window where a run settles after session
+  history loading but before the UI resubscribes.
+- [x] Reconcile durable history with live WebSocket messages received during
+  hydration instead of allowing a slower history response to replace them.
 - [x] Tag WebSocket callbacks with their source session and reject stale events
   after rapid session switching.
 - [x] Guard session-detail hydration against out-of-order HTTP responses.

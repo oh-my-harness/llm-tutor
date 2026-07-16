@@ -36,8 +36,10 @@ pub struct TutorStream {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreamSnapshot {
+    pub generation: u64,
     pub content: String,
     pub progress_content: String,
+    pub completed: bool,
 }
 
 impl TutorStream {
@@ -61,12 +63,27 @@ impl TutorStream {
     }
 
     pub fn begin_run(&self) {
-        *self.snapshot.lock().unwrap() = StreamSnapshot::default();
+        let mut snapshot = self.snapshot.lock().unwrap();
+        let generation = snapshot.generation.wrapping_add(1);
+        *snapshot = StreamSnapshot {
+            generation,
+            ..StreamSnapshot::default()
+        };
+    }
+
+    pub fn acknowledge_completed(&self, generation: u64) {
+        let mut snapshot = self.snapshot.lock().unwrap();
+        if snapshot.generation == generation {
+            snapshot.completed = false;
+        }
     }
 
     pub async fn content(&self, text: &str, chunk: bool) {
         let mut snapshot = self.snapshot.lock().unwrap();
         snapshot.content.push_str(text);
+        if !chunk {
+            snapshot.completed = true;
+        }
         let _ = self.tx.send(StreamEvent::Content {
             text: text.to_string(),
             chunk,
@@ -210,6 +227,7 @@ mod tests {
 
         let (mut rx, snapshot) = stream.subscribe_with_snapshot();
         assert_eq!(snapshot.content, "hello ");
+        assert!(!snapshot.completed);
 
         stream.content("world", true).await;
         let event = rx.recv().await.unwrap();
@@ -231,6 +249,48 @@ mod tests {
         stream.begin_run();
         let (_, snapshot) = stream.subscribe_with_snapshot();
 
-        assert_eq!(snapshot, StreamSnapshot::default());
+        assert_eq!(snapshot.content, "");
+        assert_eq!(snapshot.progress_content, "");
+        assert!(!snapshot.completed);
+    }
+
+    #[tokio::test]
+    async fn final_content_marks_snapshot_as_completed() {
+        let stream = TutorStream::new(16);
+        stream.begin_run();
+        stream.content("complete answer", false).await;
+
+        let (_, snapshot) = stream.subscribe_with_snapshot();
+
+        assert_eq!(snapshot.content, "complete answer");
+        assert!(snapshot.completed);
+    }
+
+    #[tokio::test]
+    async fn completed_snapshot_can_be_acknowledged_after_rejoin() {
+        let stream = TutorStream::new(16);
+        stream.content("complete answer", false).await;
+
+        let (_, completed) = stream.subscribe_with_snapshot();
+        stream.acknowledge_completed(completed.generation);
+        let (_, snapshot) = stream.subscribe_with_snapshot();
+
+        assert_eq!(snapshot.content, "complete answer");
+        assert!(!snapshot.completed);
+    }
+
+    #[tokio::test]
+    async fn acknowledgement_does_not_clear_a_newer_run() {
+        let stream = TutorStream::new(16);
+        stream.content("old answer", false).await;
+        let (_, old) = stream.subscribe_with_snapshot();
+        stream.begin_run();
+        stream.content("new answer", false).await;
+
+        stream.acknowledge_completed(old.generation);
+        let (_, snapshot) = stream.subscribe_with_snapshot();
+
+        assert_eq!(snapshot.content, "new answer");
+        assert!(snapshot.completed);
     }
 }

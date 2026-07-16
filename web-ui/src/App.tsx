@@ -31,7 +31,13 @@ import type { QuizSession } from './quizTypes'
 import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
 import { attachRestoredResearchReports, researchReportFromTracePayload } from './researchRestore'
 import type { ResearchReportTraceData } from './researchRestore'
-import { isCurrentSessionEvent, isLatestSessionLoad, reconcileSessionRunState } from './sessionResilience'
+import {
+  appendCompletedSessionMessage,
+  isCurrentSessionEvent,
+  isLatestSessionHydration,
+  reconcileSessionMessages,
+  reconcileSessionRunState,
+} from './sessionResilience'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
 import { openExternalUrl } from './api'
 import {
@@ -197,6 +203,7 @@ export default function App() {
   const [tutors, setTutors] = useState<TutorProfile[]>([])
   const activeSessionIdRef = useRef<string | null>(null)
   const sessionSelectionVersionRef = useRef(0)
+  const sessionHydrationVersionRef = useRef(0)
   const activateSession = useCallback((id: string | null) => {
     activeSessionIdRef.current = id
     sessionSelectionVersionRef.current += 1
@@ -275,6 +282,93 @@ export default function App() {
     ])
   }, [])
 
+  const hydrateSession = useCallback(async (id: string, settledHandoff = false) => {
+    const selectionVersion = sessionSelectionVersionRef.current
+    const hydrationVersion = ++sessionHydrationVersionRef.current
+    const isCurrentHydration = () => isLatestSessionHydration(
+      selectionVersion,
+      sessionSelectionVersionRef.current,
+      hydrationVersion,
+      sessionHydrationVersionRef.current,
+      id,
+      activeSessionIdRef.current,
+    )
+
+    try {
+      const res = await fetch(`/api/sessions/${id}`)
+      if (!res.ok) {
+        throw new Error(`failed to load session: HTTP ${res.status}`)
+      }
+      const data = await res.json() as SessionDetailResponse
+      if (!isCurrentHydration()) return
+      const restoredTrace = restoreTraceEntries(data.trace ?? [], data.compact_summary ?? null)
+      const withCitations = attachRestoredCitations(
+        (data.messages ?? []).map((message) => ({
+          role: message.role,
+          text: message.text,
+          mentions: message.mentions,
+          citations: message.citations,
+          artifacts: message.artifacts,
+        })),
+        restoredTrace,
+      )
+      const restoredReports = attachRestoredResearchReports(withCitations, restoredTrace)
+      const restored = attachRestoredResearchPlans(
+        attachRestoredQuizPlans(attachRestoredDeepSolve(restoredReports, restoredTrace), restoredTrace),
+        restoredTrace,
+      )
+      setMessages((live) => reconcileSessionMessages(restored, live))
+      void attachRestoredQuizzes(restored, restoredTrace).then((nextMessages) => {
+        if (isCurrentHydration()) {
+          setMessages((live) => reconcileSessionMessages(nextMessages, live))
+        }
+      })
+      setTraceEntries(restoredTrace)
+      setLatestUsage(data.latest_usage ?? null)
+      setSelectedTutorId(data.tutor_id ?? null)
+      const restoredModelConfig = data.llm?.model
+        ? llmSettings.llmConfigs.find((config) => config.model === data.llm?.model)
+        : null
+      setSelectedLlmConfigId(restoredModelConfig?.id ?? llmSettings.activeLlmConfigId)
+      if (data.active_run && !settledHandoff) {
+        setRunning(true)
+        pushStatus({
+          kind: 'thinking',
+          label: 'Working',
+          detail: [
+            `Rejoining ${data.active_run.capability ? capabilityLabel(data.active_run.capability) : 'agent'} run`,
+            data.active_run.current_stage ? `stage: ${data.active_run.current_stage}` : '',
+          ].filter(Boolean).join(' · '),
+        })
+      } else if (data.run_state && ['interrupted', 'failed', 'cancelled'].includes(data.run_state.status ?? '')) {
+        pushStatus({
+          kind: data.run_state.status === 'cancelled' ? 'done' : 'error',
+          label: data.run_state.status === 'interrupted' ? 'Run interrupted' : `Run ${data.run_state.status}`,
+          detail: [
+            data.run_state.capability ? capabilityLabel(data.run_state.capability) : 'Agent',
+            data.run_state.current_stage ? `stage: ${data.run_state.current_stage}` : '',
+          ].filter(Boolean).join(' · '),
+        })
+      }
+      if (data.capability && isCapability(data.capability)) {
+        setCapability(data.capability)
+      }
+      setSelectedKnowledgeBaseId(data.kb ?? '')
+      setSelectedNotebookEnabled(Boolean(data.notebook_enabled))
+      const title = data.metadata?.name || restored.find((message) => message.role === 'user')?.text
+      if (title) {
+        updateRecentSessionTitle(setRecentSessions, id, sessionTitleFromMessage(title))
+      }
+    } catch (err) {
+      if (!isCurrentHydration()) return
+      const message = err instanceof Error ? err.message : String(err)
+      setMessages((live) => reconcileSessionMessages(
+        [{ role: 'assistant', text: `Error: ${message}` }],
+        live,
+      ))
+    }
+  }, [llmSettings, pushStatus])
+
   const { send } = useWebSocket(sessionId, {
     onEvent: (event, sourceSessionId) => {
       if (!isCurrentSessionEvent(sourceSessionId, activeSessionIdRef.current)) {
@@ -304,8 +398,8 @@ export default function App() {
           const researchReport = pendingResearchReportRef.current
           const messageText = researchReport?.markdown || finalText || (quiz ? `Quiz "${quiz.title}" is ready.` : '')
           if (messageText.trim() || citations.length > 0 || deepSolve.length > 0 || notebookEditProposal || quiz || quizPlan || researchPlan) {
-            setMessages((prev) => [
-              ...dropTrailingTransientStatus(prev),
+            setMessages((prev) => appendCompletedSessionMessage(
+              dropTrailingTransientStatus(prev),
               {
                 role: 'assistant',
                 text: messageText,
@@ -318,7 +412,7 @@ export default function App() {
                 researchPlan,
                 researchTitle: researchReport?.title,
               },
-            ])
+            ))
           } else {
             setMessages((prev) => dropTrailingTransientStatus(prev))
           }
@@ -415,6 +509,14 @@ export default function App() {
               detail: typeof payload.history_len === 'number' ? `${payload.history_len} context messages` : undefined,
             })
           }
+        } else if (kind === 'history_sync') {
+          streamingRef.current = ''
+          progressStreamingRef.current = ''
+          setStreamingText('')
+          setRunning(false)
+          setMessages((prev) => dropTrailingTransientStatus(prev))
+          updateRecentSessionRun(setRecentSessions, sourceSessionId, null)
+          void hydrateSession(sourceSessionId, true)
         } else if (kind === 'stopped') {
           progressStreamingRef.current = ''
           pushStatus({
@@ -1139,7 +1241,7 @@ export default function App() {
 
   const handleSelectSession = async (id: string) => {
     if (id !== sessionId) {
-      const selectionVersion = activateSession(id)
+      activateSession(id)
       setMessages([])
       setStreamingText('')
       streamingRef.current = ''
@@ -1154,76 +1256,7 @@ export default function App() {
       pendingResearchReportRef.current = undefined
       setLatestUsage(null)
       setRunning(false)
-      try {
-        const res = await fetch(`/api/sessions/${id}`)
-        if (!res.ok) {
-          throw new Error(`failed to load session: HTTP ${res.status}`)
-        }
-        const data = await res.json() as SessionDetailResponse
-        if (!isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) return
-        const restoredTrace = restoreTraceEntries(data.trace ?? [], data.compact_summary ?? null)
-        const withCitations = attachRestoredCitations(
-          (data.messages ?? []).map((message) => ({
-            role: message.role,
-            text: message.text,
-            mentions: message.mentions,
-            citations: message.citations,
-            artifacts: message.artifacts,
-          })),
-          restoredTrace,
-        )
-        const restoredReports = attachRestoredResearchReports(withCitations, restoredTrace)
-        const restored = attachRestoredResearchPlans(
-          attachRestoredQuizPlans(attachRestoredDeepSolve(restoredReports, restoredTrace), restoredTrace),
-          restoredTrace,
-        )
-        setMessages(restored)
-        void attachRestoredQuizzes(restored, restoredTrace).then((nextMessages) => {
-          if (isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) {
-            setMessages(nextMessages)
-          }
-        })
-        setTraceEntries(restoredTrace)
-        setLatestUsage(data.latest_usage ?? null)
-        setSelectedTutorId(data.tutor_id ?? null)
-        const restoredModelConfig = data.llm?.model
-          ? llmSettings.llmConfigs.find((config) => config.model === data.llm?.model)
-          : null
-        setSelectedLlmConfigId(restoredModelConfig?.id ?? llmSettings.activeLlmConfigId)
-        if (data.active_run) {
-          setRunning(true)
-          pushStatus({
-            kind: 'thinking',
-            label: 'Working',
-            detail: [
-              `Rejoining ${data.active_run.capability ? capabilityLabel(data.active_run.capability) : 'agent'} run`,
-              data.active_run.current_stage ? `stage: ${data.active_run.current_stage}` : '',
-            ].filter(Boolean).join(' · '),
-          })
-        } else if (data.run_state && ['interrupted', 'failed', 'cancelled'].includes(data.run_state.status ?? '')) {
-          pushStatus({
-            kind: data.run_state.status === 'cancelled' ? 'done' : 'error',
-            label: data.run_state.status === 'interrupted' ? 'Run interrupted' : `Run ${data.run_state.status}`,
-            detail: [
-              data.run_state.capability ? capabilityLabel(data.run_state.capability) : 'Agent',
-              data.run_state.current_stage ? `stage: ${data.run_state.current_stage}` : '',
-            ].filter(Boolean).join(' · '),
-          })
-        }
-        if (data.capability && isCapability(data.capability)) {
-          setCapability(data.capability)
-        }
-        setSelectedKnowledgeBaseId(data.kb ?? '')
-        setSelectedNotebookEnabled(Boolean(data.notebook_enabled))
-        const title = data.metadata?.name || restored.find((message) => message.role === 'user')?.text
-        if (title) {
-          updateRecentSessionTitle(setRecentSessions, id, sessionTitleFromMessage(title))
-        }
-      } catch (err) {
-        if (!isLatestSessionLoad(selectionVersion, sessionSelectionVersionRef.current, id, activeSessionIdRef.current)) return
-        const message = err instanceof Error ? err.message : String(err)
-        setMessages([{ role: 'assistant', text: `Error: ${message}` }])
-      }
+      await hydrateSession(id)
     }
     setView('chat')
   }
