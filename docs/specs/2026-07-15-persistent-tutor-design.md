@@ -227,6 +227,12 @@ permissions, and memory policy. Soul supports edit and rendered-preview modes.
 The server applies the resolved model at session creation and revalidates
 resource permissions for session changes and every runtime turn.
 
+User-created tutors expose a delete action in the persistent header controls.
+The product presents this as deletion, while storage uses archive semantics so
+existing tutor-bound sessions keep their identity and history. Archived tutors
+are removed from active management and future selection. The built-in General
+Tutor cannot be deleted.
+
 The Tutor page also provides a continuity view for private typed memory. Users
 can add, edit, resolve, reopen, delete, and reset entries without changing
 shared Learner Memory. Each runtime tool is constructed with one immutable
@@ -243,7 +249,10 @@ The target Tutor workspace extends that surface with:
 - memory management: inspect, edit, close, delete, or reset private entries.
 
 Conversation rows will display their tutor identity. Tutor selection remains
-an optional control in the new-conversation empty state.
+an optional, fixed-height control in the new-conversation empty state. Its
+options render in a viewport-level, height-bounded overlay that scrolls
+internally; the number of tutors must never increase the empty-state or
+composer height.
 
 ## 10. MVP Scope
 

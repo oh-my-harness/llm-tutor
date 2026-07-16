@@ -65,7 +65,9 @@
   changing learning goals belong to Tutor Memory. Status: implemented except
   for the tutor conversation collection and stronger autonomous-write policy.
 - REQ-062: The new-conversation empty state shall let the user optionally choose
-  a tutor before the first message. Status: implemented.
+  a tutor before the first message. The chooser shall remain a fixed-height
+  control and open a bounded overlay list; increasing the tutor count shall not
+  resize the composer or empty-state layout. Status: implemented.
 - REQ-063: When no tutor is selected, the product shall use Temporary Assistant
   for a one-off conversation without persistent identity or private Tutor
   Memory. Temporary Assistant need not appear as a duplicate tutor-list item.
@@ -93,10 +95,12 @@
 - REQ-068A: Soul Markdown shall be injected only as bounded product-owned
   runtime instruction. It shall not be parsed to grant capabilities, tools, or
   resource access and cannot override safety policy. Status: implemented.
-- REQ-069: Deleting or resetting a tutor shall not implicitly delete global
-  Learner Memory, Notebook, Knowledge, Quiz, or Space assets. Status:
-  implemented for archive and profile reset; permanent deletion remains
-  planned.
+- REQ-069: User-created tutors shall expose a visible delete action. Deletion
+  is an archive operation: the tutor immediately disappears from active
+  management and new-conversation selection, while existing bound sessions and
+  their history remain intact. The built-in tutor cannot be deleted. Deleting
+  or resetting a tutor shall not implicitly delete global Learner Memory,
+  Notebook, Knowledge, Quiz, or Space assets. Status: implemented.
 - REQ-069A: The detailed product contract and MVP sequence shall follow
   `docs/specs/2026-07-15-persistent-tutor-design.md`. Status: active.
 

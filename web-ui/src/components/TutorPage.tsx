@@ -151,13 +151,13 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
   }
 
   const remove = async () => {
-    if (!selected || selected.built_in || !window.confirm(`归档“${selected.name}”？已有会话会继续保留。`)) return
+    if (!selected || selected.built_in || !window.confirm(`删除“${selected.name}”？该导师将从列表中移除，已有会话和历史记录仍会保留。`)) return
     setBusy(true)
     try {
       await archiveTutor(selected.id)
       await onChanged()
       setSelectedId(null)
-      setStatus('导师已归档。')
+      setStatus('导师已删除。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -306,6 +306,18 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
                   <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('profile')}>配置</button>
                   <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'memory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('memory')}>连续性</button>
                 </div>
+                {!selected.built_in && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    title="删除导师"
+                    aria-label="删除导师"
+                    onClick={() => void remove()}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
@@ -462,11 +474,6 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
                   <Save size={16} />
                   保存
                 </button>
-                {selected && !selected.built_in && !creating && (
-                  <button type="button" disabled={busy} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50" title="归档导师" aria-label="归档导师" onClick={() => void remove()}>
-                    <Trash2 size={16} />
-                  </button>
-                )}
                 {status && <span className="text-sm text-gray-600">{status}</span>}
               </div>
             </div>

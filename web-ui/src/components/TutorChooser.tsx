@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bot, Check, ChevronDown, Settings2, UserRound } from 'lucide-react'
 import { useI18n } from '../i18n'
+import { placeTutorChooser, type TutorChooserPlacement } from '../tutorChooserPlacement'
 import { tutorSoulSummary, type TutorProfile } from '../tutorTypes'
 
 interface Props {
@@ -13,7 +15,9 @@ interface Props {
 export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Props) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const [placement, setPlacement] = useState<TutorChooserPlacement | null>(null)
   const chooserRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const selectedTutor = selectedTutorId
     ? tutors.find((tutor) => tutor.id === selectedTutorId) ?? null
     : null
@@ -22,13 +26,44 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
     ? tutorSoulSummary(selectedTutor.soul_markdown)
     : t('chat.tutor.temporary.description')
 
+  const updatePlacement = useCallback(() => {
+    const anchor = chooserRef.current?.getBoundingClientRect()
+    if (!anchor) return
+    setPlacement(placeTutorChooser(anchor, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlacement(null)
+      return
+    }
+    updatePlacement()
+    window.addEventListener('resize', updatePlacement)
+    window.addEventListener('scroll', updatePlacement, true)
+    return () => {
+      window.removeEventListener('resize', updatePlacement)
+      window.removeEventListener('scroll', updatePlacement, true)
+    }
+  }, [open, updatePlacement])
+
   useEffect(() => {
     if (!open) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!chooserRef.current?.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (!chooserRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
     }
     document.addEventListener('pointerdown', closeOnOutsidePointer, true)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer, true)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
   }, [open])
 
   const select = (tutorId: string | null) => {
@@ -71,9 +106,11 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
         <Settings2 size={17} />
       </button>
 
-      {open && (
+      {open && placement && createPortal(
         <div
-          className="absolute left-3 right-3 top-[calc(100%+0.5rem)] z-50 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl shadow-gray-950/10"
+          ref={menuRef}
+          className="fixed z-[100] overflow-y-auto rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl shadow-gray-950/10"
+          style={placement}
           role="listbox"
           aria-label={t('chat.tutor.select')}
         >
@@ -90,7 +127,8 @@ export function TutorChooser({ tutors, selectedTutorId, onSelect, onManage }: Pr
           {tutors.length === 0 && (
             <div className="px-3 py-3 text-sm text-gray-500">{t('chat.tutor.empty')}</div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
