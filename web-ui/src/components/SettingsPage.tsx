@@ -4,7 +4,7 @@ import {
   BookMarked,
   Brain,
   Check,
-  Compass,
+  CircleHelp,
   Database,
   Download,
   FolderOpen,
@@ -57,7 +57,7 @@ const providerOptions: { value: LlmProvider; label: string; description: string 
   },
 ]
 
-type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'notebook' | 'governance'
+type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'notebook' | 'governance' | 'help'
 type ConfigTestState = {
   status: 'running' | 'ok' | 'error'
   message: string
@@ -102,6 +102,7 @@ const settingsTabs: Array<{
     | 'settings.tabs.embedding'
     | 'settings.tabs.search'
     | 'settings.tabs.governance'
+    | 'settings.tabs.help'
     | 'space.tabs.notebook'
   icon: LucideIcon
 }> = [
@@ -111,6 +112,7 @@ const settingsTabs: Array<{
   { key: 'search', labelKey: 'settings.tabs.search', icon: Globe2 },
   { key: 'notebook', labelKey: 'space.tabs.notebook', icon: BookMarked },
   { key: 'governance', labelKey: 'settings.tabs.governance', icon: SlidersHorizontal },
+  { key: 'help', labelKey: 'settings.tabs.help', icon: CircleHelp },
 ]
 
 export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
@@ -571,14 +573,6 @@ export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
               <p className="mt-1 text-sm text-gray-600">{tabDescription(activeTab, t)}</p>
             </div>
             <span className="ml-auto text-sm text-gray-500">{t('settings.saved')}</span>
-            <button
-              type="button"
-              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              onClick={onOpenOnboarding}
-            >
-              <Compass size={16} />
-              {language === 'en-US' ? 'Open guide' : '使用引导'}
-            </button>
           </div>
 
           {activeTab === 'appearance' && (
@@ -1242,6 +1236,37 @@ export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
               </div>
             </SettingsPanel>
           )}
+
+          {activeTab === 'help' && (
+            <SettingsPanel
+              icon={CircleHelp}
+              title={language === 'en-US' ? 'Help' : '帮助'}
+              description={language === 'en-US'
+                ? 'Review the getting-started guide and find the next useful action.'
+                : '重新查看首次使用流程，并快速找到下一步操作。'}
+            >
+              <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">
+                    {language === 'en-US' ? 'Getting started' : '使用引导'}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500">
+                    {language === 'en-US'
+                      ? 'Review model setup, Tutor choice, and starter tasks without changing existing data.'
+                      : '重新查看模型配置、导师选择和起步任务，不会更改已有数据。'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={onOpenOnboarding}
+                >
+                  <CircleHelp size={16} />
+                  {language === 'en-US' ? 'Open guide' : '重新查看'}
+                </button>
+              </div>
+            </SettingsPanel>
+          )}
         </div>
       </div>
     </main>
@@ -1307,6 +1332,7 @@ function tabDescription(tab: SettingsTab, t: (key: TranslationKey) => string) {
     search: 'settings.search.description',
     notebook: 'space.tabs.notebook.description',
     governance: 'settings.governance.description',
+    help: 'settings.help.description',
   }
   return t(keyByTab[tab])
 }

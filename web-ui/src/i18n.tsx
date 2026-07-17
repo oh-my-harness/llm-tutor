@@ -66,6 +66,7 @@ export type TranslationKey =
   | 'settings.tabs.embedding'
   | 'settings.tabs.search'
   | 'settings.tabs.governance'
+  | 'settings.tabs.help'
   | 'settings.appearance.title'
   | 'settings.appearance.description'
   | 'settings.theme.title'
@@ -78,6 +79,7 @@ export type TranslationKey =
   | 'settings.embedding.description'
   | 'settings.search.description'
   | 'settings.governance.description'
+  | 'settings.help.description'
   | 'settings.language.title'
   | 'settings.language.description.zh'
   | 'settings.language.description.en'
@@ -159,6 +161,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.tabs.embedding': '嵌入模型',
     'settings.tabs.search': '搜索',
     'settings.tabs.governance': '能力',
+    'settings.tabs.help': '帮助',
     'settings.appearance.title': '界面外观',
     'settings.appearance.description': '调整界面语言和视觉偏好。',
     'settings.theme.title': '主题色',
@@ -171,6 +174,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.embedding.description': '配置知识库检索使用的嵌入模型。',
     'settings.search.description': '配置 agent web_search 工具使用的搜索服务。',
     'settings.governance.description': '配置预算和工具执行策略。',
+    'settings.help.description': '使用引导和常用帮助入口。',
     'settings.language.title': '界面语言',
     'settings.language.description.zh': '当前使用中文界面。',
     'settings.language.description.en': '当前使用英文界面。',
@@ -251,6 +255,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.tabs.embedding': 'Embedding',
     'settings.tabs.search': 'Search',
     'settings.tabs.governance': 'Capabilities',
+    'settings.tabs.help': 'Help',
     'settings.appearance.title': 'Appearance',
     'settings.appearance.description': 'Adjust interface language and visual preferences.',
     'settings.theme.title': 'Color theme',
@@ -263,6 +268,7 @@ const translations: Record<UiLanguage, Record<TranslationKey, string>> = {
     'settings.embedding.description': 'Configure embedding models used by knowledge-base retrieval.',
     'settings.search.description': 'Configure search services used by the agent web_search tool.',
     'settings.governance.description': 'Configure budget and tool execution policies.',
+    'settings.help.description': 'Getting-started guidance and common help actions.',
     'settings.language.title': 'Interface language',
     'settings.language.description.zh': 'Chinese interface is active.',
     'settings.language.description.en': 'English interface is active.',

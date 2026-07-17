@@ -1566,7 +1566,6 @@ export default function App() {
               startNewChat()
               handleTutorSelect(tutorId)
             }}
-            onReturnToOnboarding={llmSettings.onboardingCompleted ? undefined : () => setOnboardingOpen(true)}
           />
         )}
 
