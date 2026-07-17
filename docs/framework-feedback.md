@@ -128,6 +128,12 @@
   - Actual: `llm-tutor` can keep active runs alive in-process and rejoin them by session id, but full run envelopes, missed-progress replay, restart recovery, and cancellation state are not first-class runtime session concepts yet.
   - Suggestion: add runtime-managed run records with `run_id`, `session_id`, `assistant_message_id`, status transitions, cancellation, progress cursors, and rejoin/replay APIs so product UIs do not need their own scheduler or event journal.
 
+- **Runtime sessions need an atomic append or shared write coordinator**
+  - Expected: harness-owned assistant writes and app-owned custom entries such as traces can safely target the same durable session without creating accidental branches.
+  - Actual: `Session::append` reads the active cursor, appends, and advances the cursor as separate operations. When an event sink appends a trace while the harness appends the final assistant message, both entries can receive the same parent and the later cursor update hides one sibling from the active path.
+  - Product workaround: stream run events immediately but buffer their session entries until the harness turn has settled, then append traces, artifacts, and stage records sequentially after the final assistant message. Transient cancellation state is not appended during the active turn.
+  - Suggestion: expose an atomic append primitive or a session-scoped writer/transaction that the harness and application event sinks can share.
+
 - **Model metadata discovery is still app-specific**
   - Expected: settings diagnostics and runtime context budgeting can ask the provider adapter for normalized model metadata such as context window, native embedding dimension, supported embedding dimensions, and detected source.
   - Actual: `llm-tutor` has to implement a thin `GET /models` probe, provider-specific auth headers, endpoint derivation, and recursive parsing of fields such as `context_window`, `max_context_tokens`, and `max_model_len`.

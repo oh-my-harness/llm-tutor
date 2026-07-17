@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -28,7 +28,9 @@ use crate::quiz_tool::{CreateQuizTool, ProposeQuizPlanTool};
 use crate::research_tool::{CreateResearchReportTool, ProposeResearchPlanTool};
 use crate::routes::quiz::{CreateLlmConfig, QuizState};
 use crate::routes::space::{SpaceMention, resolve_space_mention_markdown};
-use crate::session::{LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool};
+use crate::session::{
+    ActiveRunSummary, LlmSessionConfig, SearchSessionConfig, SessionEntry, SessionPool,
+};
 use crate::space_tool::{
     ListNotebookTreeTool, ProposeNotebookEditTool, ReadSpaceItemTool, SearchNotebookTool,
 };
@@ -70,6 +72,14 @@ struct PersistedEventSink {
     research_report_started: Arc<AtomicBool>,
     run_id: String,
     tutor_id: Option<String>,
+    pending_events: Arc<Mutex<Vec<PendingSessionEvent>>>,
+}
+
+struct PendingSessionEvent {
+    kind: String,
+    data: serde_json::Value,
+    run_state: Option<ActiveRunSummary>,
+    artifact: Option<serde_json::Value>,
 }
 
 impl EventSink for PersistedEventSink {
@@ -82,6 +92,7 @@ impl EventSink for PersistedEventSink {
         let stream = self.stream.clone();
         let run_id = self.run_id.clone();
         let tutor_id = self.tutor_id.clone();
+        let pending_events = self.pending_events.clone();
         Box::pin(async move {
             if let Some(map) = data.as_object_mut() {
                 map.insert("run_id".into(), serde_json::Value::String(run_id.clone()));
@@ -89,20 +100,17 @@ impl EventSink for PersistedEventSink {
                     map.insert("tutor_id".into(), serde_json::Value::String(tutor_id));
                 }
             }
-            if let Some(stage) = run_stage_from_trace(&kind, &data)
-                && let Some(run) = pool.update_active_run_stage(&session_id, &run_id, &stage)
-            {
-                let _ = pool.append_run_state(&session_id, &run).await;
-            }
-            if kind == "tool_result"
-                && let Some(artifact) = message_artifact_from_tool_result(&data, &run_id)
-                && let Ok(count) = pool.assistant_message_count(&session_id).await
-            {
-                let _ = pool
-                    .append_message_artifacts(&session_id, count + 1, vec![artifact])
-                    .await;
-            }
-            let _ = pool.append_trace(&session_id, &kind, data.clone()).await;
+            let run_state = run_stage_from_trace(&kind, &data)
+                .and_then(|stage| pool.update_active_run_stage(&session_id, &run_id, &stage));
+            let artifact = (kind == "tool_result")
+                .then(|| message_artifact_from_tool_result(&data, &run_id))
+                .flatten();
+            pending_events.lock().unwrap().push(PendingSessionEvent {
+                kind: kind.clone(),
+                data: data.clone(),
+                run_state,
+                artifact,
+            });
             stream.trace(&kind, data).await;
         })
     }
@@ -124,6 +132,27 @@ impl EventSink for PersistedEventSink {
             stream.progress_content(&text, chunk).await;
         })
     }
+}
+
+async fn flush_pending_session_events(
+    pool: &SessionPool,
+    session_id: &str,
+    assistant_message_index: usize,
+    pending_events: &Mutex<Vec<PendingSessionEvent>>,
+) -> Result<(), llm_harness_types::SessionError> {
+    let events = std::mem::take(&mut *pending_events.lock().unwrap());
+    for event in events {
+        if let Some(run) = event.run_state {
+            pool.append_run_state(session_id, &run).await?;
+        }
+        if let Some(artifact) = event.artifact {
+            pool.append_message_artifacts(session_id, assistant_message_index, vec![artifact])
+                .await?;
+        }
+        pool.append_trace(session_id, &event.kind, event.data)
+            .await?;
+    }
+    Ok(())
 }
 
 fn trace_invokes_research_report(kind: &str, data: &serde_json::Value) -> bool {
@@ -355,7 +384,6 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
                     }
                     Ok(ClientMessage::Stop) => {
                         if let Some(run) = pool.cancel_active_run(&session_id) {
-                            let _ = pool.append_run_state(&session_id, &run).await;
                             let _ = entry
                                 .stream
                                 .status(
@@ -488,6 +516,8 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         .await;
 
     let research_report_started = Arc::new(AtomicBool::new(false));
+    let pending_events = Arc::new(Mutex::new(Vec::new()));
+    let assistant_message_index = pool.assistant_message_count(&entry.id).await.unwrap_or(0) + 1;
     let work = async {
         let capability: Capability = entry.capability.parse()?;
         let repaired_context = pool
@@ -535,6 +565,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
             research_report_started: research_report_started.clone(),
             run_id: run_id.clone(),
             tutor_id: entry.tutor_id.clone(),
+            pending_events: pending_events.clone(),
         });
         let mut router = CapabilityRouter::new(env, llm, governance)
             .with_event_sink(sink)
@@ -687,6 +718,13 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
     };
 
     let result: tutor_agent::Result<(String, bool)> = work.await;
+    let _ = flush_pending_session_events(
+        &pool,
+        &entry.id,
+        assistant_message_index,
+        pending_events.as_ref(),
+    )
+    .await;
 
     if cancel.is_cancelled() {
         let _ = entry
@@ -1072,5 +1110,48 @@ mod tests {
             "tool_call",
             &serde_json::json!({ "tool": "propose_research_plan" })
         ));
+    }
+
+    #[tokio::test]
+    async fn buffered_trace_flush_keeps_final_answer_on_active_path() {
+        let root = std::env::temp_dir().join(format!(
+            "llm-tutor-ws-session-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let pool = SessionPool::new_with_root(&root);
+        let id = pool
+            .create("chat", None, false, None, None, None)
+            .await
+            .unwrap();
+        let session = pool.open_runtime_session(&id).await.unwrap();
+        session
+            .append_message(tutor_agent::chat::user_message("question"))
+            .await
+            .unwrap();
+
+        let pending = Mutex::new(vec![PendingSessionEvent {
+            kind: "final_answer".into(),
+            data: serde_json::json!({ "text": "answer" }),
+            run_state: None,
+            artifact: None,
+        }]);
+        session
+            .append_message(tutor_agent::chat::assistant_message("answer"))
+            .await
+            .unwrap();
+        flush_pending_session_events(&pool, &id, 1, &pending)
+            .await
+            .unwrap();
+
+        let messages = pool.messages(&id).await.unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(crate::session::message_text(&messages[1]), "answer");
+        let traces = pool.traces(&id).await.unwrap();
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].kind, "final_answer");
+
+        drop(session);
+        drop(pool);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
