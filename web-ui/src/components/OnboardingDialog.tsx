@@ -294,7 +294,7 @@ const chineseCopy = {
   later: '稍后再说',
   back: '上一步',
   continue: '继续',
-  done: '已了解',
+  done: '完成',
   model: {
     title: '确认对话模型',
     description: 'Agent 需要一个可用的模型服务。已有配置会直接复用，不会要求你重新填写凭据。',
@@ -335,7 +335,7 @@ const englishCopy: typeof chineseCopy = {
   later: 'Maybe later',
   back: 'Back',
   continue: 'Continue',
-  done: 'Got it',
+  done: 'Complete',
   model: {
     title: 'Confirm a chat model',
     description: 'Agent tasks need a working model service. Existing settings are reused without asking for credentials again.',

@@ -31,7 +31,7 @@ separate tutorial workspace or simulated data model.
 - Closing an incomplete flow pauses it instead of marking it complete. A compact
   floating action resumes the current step without taking workspace layout.
 - Completion requires either launching a real starter task or explicitly
-  choosing `Got it` on the final step.
+  choosing `Complete` on the final step.
 - State is local, versioned, and independent from runtime conversation history.
 - MVP does not add hosted onboarding analytics.
 
@@ -128,7 +128,7 @@ Rules:
 - [x] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
 - [x] Support back, skip, dismiss, keyboard navigation, active language, and
   light/dark themes.
-- [x] Distinguish pause from completion and provide an explicit final `Got it`
+- [x] Distinguish pause from completion and provide an explicit final `Complete`
   action.
 
 ### Phase 3: Contextual Empty States

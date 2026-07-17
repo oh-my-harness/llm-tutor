@@ -886,7 +886,7 @@ other generated learning records.
   Dismissal shall pause rather than complete an unfinished flow. While the flow
   remains incomplete, a compact floating action shall reopen it without taking
   permanent workspace layout. Launching a real starter task or choosing the
-  explicit final `Got it` action shall mark the flow complete and remove the
+  explicit final `Complete` action shall mark the flow complete and remove the
   floating action. Status: implemented.
 - REQ-468: Onboarding and contextual guidance shall follow the active UI
   language and desktop theme, remain keyboard accessible, and avoid browser-
