@@ -66,6 +66,16 @@ Update-TextFile -Path (Join-Path $root "Cargo.toml") -Updater {
     param($text)
     $text -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$Version`""
 }
+Update-TextFile -Path (Join-Path $root "Cargo.lock") -Updater {
+    param($text)
+    $next = $text
+    foreach ($package in @("llm-tutor-desktop", "tutor-agent", "tutor-rag", "tutor-tools", "tutor-web")) {
+        $escapedPackage = [regex]::Escape($package)
+        $pattern = '(?m)(^\[\[package\]\]\r?\nname = "{0}"\r?\nversion = ")[^"]+("$)' -f $escapedPackage
+        $next = Replace-First $next $pattern "`${1}$Version`${2}"
+    }
+    $next
+}
 
 Update-JsonVersion -Path (Join-Path $root "src-tauri\tauri.conf.json")
 Update-JsonVersion -Path (Join-Path $root "web-ui\package.json")

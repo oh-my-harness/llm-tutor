@@ -9,6 +9,8 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+## 0.3.4 - 2026-07-17
+
 ### Fixed
 
 - Derived the sidebar version label from the frontend package version instead
