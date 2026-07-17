@@ -10,7 +10,8 @@ import { KnowledgePage } from './components/KnowledgePage'
 import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
 import { TutorPage } from './components/TutorPage'
-import { OnboardingDialog, type OnboardingTask } from './components/OnboardingDialog'
+import { OnboardingDialog } from './components/OnboardingDialog'
+import { onboardingModeBlock, onboardingStarterPrompt, type OnboardingMode } from './onboardingModes'
 import { OnboardingResumeButton } from './components/OnboardingResumeButton'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
@@ -1164,30 +1165,29 @@ export default function App() {
     setOnboardingOpen(false)
   }, [])
 
-  const startOnboardingTask = useCallback((task: OnboardingTask) => {
+  const startOnboardingMode = useCallback((mode: OnboardingMode) => {
     const tutorId = selectedTutorId
-    completeOnboarding()
-    if (task === 'notebook') {
-      setView('notebook')
+    const tutor = tutorId ? tutors.find((item) => item.id === tutorId) ?? null : null
+    const block = onboardingModeBlock(mode, tutor)
+    if (block === 'capability') {
+      pushStatus({ kind: 'error', label: '模式不可用', detail: '当前导师未启用此模式。' })
+      return
+    }
+    if (block === 'notebook') {
+      pushStatus({ kind: 'error', label: 'Notebook 不可用', detail: '当前导师没有 Notebook 权限。' })
       return
     }
 
+    completeOnboarding()
     startNewChat()
     handleTutorSelect(tutorId)
-    setCapability(task)
-    const prompts = llmSettings.language === 'en-US'
-      ? {
-          chat: 'Explain a concept I am learning, starting by asking what I already know.',
-          research: 'I want to research a topic in depth. First help me clarify the scope and desired output.',
-          quiz: 'Create a short quiz for me. First ask what topic or saved material I want to use.',
-        }
-      : {
-          chat: '请解释一个我正在学习的概念，先问问我已经了解多少。',
-          research: '我想深入调研一个主题，请先帮我确认研究范围和期望产出。',
-          quiz: '请为我生成一组简短测验，先询问我要使用的主题或已有材料。',
-        }
-    setStarterDraft({ id: Date.now(), text: prompts[task] })
-  }, [completeOnboarding, handleTutorSelect, llmSettings.language, selectedTutorId, startNewChat])
+    setCapability(mode)
+    if (mode === 'organize') {
+      setSelectedNotebookEnabled(true)
+      setSelectedKnowledgeBaseId('')
+    }
+    setStarterDraft({ id: Date.now(), text: onboardingStarterPrompt(mode, llmSettings.language) })
+  }, [completeOnboarding, handleTutorSelect, llmSettings.language, pushStatus, selectedTutorId, startNewChat, tutors])
 
   const handleCapabilityChange = useCallback(async (nextCapability: Capability) => {
     if (running) return
@@ -1670,7 +1670,7 @@ export default function App() {
           }}
           onDismiss={pauseOnboarding}
           onComplete={completeOnboarding}
-          onStartTask={startOnboardingTask}
+          onStartMode={startOnboardingMode}
         />
       )}
     </div>

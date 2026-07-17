@@ -850,7 +850,7 @@ other generated learning records.
 - REQ-459: First-run onboarding shall provide six concise steps: verify or
   configure an available LLM, optionally choose or create a Tutor, configure
   and use a Knowledge Base, configure Notebook storage, understand and maintain
-  Memory, and start a first Chat, Research, Notebook, or Quiz task. Status:
+  Memory, and select a Chat, Research, Quiz, or Organize conversation mode. Status:
   implemented.
 - REQ-460: The model step shall detect whether a usable model configuration
   already exists. When no usable configuration exists, it shall link directly
@@ -873,10 +873,15 @@ other generated learning records.
   update, check, deduplicate, review, and apply workflow. It shall link to the
   real Memory workspace without modifying memory merely by viewing the guide.
   Status: implemented.
-- REQ-462: The final onboarding step shall offer a small set of real starter
-  actions, such as explaining a concept, researching a topic, organizing a
-  note, or generating a quiz. Selecting an action shall enter the actual
-  workflow rather than a tutorial simulation. Status: implemented.
+- REQ-462: The final onboarding step shall provide a dedicated child interface
+  for Chat, Research, Quiz, and Organize. Each mode shall have an individual
+  introduction covering suitable scenarios, runtime or workflow behavior,
+  usable material, expected output, and an editable starter prompt. Selecting
+  its start action shall open a real new conversation in that mode without
+  automatically sending the prompt. The interface shall respect the selected
+  Tutor's allowed capabilities and Notebook permission. Notebook itself shall
+  remain a workspace rather than a conversation mode; internal Code Exec and
+  retired Deep Solve shall not appear. Status: implemented.
 - REQ-463: Empty product surfaces shall provide contextual guidance focused on
   the next meaningful action for that surface. Notebook, Quiz Bank, Memory,
   Tutor, and Research guidance shall disappear automatically once the relevant

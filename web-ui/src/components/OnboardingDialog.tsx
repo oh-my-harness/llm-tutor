@@ -7,12 +7,9 @@ import {
   Check,
   CircleCheck,
   Database,
-  FileQuestion,
   FolderOpen,
   HardDrive,
-  MessageSquareText,
   NotebookPen,
-  Search,
   Settings2,
   Sparkles,
   X,
@@ -20,10 +17,10 @@ import {
 import { activeLlmConfig, hasUsableLlmConfig, testLlmConnection, type LlmSettings } from '../settings'
 import type { NotebookVaultInfo } from '../notebookSave'
 import type { TutorProfile } from '../tutorTypes'
+import type { OnboardingMode } from '../onboardingModes'
 import { useI18n } from '../i18n'
 import { TutorChooser } from './TutorChooser'
-
-export type OnboardingTask = 'chat' | 'research' | 'notebook' | 'quiz'
+import { OnboardingModeGuide } from './OnboardingModeGuide'
 
 interface Props {
   settings: LlmSettings
@@ -43,7 +40,7 @@ interface Props {
   onManageTutors: () => void
   onDismiss: () => void
   onComplete: () => void
-  onStartTask: (task: OnboardingTask) => void
+  onStartMode: (mode: OnboardingMode) => void
 }
 
 type TestState = { status: 'idle' | 'running' | 'ok' | 'error'; message: string }
@@ -67,7 +64,7 @@ export function OnboardingDialog({
   onManageTutors,
   onDismiss,
   onComplete,
-  onStartTask,
+  onStartMode,
 }: Props) {
   const { language } = useI18n()
   const copy = language === 'en-US' ? englishCopy : chineseCopy
@@ -182,7 +179,7 @@ export function OnboardingDialog({
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-5">
             {step === 0 && (
               <div>
                 <StepHeading icon={<Settings2 size={21} />} title={copy.model.title} description={copy.model.description} />
@@ -319,18 +316,13 @@ export function OnboardingDialog({
 
             {step === LAST_ONBOARDING_STEP && (
               <div>
-                <StepHeading icon={<Sparkles size={21} />} title={copy.task.title} description={copy.task.description} />
-                <div className="mt-6 grid grid-cols-2 gap-3">
-                  <TaskButton icon={<MessageSquareText size={19} />} title={copy.task.chat} description={copy.task.chatDescription} onClick={() => onStartTask('chat')} />
-                  <TaskButton icon={<Search size={19} />} title={copy.task.research} description={copy.task.researchDescription} onClick={() => onStartTask('research')} />
-                  <TaskButton icon={<NotebookPen size={19} />} title={copy.task.notebook} description={copy.task.notebookDescription} onClick={() => onStartTask('notebook')} />
-                  <TaskButton icon={<FileQuestion size={19} />} title={copy.task.quiz} description={copy.task.quizDescription} onClick={() => onStartTask('quiz')} />
-                </div>
+                <StepHeading icon={<Sparkles size={21} />} title={copy.mode.title} description={copy.mode.description} />
+                <OnboardingModeGuide selectedTutor={selectedTutor} onStart={onStartMode} />
               </div>
             )}
           </div>
 
-          <footer className="flex items-center border-t border-gray-100 px-8 py-5">
+          <footer className="flex items-center border-t border-gray-100 px-8 py-4">
             <button type="button" className="rounded-md px-2 py-2 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-900" onClick={onDismiss}>{copy.later}</button>
             <div className="ml-auto flex gap-2">
               {step > 0 && (
@@ -384,26 +376,10 @@ function GuideSteps({ items }: { items: string[] }) {
   )
 }
 
-function TaskButton({ icon, title, description, onClick }: { icon: ReactNode; title: string; description: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      className="flex min-h-24 items-start gap-3 rounded-md border border-gray-200 px-4 py-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-      onClick={onClick}
-    >
-      <span className="mt-0.5 text-blue-700">{icon}</span>
-      <span>
-        <span className="block text-sm font-semibold text-gray-900">{title}</span>
-        <span className="mt-1 block text-xs leading-5 text-gray-500">{description}</span>
-      </span>
-    </button>
-  )
-}
-
 const chineseCopy = {
   title: '开始使用',
   subtitle: '完成必要配置并开始真实学习任务',
-  steps: ['模型准备', '选择导师', '知识库', '笔记本', '记忆', '开始任务'],
+  steps: ['模型准备', '选择导师', '知识库', '笔记本', '记忆', '会话模式'],
   dismiss: '关闭使用引导',
   later: '稍后再说',
   back: '上一步',
@@ -467,24 +443,16 @@ const chineseCopy = {
     actionDescription: '打开记忆概览后，可以进入 L2/L3 阅读 Markdown；仅查看引导不会自动生成或修改记忆。',
     open: '打开记忆',
   },
-  task: {
-    title: '选择第一个任务',
-    description: '这些入口会打开真实工作区，你可以先修改预填内容再发送。',
-    chat: '解释一个概念',
-    chatDescription: '从普通对话开始，逐步追问。',
-    research: '深入调研主题',
-    researchDescription: '先确认范围，再启动研究 workflow。',
-    notebook: '创建一份笔记',
-    notebookDescription: '进入 Notebook 整理本地学习材料。',
-    quiz: '生成一组测验',
-    quizDescription: '根据主题或已有材料检查理解。',
+  mode: {
+    title: '选择会话模式',
+    description: '逐项了解模式的适用场景和运行方式，再进入真实会话。起步内容可编辑且不会自动发送。',
   },
 }
 
 const englishCopy: typeof chineseCopy = {
   title: 'Get started',
   subtitle: 'Complete essential setup and start a real learning task',
-  steps: ['Model', 'Tutor', 'Knowledge', 'Notebook', 'Memory', 'First task'],
+  steps: ['Model', 'Tutor', 'Knowledge', 'Notebook', 'Memory', 'Modes'],
   dismiss: 'Close onboarding',
   later: 'Maybe later',
   back: 'Back',
@@ -548,16 +516,8 @@ const englishCopy: typeof chineseCopy = {
     actionDescription: 'Open Memory to read L2/L3 Markdown. Viewing this guide never generates or modifies memory by itself.',
     open: 'Open Memory',
   },
-  task: {
-    title: 'Choose your first task',
-    description: 'Each option opens the real workspace with an editable starting point.',
-    chat: 'Explain a concept',
-    chatDescription: 'Start with a normal conversation and follow up naturally.',
-    research: 'Research a topic',
-    researchDescription: 'Confirm scope before starting the research workflow.',
-    notebook: 'Create a note',
-    notebookDescription: 'Open Notebook and organize local learning material.',
-    quiz: 'Generate a quiz',
-    quizDescription: 'Check understanding from a topic or saved material.',
+  mode: {
+    title: 'Choose a conversation mode',
+    description: 'Review when and how each mode runs, then enter a real conversation with an editable unsent starter prompt.',
   },
 }

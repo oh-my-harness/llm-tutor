@@ -11,8 +11,8 @@ The onboarding experience should connect existing product capabilities:
 
 ```text
 Model readiness -> Optional Tutor -> Knowledge Base -> Notebook -> Memory
-                                                        -> First real task
-                                                        -> Chat / Research / Notebook / Quiz
+                                                        -> Conversation modes
+                                                        -> Chat / Research / Quiz / Organize
 ```
 
 The normal product remains the destination. Onboarding does not create a
@@ -21,7 +21,7 @@ separate tutorial workspace or simulated data model.
 ## 2. Product Decisions
 
 - First-run onboarding has six concise steps: model readiness, optional Tutor,
-  Knowledge Base, Notebook, Memory, and the first real task.
+  Knowledge Base, Notebook, Memory, and conversation-mode selection.
 - The flow is nonblocking except when an LLM action genuinely requires a model.
 - An existing valid model configuration is detected and reused.
 - Tutor selection is optional; skipping it uses Temporary Assistant.
@@ -87,18 +87,30 @@ The app checks existing LLM settings before showing configuration UI.
 - Link directly to the real Memory workspace; this step does not create or
   modify memory by itself.
 
-### Step 6: First Useful Task
+### Step 6: Conversation Modes
 
-Offer a small set of starter actions:
+The final step uses a dedicated child surface inside the onboarding dialog. It
+does not add four more top-level steps or a separate application route.
 
-- explain a concept in Chat;
-- research a topic through Research conversation and its explicit workflow;
-- create or organize a Notebook note;
-- generate a Quiz from a topic or selected material.
+- A stable horizontal mode control switches between Chat, Research, Quiz, and
+  Organize without changing the dialog size.
+- Each mode explains its suitable scenarios, runtime behavior, usable material,
+  expected output, and editable starter prompt.
+- Chat is ordinary streaming conversation with optional tool use and no forced
+  workflow.
+- Research remains ordinary conversation while scope is clarified, then starts
+  the explicit detailed-research workflow and produces a cited report.
+- Quiz confirms topic or source material before starting its workflow and
+  produces a durable interactive quiz card.
+- Organize reads Notebook material and proposes reviewable edits; it requires
+  Notebook permission and never applies changes before user review.
+- Code Exec remains an internal tool rather than a user-facing mode. Retired
+  Deep Solve is not reintroduced.
 
-The selected action opens the real destination with an editable starting prompt
-or action and completes onboarding. A user who does not want to launch a task
-may instead choose the explicit `Complete` action on this final step.
+The selected mode's start action opens a new conversation, selects that real
+mode, pre-fills an editable prompt without sending it, and completes onboarding.
+A user who does not want to launch a conversation may instead choose the
+explicit `Complete` action on this final step.
 
 ## 4. Contextual Guidance
 
@@ -155,10 +167,13 @@ Rules:
 
 - [x] Build the six-step desktop onboarding surface.
 - [x] Expand the flow to cover Knowledge Base setup and use, Notebook setup,
-  and Memory viewing and maintenance before the first task.
+  and Memory viewing and maintenance before conversation-mode selection.
 - [x] Reuse the existing model configuration and connection-test boundaries.
 - [x] Reuse the bounded Tutor chooser and Temporary Assistant behavior.
-- [x] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
+- [x] Replace the mixed starter-task cards with a dedicated four-mode child
+  surface for Chat, Research, Quiz, and Organize.
+- [x] Route each mode action into a real new conversation with an editable
+  starter prompt and enforce Tutor capability and Notebook permissions.
 - [x] Support back, skip, dismiss, keyboard navigation, active language, and
   light/dark themes.
 - [x] Distinguish pause from completion and provide an explicit final `Complete`
@@ -179,8 +194,8 @@ Rules:
   configured desktop profile remains to be included in release QA.
 - [ ] Test model connection failure and recovery without losing entered state.
 - [ ] Test both Temporary Assistant and Tutor-selected entry paths.
-- [x] Verify Chat, Research, Notebook, and Quiz starter actions route into their
-  real product surfaces with editable prompts where applicable.
+- [x] Verify Chat, Research, Quiz, and Organize introductions, disabled Tutor
+  permissions, real mode selection, and editable starter prompts.
 - [x] Verify Knowledge Base, Notebook configuration, and Memory guidance render
   at desktop size and route to their intended real settings or workspaces.
 - [ ] Complete keyboard-only, English-copy, and installed-desktop QA. Light and

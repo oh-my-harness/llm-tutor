@@ -1253,8 +1253,8 @@ export function SettingsPage({ settings, activeTab, onTabChange, onChange, onOpe
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {language === 'en-US'
-                      ? 'Review model, Tutor, Knowledge Base, Notebook, Memory, and starter-task guidance without changing existing data.'
-                      : '重新查看模型、导师、知识库、笔记本、记忆和起步任务，不会更改已有数据。'}
+                      ? 'Review model, Tutor, Knowledge Base, Notebook, Memory, and conversation-mode guidance without changing existing data.'
+                      : '重新查看模型、导师、知识库、笔记本、记忆和会话模式，不会更改已有数据。'}
                   </div>
                 </div>
                 <button
