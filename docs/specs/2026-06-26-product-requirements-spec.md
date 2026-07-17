@@ -846,48 +846,52 @@ other generated learning records.
 
 - REQ-458: The product shall provide a first-run onboarding flow whose goal is
   to help the user complete the first useful learning task, rather than present
-  a tour of every page and control. Status: planned.
+  a tour of every page and control. Status: implemented.
 - REQ-459: First-run onboarding shall contain no more than three primary steps:
   verify or configure an available LLM, optionally choose or create a Tutor,
-  and start a first Chat, Research, Notebook, or Quiz task. Status: planned.
+  and start a first Chat, Research, Notebook, or Quiz task. Status: implemented.
 - REQ-460: The model step shall detect whether a usable model configuration
   already exists. When no usable configuration exists, it shall link directly
   to the relevant settings and offer the existing connection test. It shall
   not ask an already-configured user to enter credentials again. Status:
-  planned.
+  implemented; configured-profile release QA remains pending.
 - REQ-461: Tutor selection during onboarding shall remain optional. Skipping
   it shall use Temporary Assistant and shall not block the user from entering
-  the normal conversation workspace. Status: planned.
+  the normal conversation workspace. Status: implemented.
 - REQ-462: The final onboarding step shall offer a small set of real starter
   actions, such as explaining a concept, researching a topic, organizing a
   note, or generating a quiz. Selecting an action shall enter the actual
-  workflow rather than a tutorial simulation. Status: planned.
+  workflow rather than a tutorial simulation. Status: implemented.
 - REQ-463: Empty product surfaces shall provide contextual guidance focused on
   the next meaningful action for that surface. Notebook, Quiz Bank, Memory,
   Tutor, and Research guidance shall disappear automatically once the relevant
-  user data or state exists. Status: planned.
+  user data or state exists. Status: implemented for Notebook, Quiz Bank,
+  Memory, Tutor, and Research/Quiz conversation empty states.
 - REQ-464: Contextual guidance shall not permanently occupy primary workspace
   area, repeatedly interrupt experienced users, or depend on long sequential
   spotlight tours. Complex features may show a concise one-time hint when
-  first used. Status: planned.
+  first used. Status: implemented for compact contextual guidance; no
+  additional one-time interaction hints are currently enabled.
 - REQ-465: Settings or Help shall provide an explicit action to reopen the
   onboarding flow, while the in-app manual remains available for complete
   reference. Reopening onboarding shall not reset user data or configuration.
-  Status: planned.
+  Status: implemented.
 - REQ-466: Onboarding state shall be local-first and versioned. At minimum it
   shall track an `onboarding_version`, completion state, and dismissed
   contextual hints so future releases can introduce only the relevant new
-  guidance instead of replaying the full first-run flow. Status: planned.
+  guidance instead of replaying the full first-run flow. Status: implemented.
 - REQ-467: Dismissing or skipping onboarding shall be supported at every
   nonessential step. A dismissed flow shall leave the normal product fully
   usable, except where an unavailable model genuinely prevents an LLM action.
-  Status: planned.
+  Status: implemented.
 - REQ-468: Onboarding and contextual guidance shall follow the active UI
   language and desktop theme, remain keyboard accessible, and avoid browser-
-  style permission or navigation interactions. Status: planned.
+  style permission or navigation interactions. Status: partially implemented;
+  Chinese/English copy, themes, semantic controls, and minimum-window layout
+  are present, while complete keyboard-only installed-desktop QA remains.
 - REQ-469: Onboarding analytics shall not require hosted telemetry for MVP.
   Completion and hint state shall stay in local settings unless the user later
-  opts into a separately specified diagnostics mechanism. Status: planned.
+  opts into a separately specified diagnostics mechanism. Status: implemented.
 
 ## 25. Storage and Data
 

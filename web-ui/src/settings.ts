@@ -12,6 +12,8 @@ export type SearchProvider =
   | 'serpapi'
   | 'exa'
 
+export const CURRENT_ONBOARDING_VERSION = 1
+
 export interface LlmModelConfig {
   id: string
   name: string
@@ -62,6 +64,9 @@ export interface LlmSettings {
   activeEmbeddingConfigId: string | null
   searchConfigs: SearchConfig[]
   activeSearchConfigId: string | null
+  onboardingVersion: number
+  onboardingCompleted: boolean
+  dismissedContextHints: string[]
 }
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000
@@ -82,6 +87,9 @@ export const defaultLlmSettings: LlmSettings = {
   activeEmbeddingConfigId: null,
   searchConfigs: [],
   activeSearchConfigId: null,
+  onboardingVersion: CURRENT_ONBOARDING_VERSION,
+  onboardingCompleted: false,
+  dismissedContextHints: [],
 }
 
 const SETTINGS_STORAGE_KEY = 'tutor.llmSettings'
@@ -143,6 +151,49 @@ export function settingsForSession(
     budget_limit_usd: settings.budgetLimitUsd,
     require_approval: settings.requireApproval,
   }
+}
+
+export function hasUsableLlmConfig(settings: LlmSettings): boolean {
+  const config = activeLlmConfig(settings)
+  if (!config) return false
+  return Boolean(config.model.trim() && config.apiKey.trim() && config.baseUrl.trim())
+}
+
+export function shouldShowOnboarding(
+  settings: LlmSettings,
+  currentVersion = CURRENT_ONBOARDING_VERSION,
+): boolean {
+  return !settings.onboardingCompleted || settings.onboardingVersion < currentVersion
+}
+
+export function completeOnboardingSettings(
+  settings: LlmSettings,
+  currentVersion = CURRENT_ONBOARDING_VERSION,
+): LlmSettings {
+  return {
+    ...settings,
+    onboardingVersion: currentVersion,
+    onboardingCompleted: true,
+  }
+}
+
+export async function testLlmConnection(config: LlmModelConfig): Promise<Record<string, unknown>> {
+  const response = await fetch('/api/settings/test/llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: config.provider,
+      model: config.model,
+      api_key: config.apiKey,
+      base_url: config.baseUrl,
+      chat_path: config.chatPath,
+    }),
+  })
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'Model test failed')
+  }
+  return payload
 }
 
 export function searchForSession(settings: LlmSettings) {
@@ -338,6 +389,12 @@ function normalizeLlmSettings(parsed: Partial<LlmSettings>): LlmSettings {
     activeEmbeddingConfigId: normalizeActiveConfigId(parsed.activeEmbeddingConfigId, embeddingConfigs),
     searchConfigs,
     activeSearchConfigId: normalizeActiveConfigId(parsed.activeSearchConfigId, searchConfigs),
+    onboardingVersion: normalizeNonNegativeInteger(
+      parsed.onboardingVersion,
+      defaultLlmSettings.onboardingVersion,
+    ),
+    onboardingCompleted: Boolean(parsed.onboardingCompleted),
+    dismissedContextHints: normalizeStringArray(parsed.dismissedContextHints),
   }
 }
 
@@ -346,7 +403,19 @@ export function normalizeTheme(value: unknown): ThemeId {
 }
 
 export function settingsRequireSessionReset(current: LlmSettings, next: LlmSettings): boolean {
-  return JSON.stringify({ ...current, theme: next.theme }) !== JSON.stringify(next)
+  return JSON.stringify(runtimeRelevantSettings(current)) !== JSON.stringify(runtimeRelevantSettings(next))
+}
+
+function runtimeRelevantSettings(settings: LlmSettings) {
+  const {
+    theme: _theme,
+    language: _language,
+    onboardingVersion: _onboardingVersion,
+    onboardingCompleted: _onboardingCompleted,
+    dismissedContextHints: _dismissedContextHints,
+    ...runtimeSettings
+  } = settings
+  return runtimeSettings
 }
 
 function normalizeUiLanguage(value: unknown): UiLanguage {
@@ -377,6 +446,16 @@ function normalizeLlmConfig(value: unknown): LlmModelConfig {
 function normalizePositiveNumber(value: unknown, fallback: number): number {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) && numberValue > 0 ? Math.round(numberValue) : fallback
+}
+
+function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) && numberValue >= 0 ? Math.round(numberValue) : fallback
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item)))]
 }
 
 function normalizeLlmProvider(value: unknown): LlmProvider {

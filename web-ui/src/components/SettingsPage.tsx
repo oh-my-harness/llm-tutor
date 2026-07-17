@@ -4,6 +4,7 @@ import {
   BookMarked,
   Brain,
   Check,
+  Compass,
   Database,
   Download,
   FolderOpen,
@@ -23,6 +24,7 @@ import {
   createSearchConfig,
   llmProviderPreset,
   searchProviderPreset,
+  testLlmConnection,
 } from '../settings'
 import { useI18n, type TranslationKey, type UiLanguage } from '../i18n'
 import type {
@@ -39,6 +41,7 @@ import { chooseDesktopDirectory, getDesktopDataDir, openDesktopDataDir } from '.
 interface Props {
   settings: LlmSettings
   onChange: (settings: LlmSettings) => void
+  onOpenOnboarding: () => void
 }
 
 const providerOptions: { value: LlmProvider; label: string; description: string }[] = [
@@ -110,8 +113,8 @@ const settingsTabs: Array<{
   { key: 'governance', labelKey: 'settings.tabs.governance', icon: SlidersHorizontal },
 ]
 
-export function SettingsPage({ settings, onChange }: Props) {
-  const { t } = useI18n()
+export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
+  const { t, language } = useI18n()
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
   const [dataDir, setDataDir] = useState<string | null>(null)
@@ -445,21 +448,7 @@ export function SettingsPage({ settings, onChange }: Props) {
   const testLlmConfig = async (config: LlmModelConfig) => {
     setConfigTestState(config.id, { status: 'running', message: 'Testing model connection...' })
     try {
-      const response = await fetch('/api/settings/test/llm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: config.provider,
-          model: config.model,
-          api_key: config.apiKey,
-          base_url: config.baseUrl,
-          chat_path: config.chatPath,
-        }),
-      })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        throw new Error(payload.error || 'Model test failed')
-      }
+      const payload = await testLlmConnection(config)
       const confirmedWindow = Number(payload.confirmed_context_window_tokens || 0)
       if (confirmedWindow > 0 && confirmedWindow !== config.contextWindowTokens) {
         updateLlmConfig(config.id, 'contextWindowTokens', confirmedWindow)
@@ -582,6 +571,14 @@ export function SettingsPage({ settings, onChange }: Props) {
               <p className="mt-1 text-sm text-gray-600">{tabDescription(activeTab, t)}</p>
             </div>
             <span className="ml-auto text-sm text-gray-500">{t('settings.saved')}</span>
+            <button
+              type="button"
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              onClick={onOpenOnboarding}
+            >
+              <Compass size={16} />
+              {language === 'en-US' ? 'Open guide' : '使用引导'}
+            </button>
           </div>
 
           {activeTab === 'appearance' && (

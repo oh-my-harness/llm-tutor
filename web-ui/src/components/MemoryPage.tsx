@@ -479,6 +479,23 @@ function Overview({
         </div>
       </div>
 
+      {l2Count === 0 && l3Count === 0 && (
+        <div className="mt-8 flex max-w-3xl items-center gap-4 rounded-md border border-blue-100 bg-blue-50/60 px-5 py-4">
+          <Sparkles size={20} className="shrink-0 text-blue-700" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-gray-900">开始第一次记忆整理</div>
+            <p className="mt-1 text-sm text-gray-500">从工作区事件生成 L2 模块摘要，审核后再逐步形成 L3 学习画像。</p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-9 shrink-0 items-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+            onClick={() => onOpenLayer('L2')}
+          >
+            进入 L2
+          </button>
+        </div>
+      )}
+
       <div className="mt-12 grid gap-5 lg:grid-cols-3">
         <MemoryLayerCard
           icon={Layers3}

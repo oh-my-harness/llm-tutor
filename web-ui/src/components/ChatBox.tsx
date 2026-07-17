@@ -178,6 +178,7 @@ interface Props {
   selectedNotebookEnabled: boolean
   tutors: TutorProfile[]
   selectedTutorId: string | null | undefined
+  initialDraft?: { id: number; text: string } | null
   onTutorSelect: (tutorId: string | null) => void
   onManageTutors: () => void
   onSend: (text: string, attachments?: ChatAttachment[], mentions?: SpaceMention[]) => void
@@ -262,6 +263,7 @@ export function ChatBox({
   selectedNotebookEnabled,
   tutors,
   selectedTutorId,
+  initialDraft,
   onTutorSelect,
   onManageTutors,
   onSend,
@@ -286,7 +288,7 @@ export function ChatBox({
   disabled,
   running = false,
 }: Props) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [input, setInput] = useState('')
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -304,12 +306,25 @@ export function ChatBox({
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  const consumedDraftIdRef = useRef<number | null>(null)
   const copyFeedbackTimerRef = useRef<number | null>(null)
   const scrollSaveTimerRef = useRef<number | null>(null)
   const latestScrollPositionRef = useRef<{ sessionId: string; position: ChatScrollPosition } | null>(null)
   const pendingScrollRestoreRef = useRef<{ sessionId: string; position: ChatScrollPosition | null } | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const empty = messages.length === 0 && !streamingText
+
+  useEffect(() => {
+    if (!initialDraft || consumedDraftIdRef.current === initialDraft.id) return
+    consumedDraftIdRef.current = initialDraft.id
+    setInput(initialDraft.text)
+    window.requestAnimationFrame(() => {
+      const composer = composerInputRef.current
+      if (!composer) return
+      composer.focus()
+      composer.setSelectionRange(composer.value.length, composer.value.length)
+    })
+  }, [initialDraft])
 
   const handleSend = () => {
     const readyAttachments = attachments.filter((attachment) => !attachment.error)
@@ -587,7 +602,17 @@ export function ChatBox({
           <div className="w-full max-w-4xl">
             <div className="mb-7 text-center">
               <h2 className="text-3xl font-semibold text-gray-950">{t('chat.empty.title')}</h2>
-              <p className="mt-2 text-sm text-gray-500">{t('chat.empty.description')}</p>
+              <p className="mt-2 text-sm text-gray-500">
+                {capability === 'research'
+                  ? language === 'en-US'
+                    ? 'Describe what you want to investigate. The agent will clarify scope before starting the research workflow.'
+                    : '描述你想调研的主题，Agent 会先确认范围，再启动详细研究 workflow。'
+                  : capability === 'quiz'
+                    ? language === 'en-US'
+                      ? 'Name a topic or reference saved material, then generate a quiz in this conversation.'
+                      : '输入一个主题或引用已有材料，在当前会话中生成测验。'
+                    : t('chat.empty.description')}
+              </p>
             </div>
             <Composer
               inputRef={composerInputRef}

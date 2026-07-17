@@ -1,6 +1,6 @@
 # Product Onboarding Plan
 
-> Status: planned | Date: 2026-07-17 | Scope: first-run onboarding, contextual empty states, one-time hints, and reusable in-app guidance.
+> Status: in progress | Date: 2026-07-17 | Last updated: 2026-07-17 | Scope: first-run onboarding, contextual empty states, one-time hints, and reusable in-app guidance.
 
 ## 1. Goal
 
@@ -106,39 +106,41 @@ Rules:
 
 ### Phase 1: State and Entry Conditions
 
-- [ ] Add versioned onboarding state to local settings.
-- [ ] Detect model readiness from existing provider configuration and health
+- [x] Add versioned onboarding state to local settings.
+- [x] Detect model readiness from existing provider configuration and health
   checks.
-- [ ] Decide first-run entry without delaying normal app startup.
-- [ ] Add Settings or Help action to reopen onboarding.
+- [x] Decide first-run entry without delaying normal app startup.
+- [x] Add Settings or Help action to reopen onboarding.
 
 ### Phase 2: First-Run Experience
 
-- [ ] Build the three-step desktop onboarding surface.
-- [ ] Reuse the existing model configuration and connection-test boundaries.
-- [ ] Reuse the bounded Tutor chooser and Temporary Assistant behavior.
-- [ ] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
-- [ ] Support back, skip, dismiss, keyboard navigation, active language, and
+- [x] Build the three-step desktop onboarding surface.
+- [x] Reuse the existing model configuration and connection-test boundaries.
+- [x] Reuse the bounded Tutor chooser and Temporary Assistant behavior.
+- [x] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
+- [x] Support back, skip, dismiss, keyboard navigation, active language, and
   light/dark themes.
 
 ### Phase 3: Contextual Empty States
 
-- [ ] Audit current Notebook, Quiz Bank, Memory, Tutor, and Research empty
+- [x] Audit current Notebook, Quiz Bank, Memory, Tutor, and Research empty
   states.
-- [ ] Add one primary action to each empty state.
-- [ ] Hide guidance automatically when relevant content exists.
+- [x] Add one primary action to each empty state.
+- [x] Hide guidance automatically when relevant content exists.
 - [ ] Add stable dismissible hint keys only for interactions that remain hard to
   discover after the empty state is gone.
 
 ### Phase 4: Verification
 
-- [ ] Test fresh profiles, configured profiles, dismissed flows, and reopened
-  onboarding.
+- [x] Test fresh profiles, dismissed flows, and reopened onboarding; a real
+  configured desktop profile remains to be included in release QA.
 - [ ] Test model connection failure and recovery without losing entered state.
 - [ ] Test both Temporary Assistant and Tutor-selected entry paths.
-- [ ] Verify every starter action reaches a usable real workflow.
-- [ ] Verify keyboard operation, Chinese and English copy, light/dark themes,
-  and common desktop window sizes.
+- [x] Verify Chat, Research, Notebook, and Quiz starter actions route into their
+  real product surfaces with editable prompts where applicable.
+- [ ] Complete keyboard-only, English-copy, and installed-desktop QA. Light and
+  dark themes plus the `1100 x 700` minimum desktop viewport have been visually
+  verified in the local UI.
 
 ## 7. Acceptance Criteria
 

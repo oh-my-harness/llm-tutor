@@ -26,6 +26,7 @@ interface Props {
   knowledgeBases: Array<{ id: string; name: string }>
   onChanged: () => Promise<void>
   onStartConversation: (tutorId: string) => void
+  onReturnToOnboarding?: () => void
 }
 
 const emptyDraft: TutorDraft = {
@@ -62,7 +63,7 @@ const emptyMemoryDraft: TutorMemoryDraft = {
   next_action: '',
 }
 
-export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onStartConversation }: Props) {
+export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onStartConversation, onReturnToOnboarding }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(tutors[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState<TutorDraft>(emptyDraft)
@@ -302,6 +303,19 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
               )}
             </div>
           ))}
+          {tutors.length === 0 && (
+            <div className="px-2 py-5 text-center">
+              <p className="text-xs leading-5 text-gray-500">创建一位导师，并用 Soul Markdown 定义其教学方式。</p>
+              <button
+                type="button"
+                className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
+                onClick={startCreate}
+              >
+                <Plus size={14} />
+                新建导师
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -312,20 +326,33 @@ export function TutorPage({ tutors, modelConfigs, knowledgeBases, onChanged, onS
               <h2 className="text-xl font-semibold text-gray-900">{creating ? '新建导师' : selected?.name ?? '选择导师'}</h2>
               <p className="mt-1 text-sm text-gray-500">设置导师的长期 Soul、默认行为和可使用的能力。</p>
             </div>
-            {selected && !creating && (
-              <div className="flex items-center gap-3">
-                <div className="flex rounded-md bg-gray-100 p-0.5">
-                  <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('profile')}>配置</button>
-                  <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'memory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('memory')}>连续性</button>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
-                  onClick={() => onStartConversation(selected.id)}
-                >
-                  <MessageSquare size={16} />
-                  开始对话
-                </button>
+            {(onReturnToOnboarding || (selected && !creating)) && (
+              <div className="ml-auto flex items-center gap-3">
+                {onReturnToOnboarding && (
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    onClick={onReturnToOnboarding}
+                  >
+                    返回使用引导
+                  </button>
+                )}
+                {selected && !creating && (
+                  <>
+                    <div className="flex rounded-md bg-gray-100 p-0.5">
+                      <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'profile' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('profile')}>配置</button>
+                      <button type="button" className={`h-8 rounded px-3 text-xs ${workspaceView === 'memory' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`} onClick={() => setWorkspaceView('memory')}>连续性</button>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
+                      onClick={() => onStartConversation(selected.id)}
+                    >
+                      <MessageSquare size={16} />
+                      开始对话
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

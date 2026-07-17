@@ -10,6 +10,7 @@ import { KnowledgePage } from './components/KnowledgePage'
 import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
 import { TutorPage } from './components/TutorPage'
+import { OnboardingDialog, type OnboardingTask } from './components/OnboardingDialog'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
@@ -17,13 +18,16 @@ import { AgentStatus } from './agentStatus'
 import { useWebSocket } from './hooks/useWebSocket'
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  CURRENT_ONBOARDING_VERSION,
   activeLlmConfig,
+  completeOnboardingSettings,
   hasLocalLlmSettings,
   loadLlmSettings,
   loadStoredLlmSettings,
   saveLlmSettings,
   saveStoredLlmSettings,
   searchForSession,
+  shouldShowOnboarding,
   settingsRequireSessionReset,
   settingsForSession,
 } from './settings'
@@ -197,6 +201,9 @@ export default function App() {
   const [view, setView] = useState<AppView>('chat')
   const [capability, setCapability] = useState<Capability>('chat')
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
+  const [settingsHydrated, setSettingsHydrated] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [starterDraft, setStarterDraft] = useState<{ id: number; text: string } | null>(null)
   const [selectedLlmConfigId, setSelectedLlmConfigId] = useState<string | null>(() => loadLlmSettings().activeLlmConfigId)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [selectedTutorId, setSelectedTutorId] = useState<string | null>(null)
@@ -680,6 +687,7 @@ export default function App() {
         if (cancelled) return
         if (storedSettings) {
           setLlmSettings(storedSettings)
+          setSelectedLlmConfigId(storedSettings.activeLlmConfigId)
           saveLlmSettings(storedSettings)
         } else if (hasLocalLlmSettings()) {
           const localSettings = loadLlmSettings()
@@ -691,10 +699,20 @@ export default function App() {
         const message = err instanceof Error ? err.message : String(err)
         pushStatus({ kind: 'error', label: 'Settings load failed', detail: message })
       })
+      .finally(() => {
+        if (!cancelled) setSettingsHydrated(true)
+      })
     return () => {
       cancelled = true
     }
   }, [pushStatus])
+
+  useEffect(() => {
+    if (!settingsHydrated) return
+    if (shouldShowOnboarding(llmSettings)) {
+      setOnboardingOpen(true)
+    }
+  }, [llmSettings.onboardingCompleted, llmSettings.onboardingVersion, settingsHydrated])
 
   useEffect(() => {
     refreshSessions().catch((err) => {
@@ -1125,6 +1143,38 @@ export default function App() {
     setView(nextView)
   }, [startNewChat])
 
+  const completeOnboarding = useCallback(() => {
+    const nextSettings = completeOnboardingSettings(llmSettings, CURRENT_ONBOARDING_VERSION)
+    setLlmSettings(nextSettings)
+    persistSettings(nextSettings)
+    setOnboardingOpen(false)
+  }, [llmSettings, persistSettings])
+
+  const startOnboardingTask = useCallback((task: OnboardingTask) => {
+    const tutorId = selectedTutorId
+    completeOnboarding()
+    if (task === 'notebook') {
+      setView('notebook')
+      return
+    }
+
+    startNewChat()
+    handleTutorSelect(tutorId)
+    setCapability(task)
+    const prompts = llmSettings.language === 'en-US'
+      ? {
+          chat: 'Explain a concept I am learning, starting by asking what I already know.',
+          research: 'I want to research a topic in depth. First help me clarify the scope and desired output.',
+          quiz: 'Create a short quiz for me. First ask what topic or saved material I want to use.',
+        }
+      : {
+          chat: '请解释一个我正在学习的概念，先问问我已经了解多少。',
+          research: '我想深入调研一个主题，请先帮我确认研究范围和期望产出。',
+          quiz: '请为我生成一组简短测验，先询问我要使用的主题或已有材料。',
+        }
+    setStarterDraft({ id: Date.now(), text: prompts[task] })
+  }, [completeOnboarding, handleTutorSelect, llmSettings.language, selectedTutorId, startNewChat])
+
   const handleCapabilityChange = useCallback(async (nextCapability: Capability) => {
     if (running) return
     const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
@@ -1460,6 +1510,7 @@ export default function App() {
                   selectedNotebookEnabled={selectedNotebookEnabled}
                   tutors={tutors}
                   selectedTutorId={selectedTutorId}
+                  initialDraft={starterDraft}
                   onTutorSelect={handleTutorSelect}
                   onManageTutors={() => setView('tutor')}
                   onSend={handleSend}
@@ -1515,6 +1566,7 @@ export default function App() {
               startNewChat()
               handleTutorSelect(tutorId)
             }}
+            onReturnToOnboarding={llmSettings.onboardingCompleted ? undefined : () => setOnboardingOpen(true)}
           />
         )}
 
@@ -1527,7 +1579,20 @@ export default function App() {
         )}
 
         {view === 'space' && (
-          <SpacePage focusTarget={spaceFocusTarget} onSourceNavigate={handleSourceNavigate} />
+          <SpacePage
+            focusTarget={spaceFocusTarget}
+            onSourceNavigate={handleSourceNavigate}
+            onStartQuiz={() => {
+              startNewChat()
+              setCapability('quiz')
+              setStarterDraft({
+                id: Date.now(),
+                text: llmSettings.language === 'en-US'
+                  ? 'Create a short quiz for me. First ask what topic or saved material I want to use.'
+                  : '请为我生成一组简短测验，先询问我要使用的主题或已有材料。',
+              })
+            }}
+          />
         )}
 
         {view === 'memory' && (
@@ -1535,11 +1600,33 @@ export default function App() {
         )}
 
         {view === 'settings' && (
-          <SettingsPage settings={llmSettings} onChange={handleSettingsChange} />
+          <SettingsPage
+            settings={llmSettings}
+            onChange={handleSettingsChange}
+            onOpenOnboarding={() => setOnboardingOpen(true)}
+          />
         )}
       </div>
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />
+      {onboardingOpen && (
+        <OnboardingDialog
+          settings={llmSettings}
+          tutors={tutors}
+          selectedTutorId={selectedTutorId}
+          onTutorSelect={handleTutorSelect}
+          onOpenModelSettings={() => {
+            setOnboardingOpen(false)
+            setView('settings')
+          }}
+          onManageTutors={() => {
+            setOnboardingOpen(false)
+            setView('tutor')
+          }}
+          onDismiss={completeOnboarding}
+          onStartTask={startOnboardingTask}
+        />
+      )}
     </div>
     </I18nProvider>
   )

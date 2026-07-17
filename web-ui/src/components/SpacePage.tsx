@@ -120,13 +120,15 @@ type SpaceFocusTarget = Extract<SourceTarget, { type: 'notebook' | 'quiz' }>
 export function SpacePage({
   focusTarget,
   onSourceNavigate,
+  onStartQuiz,
   mode = 'space',
 }: {
   focusTarget?: SpaceFocusTarget | null
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+  onStartQuiz?: () => void
   mode?: 'space' | 'notebook'
 }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [activeTab, setActiveTab] = useState<SpaceTab>(() => mode === 'notebook' ? 'notebook' : 'quiz_bank')
   const [quizzes, setQuizzes] = useState<QuizSession[]>([])
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null)
@@ -611,6 +613,7 @@ export function SpacePage({
           onSaveEntry={(entry) => void saveNotebookEntry(entry)}
           onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
           onSourceNavigate={onSourceNavigate}
+          language={language}
         />
       </main>
     )
@@ -714,6 +717,7 @@ export function SpacePage({
             onSaveEntry={(entry) => void saveNotebookEntry(entry)}
             onCreateLinkedEntry={(title) => void createNotebookEntryFromLink(title)}
             onSourceNavigate={onSourceNavigate}
+            language={language}
           />
         )}
         {activeTab === 'quiz_bank' && (
@@ -730,6 +734,8 @@ export function SpacePage({
             onDeleteQuiz={(quiz) => void deleteQuiz(quiz)}
             onQuestionIndexChange={setQuestionIndex}
             onSourceNavigate={onSourceNavigate}
+            onStartQuiz={onStartQuiz}
+            language={language}
           />
         )}
         {activeTab === 'student_profile' && (
@@ -773,6 +779,7 @@ function NotebookTab({
   onSaveEntry,
   onCreateLinkedEntry,
   onSourceNavigate,
+  language,
 }: {
   entries: NotebookEntry[]
   folders: string[]
@@ -795,6 +802,7 @@ function NotebookTab({
   onSaveEntry: (entry: NotebookEntry) => void
   onCreateLinkedEntry: (title: string) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+  language: 'zh-CN' | 'en-US'
 }) {
   const isEditing = activeEntry ? editingEntryId === activeEntry.id : false
   const [relationsCollapsed, setRelationsCollapsed] = useState(true)
@@ -878,8 +886,12 @@ function NotebookTab({
         {!activeEntry ? (
           <EmptyDetail
             icon={BookMarked}
-            title="Create or select a note"
-            description="Notebook stores research reports, useful chat answers, source snippets, quiz summaries, and solve results as Markdown entries."
+            title={language === 'en-US' ? 'Create or select a note' : '创建或选择一份笔记'}
+            description={language === 'en-US'
+              ? 'Notebook stores research reports, useful chat answers, source snippets, and quiz summaries as Markdown entries.'
+              : 'Notebook 使用 Markdown 保存研究报告、重要回答、资料片段和测验总结。'}
+            actionLabel={language === 'en-US' ? 'New note' : '新建笔记'}
+            onAction={() => onCreateEntry()}
           />
         ) : (
           <>
@@ -1435,6 +1447,8 @@ function QuizBankTab({
   onDeleteQuiz,
   onQuestionIndexChange,
   onSourceNavigate,
+  onStartQuiz,
+  language,
 }: {
   quizzes: QuizSession[]
   filteredQuizzes: QuizSession[]
@@ -1448,6 +1462,8 @@ function QuizBankTab({
   onDeleteQuiz: (quiz: QuizSession) => void
   onQuestionIndexChange: (index: number) => void
   onSourceNavigate?: (target: SourceTarget, reference: SourceReference) => void
+  onStartQuiz?: () => void
+  language: 'zh-CN' | 'en-US'
 }) {
   const activeAnswer = activeQuiz && activeQuestion
     ? activeQuiz.answers.find((answer) => answer.question_id === activeQuestion.id) ?? null
@@ -1537,8 +1553,14 @@ function QuizBankTab({
         {!activeQuiz || !activeQuestion ? (
           <EmptyDetail
             icon={FileQuestion}
-            title="Select a quiz record"
-            description="Quiz Bank is for review and re-practice. Generate new quizzes from the chat composer."
+            title={language === 'en-US' ? 'Select a quiz record' : '选择一条测验记录'}
+            description={language === 'en-US'
+              ? 'Quiz Bank is for review and re-practice. Generate new quizzes from the chat composer.'
+              : '题库用于回顾和再次练习。新的测验从聊天输入框中生成。'}
+            actionLabel={quizzes.length === 0
+              ? language === 'en-US' ? 'Generate a quiz' : '生成测验'
+              : undefined}
+            onAction={quizzes.length === 0 ? onStartQuiz : undefined}
           />
         ) : (
           <>
@@ -1864,7 +1886,19 @@ function ScorePill({ quiz }: { quiz: QuizSession }) {
   )
 }
 
-function EmptyDetail({ icon: Icon, title, description }: { icon: typeof FileQuestion; title: string; description: string }) {
+function EmptyDetail({
+  icon: Icon,
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  icon: typeof FileQuestion
+  title: string
+  description: string
+  actionLabel?: string
+  onAction?: () => void
+}) {
   return (
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="max-w-md text-center">
@@ -1873,6 +1907,16 @@ function EmptyDetail({ icon: Icon, title, description }: { icon: typeof FileQues
         </div>
         <h3 className="mt-5 text-2xl font-semibold text-gray-950">{title}</h3>
         <p className="mt-2 text-sm leading-6 text-gray-500">{description}</p>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            className="mt-5 inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
+            onClick={onAction}
+          >
+            <Plus size={16} />
+            {actionLabel}
+          </button>
+        )}
       </div>
     </div>
   )

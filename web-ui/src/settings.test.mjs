@@ -13,9 +13,12 @@ const module = { exports: {} }
 Function('module', 'exports', compiled)(module, module.exports)
 const {
   defaultLlmSettings,
+  completeOnboardingSettings,
+  hasUsableLlmConfig,
   normalizeTheme,
   settingsForSession,
   settingsRequireSessionReset,
+  shouldShowOnboarding,
 } = module.exports
 
 test('keeps supported appearance themes', () => {
@@ -36,6 +39,47 @@ test('theme changes do not reset the active runtime session', () => {
     settingsRequireSessionReset(darkSettings, { ...darkSettings, model: 'another-model' }),
     true,
   )
+})
+
+test('onboarding progress does not reset the active runtime session', () => {
+  const completed = {
+    ...defaultLlmSettings,
+    onboardingCompleted: true,
+    dismissedContextHints: ['notebook.empty'],
+  }
+  assert.equal(settingsRequireSessionReset(defaultLlmSettings, completed), false)
+})
+
+test('shows onboarding once per required version and completes it without changing product data', () => {
+  assert.equal(shouldShowOnboarding(defaultLlmSettings), true)
+  const completed = completeOnboardingSettings(defaultLlmSettings)
+  assert.equal(completed.onboardingCompleted, true)
+  assert.equal(shouldShowOnboarding(completed), false)
+  assert.equal(shouldShowOnboarding(completed, completed.onboardingVersion + 1), true)
+  assert.deepEqual(completed.llmConfigs, defaultLlmSettings.llmConfigs)
+})
+
+test('requires a complete active model profile before onboarding marks model readiness', () => {
+  const profile = {
+    id: 'model-a',
+    name: 'Model A',
+    provider: 'openai',
+    model: 'model-a-name',
+    apiKey: 'key-a',
+    baseUrl: 'https://a.example',
+    chatPath: '/v1/chat/completions',
+    contextWindowTokens: 64000,
+  }
+  assert.equal(hasUsableLlmConfig({
+    ...defaultLlmSettings,
+    llmConfigs: [profile],
+    activeLlmConfigId: profile.id,
+  }), true)
+  assert.equal(hasUsableLlmConfig({
+    ...defaultLlmSettings,
+    llmConfigs: [{ ...profile, apiKey: '' }],
+    activeLlmConfigId: profile.id,
+  }), false)
 })
 
 test('builds runtime settings from an explicitly selected model config', () => {
