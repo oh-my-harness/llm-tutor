@@ -70,13 +70,33 @@ Update-TextFile -Path (Join-Path $root "Cargo.toml") -Updater {
 Update-JsonVersion -Path (Join-Path $root "src-tauri\tauri.conf.json")
 Update-JsonVersion -Path (Join-Path $root "web-ui\package.json")
 Update-PackageLockVersion -Path (Join-Path $root "web-ui\package-lock.json")
-Update-TextFile -Path (Join-Path $root "web-ui\src\components\Sidebar.tsx") -Updater {
+Update-TextFile -Path (Join-Path $root "README.md") -Updater {
     param($text)
-    Replace-First $text '(>v)\d+\.\d+\.\d+(</div>)' "`${1}$Version`${2}"
+    $next = Replace-First $text '(?m)^(> [^\r\n]*`)\d+\.\d+\.\d+(`)' "`${1}$Version`${2}"
+    Replace-First $next '(?m)^(> [^\r\n]*`v)\d+\.\d+\.\d+(`)' "`${1}$Version`${2}"
+}
+Update-TextFile -Path (Join-Path $root "MANUAL.md") -Updater {
+    param($text)
+    Replace-First $text '(?m)^(> [^\r\n]*?)\d+\.\d+\.\d+( [^\r\n]*)$' "`${1}$Version`${2}"
+}
+Update-TextFile -Path (Join-Path $root "docs\qa\desktop-release.md") -Updater {
+    param($text)
+    Replace-First $text '(?m)^(This checklist applies to the current desktop release, including `v)\d+\.\d+\.\d+(`\.)' "`${1}$Version`${2}"
+}
+
+Push-Location $root
+try {
+    & cargo metadata --no-deps --format-version 1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo metadata failed while refreshing Cargo.lock."
+    }
+}
+finally {
+    Pop-Location
 }
 
 Write-Host ""
 Write-Host "Version updated to $Version." -ForegroundColor Green
 Write-Host "Recommended next checks:"
-Write-Host "  cargo metadata --no-deps --format-version 1 > `$null"
+Write-Host "  node scripts/check-version.mjs"
 Write-Host "  npm run build --prefix web-ui"

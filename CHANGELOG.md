@@ -9,6 +9,13 @@ release titles, or artifact names such as `v0.1.0-alpha.1`.
 
 ## Unreleased
 
+### Fixed
+
+- Derived the sidebar version label from the frontend package version instead
+  of a separate hard-coded value.
+- Added release-time version consistency checks for Cargo, Tauri, npm,
+  documentation, and Git tags.
+
 ## 0.3.3 - 2026-07-16
 
 ### Changed

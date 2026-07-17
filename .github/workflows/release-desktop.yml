@@ -54,6 +54,16 @@ jobs:
           echo "::add-mask::${PRIVATE_DEPS_TOKEN}"
           git config --global url."https://x-access-token:${PRIVATE_DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
 
+      - name: Verify release version consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            node scripts/check-version.mjs "${GITHUB_REF_NAME}"
+          else
+            node scripts/check-version.mjs
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

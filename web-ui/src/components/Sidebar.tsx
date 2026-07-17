@@ -319,7 +319,7 @@ export function Sidebar({
           <Settings size={19} />
           {!collapsed && <span>{t('nav.settings')}</span>}
         </button>
-        {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v0.3.2</div>}
+        {!collapsed && <div className="mt-3 px-3 text-xs text-gray-500">v{__APP_VERSION__}</div>}
       </div>
     </aside>
   )
