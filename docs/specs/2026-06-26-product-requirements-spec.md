@@ -1,6 +1,6 @@
 # llm-tutor Product Requirements Spec
 
-> Status: active | Date: 2026-06-26 | Last updated: 2026-07-16 | Scope: consolidate current and planned product requirements into one itemized spec.
+> Status: active | Date: 2026-06-26 | Last updated: 2026-07-17 | Scope: consolidate current and planned product requirements into one itemized spec.
 
 ## 1. Product Goal
 
@@ -841,6 +841,53 @@ other generated learning records.
 - REQ-455: The chat scroll behavior shall match common chat apps.
 - REQ-456: The UI shall remain usable on common desktop sizes.
 - REQ-457: Mobile responsiveness shall be improved. Status: planned.
+
+## 24A. Product Onboarding and Guidance
+
+- REQ-458: The product shall provide a first-run onboarding flow whose goal is
+  to help the user complete the first useful learning task, rather than present
+  a tour of every page and control. Status: planned.
+- REQ-459: First-run onboarding shall contain no more than three primary steps:
+  verify or configure an available LLM, optionally choose or create a Tutor,
+  and start a first Chat, Research, Notebook, or Quiz task. Status: planned.
+- REQ-460: The model step shall detect whether a usable model configuration
+  already exists. When no usable configuration exists, it shall link directly
+  to the relevant settings and offer the existing connection test. It shall
+  not ask an already-configured user to enter credentials again. Status:
+  planned.
+- REQ-461: Tutor selection during onboarding shall remain optional. Skipping
+  it shall use Temporary Assistant and shall not block the user from entering
+  the normal conversation workspace. Status: planned.
+- REQ-462: The final onboarding step shall offer a small set of real starter
+  actions, such as explaining a concept, researching a topic, organizing a
+  note, or generating a quiz. Selecting an action shall enter the actual
+  workflow rather than a tutorial simulation. Status: planned.
+- REQ-463: Empty product surfaces shall provide contextual guidance focused on
+  the next meaningful action for that surface. Notebook, Quiz Bank, Memory,
+  Tutor, and Research guidance shall disappear automatically once the relevant
+  user data or state exists. Status: planned.
+- REQ-464: Contextual guidance shall not permanently occupy primary workspace
+  area, repeatedly interrupt experienced users, or depend on long sequential
+  spotlight tours. Complex features may show a concise one-time hint when
+  first used. Status: planned.
+- REQ-465: Settings or Help shall provide an explicit action to reopen the
+  onboarding flow, while the in-app manual remains available for complete
+  reference. Reopening onboarding shall not reset user data or configuration.
+  Status: planned.
+- REQ-466: Onboarding state shall be local-first and versioned. At minimum it
+  shall track an `onboarding_version`, completion state, and dismissed
+  contextual hints so future releases can introduce only the relevant new
+  guidance instead of replaying the full first-run flow. Status: planned.
+- REQ-467: Dismissing or skipping onboarding shall be supported at every
+  nonessential step. A dismissed flow shall leave the normal product fully
+  usable, except where an unavailable model genuinely prevents an LLM action.
+  Status: planned.
+- REQ-468: Onboarding and contextual guidance shall follow the active UI
+  language and desktop theme, remain keyboard accessible, and avoid browser-
+  style permission or navigation interactions. Status: planned.
+- REQ-469: Onboarding analytics shall not require hosted telemetry for MVP.
+  Completion and hint state shall stay in local settings unless the user later
+  opts into a separately specified diagnostics mechanism. Status: planned.
 
 ## 25. Storage and Data
 
