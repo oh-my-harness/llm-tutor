@@ -847,9 +847,11 @@ other generated learning records.
 - REQ-458: The product shall provide a first-run onboarding flow whose goal is
   to help the user complete the first useful learning task, rather than present
   a tour of every page and control. Status: implemented.
-- REQ-459: First-run onboarding shall contain no more than three primary steps:
-  verify or configure an available LLM, optionally choose or create a Tutor,
-  and start a first Chat, Research, Notebook, or Quiz task. Status: implemented.
+- REQ-459: First-run onboarding shall provide six concise steps: verify or
+  configure an available LLM, optionally choose or create a Tutor, configure
+  and use a Knowledge Base, configure Notebook storage, understand and maintain
+  Memory, and start a first Chat, Research, Notebook, or Quiz task. Status:
+  implemented.
 - REQ-460: The model step shall detect whether a usable model configuration
   already exists. When no usable configuration exists, it shall link directly
   to the relevant settings and offer the existing connection test. It shall
@@ -858,6 +860,19 @@ other generated learning records.
 - REQ-461: Tutor selection during onboarding shall remain optional. Skipping
   it shall use Temporary Assistant and shall not block the user from entering
   the normal conversation workspace. Status: implemented.
+- REQ-461A: Knowledge Base onboarding shall explain that RAG requires an
+  embedding configuration, show current embedding and Knowledge Base readiness,
+  link to the real configuration and Knowledge Base surfaces, and explain how
+  a Knowledge Base is selected from Chat for retrieval and citations. Users who
+  do not need RAG may skip the step. Status: implemented.
+- REQ-461B: Notebook onboarding shall distinguish the always-available app-local
+  Notebook from an optional external Markdown Vault, show the current storage
+  mode, and link to both Notebook settings and the Notebook workspace. Status:
+  implemented.
+- REQ-461C: Memory onboarding shall explain the L1/L2/L3 model and the supported
+  update, check, deduplicate, review, and apply workflow. It shall link to the
+  real Memory workspace without modifying memory merely by viewing the guide.
+  Status: implemented.
 - REQ-462: The final onboarding step shall offer a small set of real starter
   actions, such as explaining a concept, researching a topic, organizing a
   note, or generating a quiz. Selecting an action shall enter the actual

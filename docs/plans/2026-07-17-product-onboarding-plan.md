@@ -10,8 +10,9 @@ without turning the product into a feature tour.
 The onboarding experience should connect existing product capabilities:
 
 ```text
-Model readiness -> Optional Tutor -> First real task
-                                  -> Chat / Research / Notebook / Quiz
+Model readiness -> Optional Tutor -> Knowledge Base -> Notebook -> Memory
+                                                        -> First real task
+                                                        -> Chat / Research / Notebook / Quiz
 ```
 
 The normal product remains the destination. Onboarding does not create a
@@ -19,7 +20,8 @@ separate tutorial workspace or simulated data model.
 
 ## 2. Product Decisions
 
-- First-run onboarding has at most three primary steps.
+- First-run onboarding has six concise steps: model readiness, optional Tutor,
+  Knowledge Base, Notebook, Memory, and the first real task.
 - The flow is nonblocking except when an LLM action genuinely requires a model.
 - An existing valid model configuration is detected and reused.
 - Tutor selection is optional; skipping it uses Temporary Assistant.
@@ -56,7 +58,36 @@ The app checks existing LLM settings before showing configuration UI.
   not add a duplicate Tutor item.
 - Keep Tutor identity separate from Chat, Research, and Quiz capability modes.
 
-### Step 3: First Useful Task
+### Step 3: Knowledge Base
+
+- Explain that RAG requires a configured embedding model, while users who do
+  not need RAG may skip this step.
+- Show whether an embedding configuration and one or more Knowledge Bases
+  already exist.
+- Link directly to Embedding settings and the real Knowledge Base workspace.
+- Explain the complete usage loop: configure embedding, create a Knowledge
+  Base, add documents, then select that Knowledge Base from the Chat source
+  selector so the Agent can retrieve and cite it.
+
+### Step 4: Notebook
+
+- Explain that the built-in local Notebook works without external setup.
+- Explain that desktop users may bind an existing Markdown Vault from Notebook
+  settings, and that generated content can then use the native save dialog.
+- Show whether the current Notebook uses the app-local directory or an external
+  Vault, and link to both Notebook settings and the real Notebook workspace.
+
+### Step 5: Memory
+
+- Explain L1 workspace evidence, L2 per-module summaries, and L3 cross-module
+  learner context without presenting Memory as an external fact store.
+- Explain that users open an L2 or L3 document, choose update, check, or
+  deduplicate, select a model, run the workflow, review the proposed diff, and
+  apply accepted changes.
+- Link directly to the real Memory workspace; this step does not create or
+  modify memory by itself.
+
+### Step 6: First Useful Task
 
 Offer a small set of starter actions:
 
@@ -66,8 +97,8 @@ Offer a small set of starter actions:
 - generate a Quiz from a topic or selected material.
 
 The selected action opens the real destination with an editable starting prompt
-or action. Completion is recorded when the user enters the product, not after a
-ceremonial completion page.
+or action and completes onboarding. A user who does not want to launch a task
+may instead choose the explicit `Complete` action on this final step.
 
 ## 4. Contextual Guidance
 
@@ -122,7 +153,9 @@ Rules:
 
 ### Phase 2: First-Run Experience
 
-- [x] Build the three-step desktop onboarding surface.
+- [x] Build the six-step desktop onboarding surface.
+- [x] Expand the flow to cover Knowledge Base setup and use, Notebook setup,
+  and Memory viewing and maintenance before the first task.
 - [x] Reuse the existing model configuration and connection-test boundaries.
 - [x] Reuse the bounded Tutor chooser and Temporary Assistant behavior.
 - [x] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
@@ -148,14 +181,16 @@ Rules:
 - [ ] Test both Temporary Assistant and Tutor-selected entry paths.
 - [x] Verify Chat, Research, Notebook, and Quiz starter actions route into their
   real product surfaces with editable prompts where applicable.
+- [x] Verify Knowledge Base, Notebook configuration, and Memory guidance render
+  at desktop size and route to their intended real settings or workspaces.
 - [ ] Complete keyboard-only, English-copy, and installed-desktop QA. Light and
   dark themes plus the `1100 x 700` minimum desktop viewport have been visually
   verified in the local UI.
 
 ## 7. Acceptance Criteria
 
-- A fresh user can configure or reuse a model and reach a useful task in no
-  more than three primary steps.
+- A fresh user can configure or reuse a model, understand the three persistent
+  knowledge surfaces, and reach a useful task through six concise steps.
 - A configured returning user is not forced through credential setup.
 - Tutor choice remains optional and skipping it has clear Temporary Assistant
   semantics.

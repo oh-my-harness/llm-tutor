@@ -40,6 +40,8 @@ import { chooseDesktopDirectory, getDesktopDataDir, openDesktopDataDir } from '.
 
 interface Props {
   settings: LlmSettings
+  activeTab: SettingsTab
+  onTabChange: (tab: SettingsTab) => void
   onChange: (settings: LlmSettings) => void
   onOpenOnboarding: () => void
 }
@@ -57,7 +59,7 @@ const providerOptions: { value: LlmProvider; label: string; description: string 
   },
 ]
 
-type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'notebook' | 'governance' | 'help'
+export type SettingsTab = 'appearance' | 'llm' | 'embedding' | 'search' | 'notebook' | 'governance' | 'help'
 type ConfigTestState = {
   status: 'running' | 'ok' | 'error'
   message: string
@@ -115,9 +117,8 @@ const settingsTabs: Array<{
   { key: 'help', labelKey: 'settings.tabs.help', icon: CircleHelp },
 ]
 
-export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
+export function SettingsPage({ settings, activeTab, onTabChange, onChange, onOpenOnboarding }: Props) {
   const { t, language } = useI18n()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
   const [dataDir, setDataDir] = useState<string | null>(null)
   const [dataDirError, setDataDirError] = useState('')
@@ -536,7 +537,7 @@ export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
                 className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm ${
                   active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                 }`}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => onTabChange(tab.key)}
               >
                 <Icon size={18} />
                 <span>{t(tab.labelKey)}</span>
@@ -557,7 +558,7 @@ export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
                 id="settings-tab"
                 className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
                 value={activeTab}
-                onChange={(event) => setActiveTab(event.target.value as SettingsTab)}
+                onChange={(event) => onTabChange(event.target.value as SettingsTab)}
               >
                 {settingsTabs.map((tab) => (
                   <option key={tab.key} value={tab.key}>
@@ -1252,8 +1253,8 @@ export function SettingsPage({ settings, onChange, onOpenOnboarding }: Props) {
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {language === 'en-US'
-                      ? 'Review model setup, Tutor choice, and starter tasks without changing existing data.'
-                      : '重新查看模型配置、导师选择和起步任务，不会更改已有数据。'}
+                      ? 'Review model, Tutor, Knowledge Base, Notebook, Memory, and starter-task guidance without changing existing data.'
+                      : '重新查看模型、导师、知识库、笔记本、记忆和起步任务，不会更改已有数据。'}
                   </div>
                 </div>
                 <button

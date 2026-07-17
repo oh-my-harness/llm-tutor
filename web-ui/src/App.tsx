@@ -5,7 +5,7 @@ import type { ChatAttachment, ContextStats, NotebookEditProposal, SaveToNotebook
 import { TracePanel, TraceEntry } from './components/TracePanel'
 import { BudgetPanel } from './components/BudgetPanel'
 import { ApprovalDialog } from './components/ApprovalDialog'
-import { SettingsPage } from './components/SettingsPage'
+import { SettingsPage, type SettingsTab } from './components/SettingsPage'
 import { KnowledgePage } from './components/KnowledgePage'
 import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
@@ -205,6 +205,7 @@ export default function App() {
   const [settingsHydrated, setSettingsHydrated] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [onboardingStep, setOnboardingStep] = useState(0)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('llm')
   const [starterDraft, setStarterDraft] = useState<{ id: number; text: string } | null>(null)
   const [selectedLlmConfigId, setSelectedLlmConfigId] = useState<string | null>(() => loadLlmSettings().activeLlmConfigId)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -1142,6 +1143,7 @@ export default function App() {
       startNewChat()
       return
     }
+    if (nextView === 'settings') setSettingsTab('llm')
     setView(nextView)
   }, [startNewChat])
 
@@ -1613,6 +1615,8 @@ export default function App() {
         {view === 'settings' && (
           <SettingsPage
             settings={llmSettings}
+            activeTab={settingsTab}
+            onTabChange={setSettingsTab}
             onChange={handleSettingsChange}
             onOpenOnboarding={openOnboarding}
           />
@@ -1627,13 +1631,38 @@ export default function App() {
         <OnboardingDialog
           settings={llmSettings}
           tutors={tutors}
+          knowledgeBaseCount={knowledgeBases.length}
+          notebookVault={notebookVault}
           selectedTutorId={selectedTutorId}
           step={onboardingStep}
           onStepChange={setOnboardingStep}
           onTutorSelect={handleTutorSelect}
           onOpenModelSettings={() => {
             setOnboardingOpen(false)
+            setSettingsTab('llm')
             setView('settings')
+          }}
+          onOpenEmbeddingSettings={() => {
+            setOnboardingOpen(false)
+            setSettingsTab('embedding')
+            setView('settings')
+          }}
+          onOpenKnowledge={() => {
+            setOnboardingOpen(false)
+            setView('knowledge')
+          }}
+          onOpenNotebookSettings={() => {
+            setOnboardingOpen(false)
+            setSettingsTab('notebook')
+            setView('settings')
+          }}
+          onOpenNotebook={() => {
+            setOnboardingOpen(false)
+            setView('notebook')
+          }}
+          onOpenMemory={() => {
+            setOnboardingOpen(false)
+            setView('memory')
           }}
           onManageTutors={() => {
             setOnboardingOpen(false)
