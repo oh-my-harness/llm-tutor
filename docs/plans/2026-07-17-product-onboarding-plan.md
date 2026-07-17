@@ -28,6 +28,10 @@ separate tutorial workspace or simulated data model.
   walkthroughs.
 - Complex controls may show one concise, dismissible hint on first use.
 - Settings or Help can reopen onboarding without changing existing data.
+- Closing an incomplete flow pauses it instead of marking it complete. A compact
+  floating action resumes the current step without taking workspace layout.
+- Completion requires either launching a real starter task or explicitly
+  choosing `Got it` on the final step.
 - State is local, versioned, and independent from runtime conversation history.
 - MVP does not add hosted onboarding analytics.
 
@@ -99,6 +103,8 @@ Rules:
   but must not replay unrelated completed steps.
 - Reopening onboarding does not clear completion state, credentials, sessions,
   Tutors, Notebook data, or Memory.
+- Pausing an incomplete flow preserves its current step for the active app run
+  and keeps a compact resume action visible until completion.
 - Hint identifiers are stable product keys rather than translated labels.
 - Generated content and stored user data are not onboarding state.
 
@@ -111,6 +117,8 @@ Rules:
   checks.
 - [x] Decide first-run entry without delaying normal app startup.
 - [x] Add Settings or Help action to reopen onboarding.
+- [x] Keep a non-layout floating resume action visible while onboarding remains
+  incomplete.
 
 ### Phase 2: First-Run Experience
 
@@ -120,6 +128,8 @@ Rules:
 - [x] Route starter actions into real Chat, Research, Notebook, and Quiz flows.
 - [x] Support back, skip, dismiss, keyboard navigation, active language, and
   light/dark themes.
+- [x] Distinguish pause from completion and provide an explicit final `Got it`
+  action.
 
 ### Phase 3: Contextual Empty States
 
@@ -150,6 +160,8 @@ Rules:
 - Tutor choice remains optional and skipping it has clear Temporary Assistant
   semantics.
 - Dismissing onboarding never traps the user outside the normal application.
+- Dismissing an incomplete flow does not silently mark it complete; the user can
+  resume it from the compact floating action.
 - Empty-state guidance disappears when its surface has content.
 - Reopening onboarding leaves all existing product data unchanged.
 - Future releases can add targeted guidance through the versioned state without

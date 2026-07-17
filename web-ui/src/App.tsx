@@ -11,6 +11,7 @@ import { SpacePage } from './components/SpacePage'
 import { MemoryPage } from './components/MemoryPage'
 import { TutorPage } from './components/TutorPage'
 import { OnboardingDialog, type OnboardingTask } from './components/OnboardingDialog'
+import { OnboardingResumeButton } from './components/OnboardingResumeButton'
 import { AppView, Sidebar } from './components/Sidebar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
@@ -203,6 +204,7 @@ export default function App() {
   const [llmSettings, setLlmSettings] = useState(loadLlmSettings)
   const [settingsHydrated, setSettingsHydrated] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [onboardingStep, setOnboardingStep] = useState(0)
   const [starterDraft, setStarterDraft] = useState<{ id: number; text: string } | null>(null)
   const [selectedLlmConfigId, setSelectedLlmConfigId] = useState<string | null>(() => loadLlmSettings().activeLlmConfigId)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -1147,8 +1149,18 @@ export default function App() {
     const nextSettings = completeOnboardingSettings(llmSettings, CURRENT_ONBOARDING_VERSION)
     setLlmSettings(nextSettings)
     persistSettings(nextSettings)
+    setOnboardingStep(0)
     setOnboardingOpen(false)
   }, [llmSettings, persistSettings])
+
+  const openOnboarding = useCallback(() => {
+    if (!shouldShowOnboarding(llmSettings)) setOnboardingStep(0)
+    setOnboardingOpen(true)
+  }, [llmSettings])
+
+  const pauseOnboarding = useCallback(() => {
+    setOnboardingOpen(false)
+  }, [])
 
   const startOnboardingTask = useCallback((task: OnboardingTask) => {
     const tutorId = selectedTutorId
@@ -1602,17 +1614,22 @@ export default function App() {
           <SettingsPage
             settings={llmSettings}
             onChange={handleSettingsChange}
-            onOpenOnboarding={() => setOnboardingOpen(true)}
+            onOpenOnboarding={openOnboarding}
           />
         )}
       </div>
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />
+      {settingsHydrated && shouldShowOnboarding(llmSettings) && !onboardingOpen && (
+        <OnboardingResumeButton onClick={openOnboarding} />
+      )}
       {onboardingOpen && (
         <OnboardingDialog
           settings={llmSettings}
           tutors={tutors}
           selectedTutorId={selectedTutorId}
+          step={onboardingStep}
+          onStepChange={setOnboardingStep}
           onTutorSelect={handleTutorSelect}
           onOpenModelSettings={() => {
             setOnboardingOpen(false)
@@ -1622,7 +1639,8 @@ export default function App() {
             setOnboardingOpen(false)
             setView('tutor')
           }}
-          onDismiss={completeOnboarding}
+          onDismiss={pauseOnboarding}
+          onComplete={completeOnboarding}
           onStartTask={startOnboardingTask}
         />
       )}

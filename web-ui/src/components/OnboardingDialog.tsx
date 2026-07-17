@@ -24,10 +24,13 @@ interface Props {
   settings: LlmSettings
   tutors: TutorProfile[]
   selectedTutorId: string | null
+  step: number
+  onStepChange: (step: number) => void
   onTutorSelect: (tutorId: string | null) => void
   onOpenModelSettings: () => void
   onManageTutors: () => void
   onDismiss: () => void
+  onComplete: () => void
   onStartTask: (task: OnboardingTask) => void
 }
 
@@ -37,15 +40,17 @@ export function OnboardingDialog({
   settings,
   tutors,
   selectedTutorId,
+  step,
+  onStepChange,
   onTutorSelect,
   onOpenModelSettings,
   onManageTutors,
   onDismiss,
+  onComplete,
   onStartTask,
 }: Props) {
   const { language } = useI18n()
   const copy = language === 'en-US' ? englishCopy : chineseCopy
-  const [step, setStep] = useState(0)
   const [testState, setTestState] = useState<TestState>({ status: 'idle', message: '' })
   const dialogRef = useRef<HTMLElement>(null)
   const activeModel = activeLlmConfig(settings)
@@ -228,15 +233,21 @@ export function OnboardingDialog({
             <button type="button" className="rounded-md px-2 py-2 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-900" onClick={onDismiss}>{copy.later}</button>
             <div className="ml-auto flex gap-2">
               {step > 0 && (
-                <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-100" onClick={() => setStep((current) => current - 1)}>
+                <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-100" onClick={() => onStepChange(step - 1)}>
                   <ArrowLeft size={15} />
                   {copy.back}
                 </button>
               )}
               {step < 2 && (
-                <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700" onClick={() => setStep((current) => current + 1)}>
+                <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700" onClick={() => onStepChange(step + 1)}>
                   {copy.continue}
                   <ArrowRight size={15} />
+                </button>
+              )}
+              {step === 2 && (
+                <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700" onClick={onComplete}>
+                  <Check size={15} />
+                  {copy.done}
                 </button>
               )}
             </div>
@@ -283,6 +294,7 @@ const chineseCopy = {
   later: '稍后再说',
   back: '上一步',
   continue: '继续',
+  done: '已了解',
   model: {
     title: '确认对话模型',
     description: 'Agent 需要一个可用的模型服务。已有配置会直接复用，不会要求你重新填写凭据。',
@@ -323,6 +335,7 @@ const englishCopy: typeof chineseCopy = {
   later: 'Maybe later',
   back: 'Back',
   continue: 'Continue',
+  done: 'Got it',
   model: {
     title: 'Confirm a chat model',
     description: 'Agent tasks need a working model service. Existing settings are reused without asking for credentials again.',

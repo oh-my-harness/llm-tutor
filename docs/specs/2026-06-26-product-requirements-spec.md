@@ -883,7 +883,11 @@ other generated learning records.
 - REQ-467: Dismissing or skipping onboarding shall be supported at every
   nonessential step. A dismissed flow shall leave the normal product fully
   usable, except where an unavailable model genuinely prevents an LLM action.
-  Status: implemented.
+  Dismissal shall pause rather than complete an unfinished flow. While the flow
+  remains incomplete, a compact floating action shall reopen it without taking
+  permanent workspace layout. Launching a real starter task or choosing the
+  explicit final `Got it` action shall mark the flow complete and remove the
+  floating action. Status: implemented.
 - REQ-468: Onboarding and contextual guidance shall follow the active UI
   language and desktop theme, remain keyboard accessible, and avoid browser-
   style permission or navigation interactions. Status: partially implemented;
