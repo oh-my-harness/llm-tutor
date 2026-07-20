@@ -25,6 +25,9 @@ mod tutor_store;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::from_args(std::env::args().skip(1))?;
+    if config.exit_on_stdin_close {
+        spawn_stdin_close_watchdog();
+    }
     std::fs::create_dir_all(&config.data_dir)?;
     let pool = session::SessionPool::new_with_root(config.data_dir.join("sessions"));
     let knowledge = knowledge_store::KnowledgeStore::new_with_path(
@@ -122,6 +125,7 @@ struct ServerConfig {
     host: IpAddr,
     port: u16,
     data_dir: PathBuf,
+    exit_on_stdin_close: bool,
 }
 
 impl Default for ServerConfig {
@@ -130,6 +134,7 @@ impl Default for ServerConfig {
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port: 8080,
             data_dir: default_data_dir(),
+            exit_on_stdin_close: false,
         }
     }
 }
@@ -159,9 +164,12 @@ impl ServerConfig {
                         .ok_or_else(|| anyhow::anyhow!("--data-dir requires a value"))?;
                     config.data_dir = PathBuf::from(value);
                 }
+                "--exit-on-stdin-close" => {
+                    config.exit_on_stdin_close = true;
+                }
                 "--help" | "-h" => {
                     println!(
-                        "Usage: tutor-web [--host 127.0.0.1] [--port 8080] [--data-dir .llm-tutor]"
+                        "Usage: tutor-web [--host 127.0.0.1] [--port 8080] [--data-dir .llm-tutor] [--exit-on-stdin-close]"
                     );
                     std::process::exit(0);
                 }
@@ -170,6 +178,25 @@ impl ServerConfig {
         }
 
         Ok(config)
+    }
+}
+
+fn spawn_stdin_close_watchdog() {
+    std::thread::spawn(|| {
+        wait_for_reader_close(std::io::stdin());
+        std::process::exit(0);
+    });
+}
+
+fn wait_for_reader_close(mut reader: impl std::io::Read) {
+    let mut buffer = [0_u8; 1];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return,
+        }
     }
 }
 
@@ -188,7 +215,7 @@ fn default_data_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServerConfig, default_data_dir};
+    use super::{ServerConfig, default_data_dir, wait_for_reader_close};
     use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
@@ -207,6 +234,7 @@ mod tests {
                 host: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 port: 43127,
                 data_dir: default_data_dir(),
+                exit_on_stdin_close: false,
             }
         );
     }
@@ -223,5 +251,17 @@ mod tests {
             config.data_dir,
             std::path::PathBuf::from("D:/tmp/llm-tutor-data")
         );
+    }
+
+    #[test]
+    fn parses_exit_on_stdin_close() {
+        let config = ServerConfig::from_args(["--exit-on-stdin-close".to_string()]).unwrap();
+
+        assert!(config.exit_on_stdin_close);
+    }
+
+    #[test]
+    fn reader_close_waits_until_eof() {
+        wait_for_reader_close(std::io::Cursor::new(b"parent pipe data"));
     }
 }

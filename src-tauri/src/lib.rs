@@ -21,6 +21,16 @@ struct BackendState {
     child: Mutex<Option<BackendProcess>>,
 }
 
+impl BackendState {
+    fn shutdown(&self) {
+        if let Ok(mut child) = self.child.lock()
+            && let Some(child) = child.take()
+        {
+            child.kill();
+        }
+    }
+}
+
 enum BackendProcess {
     #[cfg(debug_assertions)]
     Std(Child),
@@ -30,11 +40,7 @@ enum BackendProcess {
 
 impl Drop for BackendState {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.child.lock()
-            && let Some(child) = child.take()
-        {
-            child.kill();
-        }
+        self.shutdown();
     }
 }
 
@@ -101,7 +107,7 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
@@ -126,8 +132,16 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run llm-tutor desktop app");
+        .build(tauri::generate_context!())
+        .expect("failed to build llm-tutor desktop app");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit)
+            && let Some(state) = app_handle.try_state::<BackendState>()
+        {
+            state.shutdown();
+        }
+    });
 }
 
 fn find_free_port() -> std::io::Result<u16> {
@@ -152,7 +166,9 @@ fn spawn_backend(
             &port,
             "--data-dir",
             &data_dir,
+            "--exit-on-stdin-close",
         ])
+        .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
@@ -178,6 +194,7 @@ fn spawn_backend(
             &port,
             "--data-dir",
             &data_dir,
+            "--exit-on-stdin-close",
         ])
         .spawn()
         .map_err(io_error)?;

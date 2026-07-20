@@ -39,7 +39,10 @@ Use this checklist after running:
 - [ ] Confirm Temporary Assistant starts without private Tutor Memory when no Tutor is selected.
 - [ ] Close and restart the app.
 - [ ] Confirm sessions, knowledge bases, notebooks, quizzes, and memory still exist after restart.
-- [ ] Confirm closing the app stops the `tutor-web` sidecar process.
+- [ ] Record the child `tutor-web` PID, close the app normally, and confirm that
+      PID exits and its local port is released within five seconds.
+- [ ] Start the app again, force-stop only the desktop parent process, and
+      confirm the child `tutor-web` PID exits within five seconds.
 - [ ] Inspect visible logs and trace output for accidental API key exposure.
 
 ## Result

@@ -301,7 +301,11 @@ Tasks:
 - [x] Add `tutor-web` host/port runtime config.
 - [x] Add sidecar declaration to release Tauri config.
 - [x] Spawn `tutor-web` on app startup.
-- [x] Kill `tutor-web` on app exit.
+- [x] Kill `tutor-web` explicitly from Tauri's exit event instead of relying on
+      Rust destructors, which are skipped by Tauri's process exit path.
+- [x] Exit `tutor-web` when its desktop-parent stdin pipe closes so crashes,
+      forced termination, and development hot restarts do not leave orphaned
+      sidecars.
 - [x] Implement dynamic local port selection.
 - [x] Implement Tauri command: `get_backend_url`.
 - [x] Add frontend API URL resolver.
@@ -312,7 +316,8 @@ Acceptance:
 - Desktop app starts backend automatically.
 - Chat session list can load from sidecar.
 - WebSocket chat can connect from the desktop app.
-- Closing the desktop app stops the sidecar.
+- Closing the desktop app stops the sidecar, and an abnormally terminated
+  desktop parent does not leave `tutor-web` listening in the background.
 
 ### Phase 3: Local Data Directory
 
