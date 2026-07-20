@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  AlertCircle,
   CheckCircle2,
   Database,
   FileText,
@@ -13,6 +14,7 @@ import {
   Settings,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import { apiUrl } from '../api'
 import { activeEmbeddingConfig, embeddingForSession } from '../settings'
@@ -103,7 +105,8 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
   const [hits, setHits] = useState<SearchHit[]>([])
   const [status, setStatus] = useState('所有更改已保存')
   const [busy, setBusy] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [createError, setCreateError] = useState('')
   const [knowledgeListCollapsed, setKnowledgeListCollapsed] = useState(false)
   const [fileListCollapsed, setFileListCollapsed] = useState(false)
   const [newKbName, setNewKbName] = useState('')
@@ -124,6 +127,20 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
   const activeEmbedding = activeEmbeddingConfig(settings)
   const selectedNewEmbedding =
     settings.embeddingConfigs.find((config) => config.id === newKbEmbeddingId) ?? activeEmbedding
+
+  const openCreateDialog = () => {
+    setNewKbName('')
+    setNewKbEmbeddingId(settings.activeEmbeddingConfigId ?? settings.embeddingConfigs[0]?.id ?? '')
+    setCreateError('')
+    setCreateDialogOpen(true)
+  }
+
+  const closeCreateDialog = useCallback(() => {
+    if (busy) return
+    setCreateDialogOpen(false)
+    setNewKbName('')
+    setCreateError('')
+  }, [busy])
 
   const filteredKnowledgeBases = useMemo(
     () =>
@@ -180,6 +197,7 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
   const createKnowledgeBase = async () => {
     if (!selectedNewEmbedding || busy) return
     setBusy(true)
+    setCreateError('')
     setStatus('正在创建知识库...')
     try {
       const name = newKbName.trim() || `knowledge-${knowledgeBases.length + 1}`
@@ -195,12 +213,15 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
       setActiveKbId(created.id)
       setSelectedDocId(null)
       setNewKbName('')
-      setCreating(false)
+      setCreateError('')
+      setCreateDialogOpen(false)
       setTab('upload')
       setStatus('知识库已创建')
       onChanged?.()
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setCreateError(message)
+      setStatus(message)
     } finally {
       setBusy(false)
     }
@@ -430,7 +451,7 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
 
     setActiveKbId(kb.id)
     setTab('files')
-    setCreating(false)
+    setCreateDialogOpen(false)
     setFileListCollapsed(false)
 
     const doc = kb.documents.find((item) => item.id === focusTarget.documentId)
@@ -462,14 +483,11 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
         onSearch={setKbSearch}
         onCollapse={() => setKnowledgeListCollapsed(true)}
         onExpand={() => setKnowledgeListCollapsed(false)}
-        onCreate={() => {
-          setCreating(true)
-          setTab('settings')
-        }}
+        onCreate={openCreateDialog}
         onSelect={(item) => {
           setActiveKbId(item.id)
           setSelectedDocId(item.documents[0]?.id ?? null)
-          setCreating(false)
+          setCreateDialogOpen(false)
         }}
         onDelete={deleteKnowledgeBase}
       />
@@ -480,53 +498,42 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="truncate text-xl font-semibold text-gray-950">
-                  {creating ? '新建知识库' : activeKb?.name ?? '知识库'}
+                  {activeKb?.name ?? '知识库'}
                 </h1>
-                {activeKb && !creating && (
+                {activeKb && (
                   <Badge tone="green" icon={<CheckCircle2 size={14} />}>
                     {statusLabel(activeKb.status)}
                   </Badge>
                 )}
               </div>
               <p className="mt-1.5 text-xs text-gray-600">
-                {creating
-                  ? '创建时绑定嵌入模型，后续入库和检索都固定使用该配置。'
-                  : activeKb
-                    ? `${activeKb.embedding.model} · ${activeKb.embedding.dimensions ?? '未知'}维 · 最近更新 ${formatTime(activeKb.updated_at)}`
-                    : '请先创建一个知识库。'}
+                {activeKb
+                  ? `${activeKb.embedding.model} · ${activeKb.embedding.dimensions ?? '未知'}维 · 最近更新 ${formatTime(activeKb.updated_at)}`
+                  : '创建知识库后，即可添加资料并进行语义检索。'}
               </p>
             </div>
             <div className="text-xs text-gray-500">{status}</div>
           </div>
 
-          <nav className="mt-4 flex gap-5">
-            <TabButton active={tab === 'files'} icon={<FileText size={17} />} onClick={() => setTab('files')}>
-              文件
-            </TabButton>
-            <TabButton active={tab === 'upload'} icon={<Upload size={17} />} onClick={() => setTab('upload')}>
-              添加文档
-            </TabButton>
-            <TabButton active={tab === 'indexes'} icon={<Layers size={17} />} onClick={() => setTab('indexes')}>
-              索引版本
-            </TabButton>
-            <TabButton active={tab === 'settings'} icon={<Settings size={17} />} onClick={() => setTab('settings')}>
-              设置
-            </TabButton>
-          </nav>
+          {activeKb && (
+            <nav className="mt-4 flex gap-5">
+              <TabButton active={tab === 'files'} icon={<FileText size={17} />} onClick={() => setTab('files')}>
+                文件
+              </TabButton>
+              <TabButton active={tab === 'upload'} icon={<Upload size={17} />} onClick={() => setTab('upload')}>
+                添加文档
+              </TabButton>
+              <TabButton active={tab === 'indexes'} icon={<Layers size={17} />} onClick={() => setTab('indexes')}>
+                索引版本
+              </TabButton>
+              <TabButton active={tab === 'settings'} icon={<Settings size={17} />} onClick={() => setTab('settings')}>
+                设置
+              </TabButton>
+            </nav>
+          )}
         </header>
 
-        {creating ? (
-          <CreatePanel
-            settings={settings}
-            name={newKbName}
-            embeddingId={newKbEmbeddingId}
-            busy={busy}
-            onNameChange={setNewKbName}
-            onEmbeddingChange={setNewKbEmbeddingId}
-            onCreate={createKnowledgeBase}
-            selectedEmbedding={selectedNewEmbedding}
-          />
-        ) : activeKb ? (
+        {activeKb ? (
           <div className="flex min-h-0 flex-1">
             {tab === 'files' && (
               <FileListPanel
@@ -681,18 +688,27 @@ export function KnowledgePage({ settings, onChanged, focusTarget }: Props) {
             </section>
           </div>
         ) : (
-          <CreatePanel
-            settings={settings}
-            name={newKbName}
-            embeddingId={newKbEmbeddingId}
-            busy={busy}
-            onNameChange={setNewKbName}
-            onEmbeddingChange={setNewKbEmbeddingId}
-            onCreate={createKnowledgeBase}
-            selectedEmbedding={selectedNewEmbedding}
+          <EmptyKnowledgeState
+            canCreate={settings.embeddingConfigs.length > 0}
+            onCreate={openCreateDialog}
           />
         )}
       </section>
+
+      {createDialogOpen && (
+        <CreateKnowledgeBaseDialog
+          settings={settings}
+          name={newKbName}
+          embeddingId={newKbEmbeddingId}
+          busy={busy}
+          error={createError}
+          selectedEmbedding={selectedNewEmbedding}
+          onNameChange={setNewKbName}
+          onEmbeddingChange={setNewKbEmbeddingId}
+          onClose={closeCreateDialog}
+          onCreate={createKnowledgeBase}
+        />
+      )}
     </main>
   )
 }
@@ -816,55 +832,175 @@ function KnowledgeListPanel({
   )
 }
 
-function CreatePanel({
+function EmptyKnowledgeState({
+  canCreate,
+  onCreate,
+}: {
+  canCreate: boolean
+  onCreate: () => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-12">
+      <div className="max-w-sm text-center">
+        <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <Database size={21} />
+        </span>
+        <h2 className="mt-4 text-base font-semibold text-gray-950">暂无知识库</h2>
+        <p className="mt-2 text-sm leading-6 text-gray-500">
+          {canCreate
+            ? '新建知识库并选择嵌入模型，然后添加你的课程资料。'
+            : '请先在设置中配置嵌入模型，再新建知识库。'}
+        </p>
+        <button
+          className={`${primaryButtonClassName} mt-5`}
+          type="button"
+          onClick={onCreate}
+          disabled={!canCreate}
+        >
+          <Plus size={17} />
+          新建知识库
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CreateKnowledgeBaseDialog({
   settings,
   name,
   embeddingId,
   busy,
+  error,
   selectedEmbedding,
   onNameChange,
   onEmbeddingChange,
+  onClose,
   onCreate,
 }: {
   settings: LlmSettings
   name: string
   embeddingId: string
   busy: boolean
+  error: string
   selectedEmbedding: EmbeddingModelConfig | null
   onNameChange: (value: string) => void
   onEmbeddingChange: (value: string) => void
+  onClose: () => void
   onCreate: () => void
 }) {
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameInputRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [busy, onClose])
+
   return (
-    <Panel>
-      <div className="max-w-2xl">
-        <h3 className="text-lg font-semibold text-gray-950">新建知识库</h3>
-        <div className="mt-5 grid gap-4">
-          <Field label="知识库名称">
-            <input className={inputClassName} value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="例如：高等数学教材" />
-          </Field>
-          <Field label="嵌入模型">
-            <select className={inputClassName} value={embeddingId} onChange={(event) => onEmbeddingChange(event.target.value)}>
-              <option value="">选择嵌入模型</option>
-              {settings.embeddingConfigs.map((config) => (
-                <option key={config.id} value={config.id}>
-                  {config.name} · {config.model} · {config.dimensions}维
-                </option>
-              ))}
-            </select>
-          </Field>
-          {selectedEmbedding && (
-            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
-              创建后将固定使用 {selectedEmbedding.model}，维度 {selectedEmbedding.dimensions}。
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/30 px-4 py-6 backdrop-blur-[1px]"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        className="w-full max-w-lg overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl shadow-gray-950/15"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-knowledge-base-title"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+              <Database size={18} />
+            </span>
+            <div className="min-w-0">
+              <h2 id="create-knowledge-base-title" className="text-base font-semibold text-gray-950">
+                新建知识库
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">
+                嵌入模型创建后不可更换，后续入库和检索将固定使用该配置。
+              </p>
             </div>
-          )}
-          <button className={primaryButtonClassName} type="button" onClick={onCreate} disabled={!selectedEmbedding || busy}>
-            <Plus size={17} />
-            创建
+          </div>
+          <button
+            className={iconButtonClassName}
+            type="button"
+            title="关闭"
+            aria-label="关闭新建知识库弹窗"
+            onClick={onClose}
+            disabled={busy}
+          >
+            <X size={18} />
           </button>
-        </div>
-      </div>
-    </Panel>
+        </header>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            onCreate()
+          }}
+        >
+          <div className="grid gap-4 px-5 py-5">
+            <Field label="知识库名称">
+              <input
+                ref={nameInputRef}
+                className={inputClassName}
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                placeholder="例如：高等数学教材"
+                disabled={busy}
+              />
+            </Field>
+            <Field label="嵌入模型">
+              <select
+                className={inputClassName}
+                value={embeddingId}
+                onChange={(event) => onEmbeddingChange(event.target.value)}
+                disabled={busy}
+              >
+                <option value="">选择嵌入模型</option>
+                {settings.embeddingConfigs.map((config) => (
+                  <option key={config.id} value={config.id}>
+                    {config.name} · {config.model} · {config.dimensions}维
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {selectedEmbedding && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-sm text-blue-800">
+                创建后将固定使用 {selectedEmbedding.model}，维度 {selectedEmbedding.dimensions}。
+              </div>
+            )}
+            {error && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700" role="alert">
+                <AlertCircle className="mt-0.5 shrink-0" size={16} />
+                <span className="min-w-0 break-words">{error}</span>
+              </div>
+            )}
+          </div>
+
+          <footer className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-3">
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+            >
+              取消
+            </button>
+            <button className={primaryButtonClassName} type="submit" disabled={!selectedEmbedding || busy}>
+              <Plus size={17} />
+              {busy ? '正在创建...' : '创建'}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
   )
 }
 
