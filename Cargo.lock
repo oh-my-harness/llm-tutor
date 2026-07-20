@@ -4598,7 +4598,7 @@ dependencies = [
 
 [[package]]
 name = "llm-tutor-desktop"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "arboard",
  "tauri",
@@ -8138,7 +8138,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-agent"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8164,7 +8164,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-rag"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -8181,7 +8181,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-tools"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8201,7 +8201,7 @@ dependencies = [
 
 [[package]]
 name = "tutor-web"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "axum",
