@@ -16,6 +16,7 @@ use tutor_agent::capability::Capability;
 use tutor_agent::chat::{assistant_message, user_message};
 use tutor_agent::event_sink::EventSink;
 use tutor_agent::governance::GovernanceConfig;
+use tutor_agent::research::{ResearchWorkflowInput, run_research_workflow_with_runtime};
 use tutor_agent::{CapabilityRouter, LlmConfig};
 
 fn make_governance(audit: Option<Arc<dyn AuditSink>>) -> GovernanceConfig {
@@ -432,13 +433,17 @@ async fn research_explicit_start_enters_search_path() {
     )
     .with_event_sink(sink.clone());
 
-    let answer = router
-        .run(
-            Capability::Research,
-            "Start the detailed research workflow for agent research workflow.",
-        )
-        .await
-        .unwrap();
+    let answer = run_research_workflow_with_runtime(
+        &router,
+        ResearchWorkflowInput {
+            request: "Start the detailed research workflow for agent research workflow.".into(),
+        },
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .markdown;
 
     assert!(answer.contains("Report"));
     let events = sink.events();
@@ -467,7 +472,7 @@ async fn research_explicit_start_enters_search_path() {
 }
 
 #[tokio::test]
-async fn research_chinese_confirmation_after_plan_enters_workflow() {
+async fn research_workflow_accepts_confirmed_chinese_context() {
     let dir = TempDir::new().unwrap();
     let repo = JsonlSessionRepo::new(dir.path().join("sessions"));
     let storage = repo.create(CreateSessionOptions::default()).await.unwrap();
@@ -512,10 +517,17 @@ async fn research_chinese_confirmation_after_plan_enters_workflow() {
     .with_event_sink(sink.clone())
     .with_workflow_root(dir.path().join("workflow-sessions"));
 
-    let answer = router
-        .run_with_session(Capability::Research, session, "可以")
+    let answer = run_research_workflow_with_runtime(
+        &router,
+        ResearchWorkflowInput {
+            request: "Conversation context:\nUser: 帮我调研一下transformer架构，我想学习\n\nAssistant: 这是调研计划。确认后我就启动详细研究工作流程。\n\nConfirmed research instruction:\n可以".into(),
+        },
+        Some(session),
+        None,
+    )
         .await
-        .unwrap();
+        .unwrap()
+        .markdown;
 
     assert!(answer.contains("Transformer Report"));
     let events = sink.events();
@@ -563,14 +575,17 @@ async fn research_workflow_persists_final_report_to_session() {
     )
     .with_workflow_root(dir.path().join("workflow-sessions"));
 
-    let answer = router
-        .run_with_session(
-            Capability::Research,
-            session,
-            "Start the detailed research workflow for agent research workflow.",
-        )
-        .await
-        .unwrap();
+    let answer = run_research_workflow_with_runtime(
+        &router,
+        ResearchWorkflowInput {
+            request: "Start the detailed research workflow for agent research workflow.".into(),
+        },
+        Some(session),
+        None,
+    )
+    .await
+    .unwrap()
+    .markdown;
     assert!(answer.contains("Persisted report"));
 
     let context = inspect_session.build_context().await.unwrap();
@@ -624,13 +639,16 @@ async fn research_workflow_fails_clearly_after_citation_repair_attempt() {
         make_governance(None),
     );
 
-    let err = router
-        .run(
-            Capability::Research,
-            "Start the detailed research workflow for agent research workflow.",
-        )
-        .await
-        .unwrap_err();
+    let err = run_research_workflow_with_runtime(
+        &router,
+        ResearchWorkflowInput {
+            request: "Start the detailed research workflow for agent research workflow.".into(),
+        },
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
 
     assert!(
         err.to_string()
