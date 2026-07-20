@@ -23,6 +23,9 @@ Use this checklist after running:
 - [ ] Install or unpack the app on a clean Windows profile or after clearing the app data directory.
 - [ ] Start the app without running `cargo run`, `cargo tauri dev`, or `npm run dev`.
 - [ ] Confirm the app opens the React UI and does not show Vite proxy errors.
+- [ ] On Windows, confirm the upper-left native icon/title are absent and the
+      custom title strip supports drag, double-click maximize/restore, minimize,
+      maximize/restore, close, keyboard focus, and edge resize.
 - [ ] Confirm Settings shows the desktop data directory and the Open button opens it.
 - [ ] Change one setting, restart the app, and confirm it was restored from `settings.json`.
 - [ ] Configure one LLM provider.

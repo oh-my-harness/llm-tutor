@@ -14,6 +14,7 @@ import { OnboardingDialog } from './components/OnboardingDialog'
 import { onboardingModeBlock, onboardingStarterPrompt, type OnboardingMode } from './onboardingModes'
 import { OnboardingResumeButton } from './components/OnboardingResumeButton'
 import { AppView, Sidebar } from './components/Sidebar'
+import { DesktopTitleBar } from './components/DesktopTitleBar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
 import { AgentStatus } from './agentStatus'
@@ -1507,7 +1508,9 @@ export default function App() {
 
   return (
     <I18nProvider language={llmSettings.language}>
-    <div className="app-shell flex h-screen overflow-hidden" data-theme={llmSettings.theme}>
+    <div className="app-shell flex h-screen flex-col overflow-hidden" data-theme={llmSettings.theme}>
+      <DesktopTitleBar language={llmSettings.language} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <Sidebar
         activeView={view}
         activeSessionId={view === 'chat' ? sessionId : null}
@@ -1651,6 +1654,7 @@ export default function App() {
             onStartGuideTutor={startGuideTutor}
           />
         )}
+      </div>
       </div>
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />

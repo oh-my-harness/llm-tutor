@@ -520,6 +520,10 @@ Tasks:
       desktop clipboard commands instead of browser clipboard permission prompts.
 - [x] Add a product-owned right-click context menu for recent session items,
       including Pin/Unpin, Rename, and Delete.
+- [x] Use a frameless Windows window with an empty drag region and app-owned
+      minimize, maximize/restore, and close controls. Do not render the app icon
+      or product name in the upper-left window chrome; retain native title bars
+      on macOS and Linux.
 - [x] Change recent-session ordering so selecting a session does not move it;
       only sending a new message or receiving new conversation activity should
       promote an unpinned session.
@@ -573,6 +577,9 @@ Acceptance:
 - The app no longer exposes obvious browser context menus in normal desktop
   workflows.
 - The top-level window stays fixed while the active work pane owns scrolling.
+- The Windows build has no browser-like or duplicated native title strip, while
+  drag, double-click maximize/restore, minimize, maximize, close, and edge resize
+  remain available.
 - External links and local file/folder actions use desktop-appropriate behavior.
 - Generated content uses a Notebook tree for app-owned storage and a native
   Save dialog only for a bound external Vault; export remains a separate local
