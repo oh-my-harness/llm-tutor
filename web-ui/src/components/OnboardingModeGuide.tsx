@@ -8,7 +8,9 @@ import {
   onboardingStarterPrompt,
   type OnboardingMode,
 } from '../onboardingModes'
+import type { ComposerGuideControl } from '../productGuide'
 import type { TutorProfile } from '../tutorTypes'
+import { ComposerGuidePreview } from './ComposerGuidePreview'
 
 interface Props {
   selectedTutor: TutorProfile | null
@@ -25,6 +27,8 @@ const modeIcons: Record<OnboardingMode, ReactNode> = {
 export function OnboardingModeGuide({ selectedTutor, onStart }: Props) {
   const { language } = useI18n()
   const copy = language === 'en-US' ? englishCopy : chineseCopy
+  const [guideView, setGuideView] = useState<'composer' | 'modes'>('composer')
+  const [composerControl, setComposerControl] = useState<ComposerGuideControl>('mode')
   const [selectedMode, setSelectedMode] = useState<OnboardingMode>(() => initialOnboardingMode(selectedTutor))
   const detail = copy.modes[selectedMode]
   const block = onboardingModeBlock(selectedMode, selectedTutor)
@@ -37,59 +41,81 @@ export function OnboardingModeGuide({ selectedTutor, onStart }: Props) {
 
   return (
     <div className="mt-4">
-      <div className="grid h-10 grid-cols-4 gap-1 rounded-md bg-gray-100 p-1" role="tablist" aria-label={copy.modeSelectorLabel}>
-        {onboardingModes.map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            role="tab"
-            aria-selected={mode === selectedMode}
-            className={`inline-flex min-w-0 items-center justify-center gap-2 rounded px-2 text-sm font-medium transition-colors ${
-              mode === selectedMode
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-            }`}
-            onClick={() => setSelectedMode(mode)}
-          >
-            <span className="shrink-0">{modeIcons[mode]}</span>
-            <span className="truncate">{detailLabel(copy, mode)}</span>
+      <div className="mb-3 flex h-9 rounded-md bg-gray-100 p-1" role="tablist" aria-label={copy.guideSelectorLabel}>
+        {(['composer', 'modes'] as const).map((view) => (
+          <button key={view} type="button" role="tab" aria-selected={guideView === view} className={`flex-1 rounded text-sm font-medium ${guideView === view ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`} onClick={() => setGuideView(view)}>
+            {copy.guideViews[view]}
           </button>
         ))}
       </div>
 
-      <div className="mt-3">
-        <h3 className="text-base font-semibold text-gray-950">{detail.title}</h3>
-        <p className="mt-1 text-sm leading-5 text-gray-500">{detail.summary}</p>
-      </div>
-
-      <dl className="mt-3 divide-y divide-gray-100 border-y border-gray-100 text-sm">
-        <ModeDetail label={copy.labels.bestFor} value={detail.bestFor} />
-        <ModeDetail label={copy.labels.behavior} value={detail.behavior} />
-        <ModeDetail label={copy.labels.material} value={detail.material} />
-        <ModeDetail label={copy.labels.output} value={detail.output} />
-      </dl>
-
-      <div className="mt-3 flex items-center gap-4 rounded-md bg-gray-50 px-4 py-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium text-gray-500">{copy.starterLabel}</div>
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-gray-700">{starterPrompt}</p>
-          {unavailableReason && (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700">
-              <LockKeyhole size={13} className="shrink-0" />
-              <span>{unavailableReason}</span>
-            </div>
-          )}
+      {guideView === 'composer' ? (
+        <div>
+          <ComposerGuidePreview control={composerControl} onControlChange={setComposerControl} compact />
+          <div className="mt-3 flex justify-end">
+            <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700" onClick={() => onStart('chat')}>
+              {copy.startChat}
+              <ArrowRight size={15} />
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500"
-          disabled={Boolean(unavailableReason)}
-          onClick={() => onStart(selectedMode)}
-        >
-          {detail.start}
-          <ArrowRight size={15} />
-        </button>
-      </div>
+      ) : (
+        <>
+          <div className="grid h-10 grid-cols-4 gap-1 rounded-md bg-gray-100 p-1" role="tablist" aria-label={copy.modeSelectorLabel}>
+            {onboardingModes.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={mode === selectedMode}
+                className={`inline-flex min-w-0 items-center justify-center gap-2 rounded px-2 text-sm font-medium transition-colors ${
+                  mode === selectedMode
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+                onClick={() => setSelectedMode(mode)}
+              >
+                <span className="shrink-0">{modeIcons[mode]}</span>
+                <span className="truncate">{detailLabel(copy, mode)}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3">
+            <h3 className="text-base font-semibold text-gray-950">{detail.title}</h3>
+            <p className="mt-1 text-sm leading-5 text-gray-500">{detail.summary}</p>
+          </div>
+
+          <dl className="mt-3 divide-y divide-gray-100 border-y border-gray-100 text-sm">
+            <ModeDetail label={copy.labels.bestFor} value={detail.bestFor} />
+            <ModeDetail label={copy.labels.behavior} value={detail.behavior} />
+            <ModeDetail label={copy.labels.material} value={detail.material} />
+            <ModeDetail label={copy.labels.output} value={detail.output} />
+          </dl>
+
+          <div className="mt-3 flex items-center gap-4 rounded-md bg-gray-50 px-4 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-gray-500">{copy.starterLabel}</div>
+              <p className="mt-1 line-clamp-2 text-sm leading-5 text-gray-700">{starterPrompt}</p>
+              {unavailableReason && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700">
+                  <LockKeyhole size={13} className="shrink-0" />
+                  <span>{unavailableReason}</span>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500"
+              disabled={Boolean(unavailableReason)}
+              onClick={() => onStart(selectedMode)}
+            >
+              {detail.start}
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -108,6 +134,9 @@ function detailLabel(copy: typeof chineseCopy, mode: OnboardingMode) {
 }
 
 const chineseCopy = {
+  guideSelectorLabel: '开始会话指南',
+  guideViews: { composer: '输入框控件', modes: '会话模式' },
+  startChat: '进入 Chat 体验',
   modeSelectorLabel: '选择会话模式',
   starterLabel: '可编辑的起步内容',
   labels: {
@@ -165,6 +194,9 @@ const chineseCopy = {
 }
 
 const englishCopy: typeof chineseCopy = {
+  guideSelectorLabel: 'Start a conversation guide',
+  guideViews: { composer: 'Composer controls', modes: 'Conversation modes' },
+  startChat: 'Try it in Chat',
   modeSelectorLabel: 'Choose a conversation mode',
   starterLabel: 'Editable starter prompt',
   labels: {

@@ -22,8 +22,9 @@ checklists.
   session rejoin, and restorable interactive Chat attachments.
 - `2026-07-15-persistent-tutor-implementation-plan.md`: active persistent Tutor
   identity, Soul, permissions, private continuity memory, and handoff plan.
-- `2026-07-17-product-onboarding-plan.md`: first-run model/Tutor/task guidance,
-  contextual empty states, one-time hints, and versioned local onboarding state.
+- `2026-07-17-product-onboarding-plan.md`: first-run setup, interface-faithful
+  composer guidance, persistent Help topics, contextual hints, and the built-in
+  Usage Guide Tutor.
 
 ## Feature Plans
 

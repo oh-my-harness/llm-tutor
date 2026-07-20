@@ -8,6 +8,8 @@ pub const GENERAL_TUTOR_ID: &str = "general-tutor";
 pub const MAX_SOUL_CHARS: usize = 16_000;
 
 const SUPPORTED_CAPABILITIES: &[&str] = &["chat", "code_exec", "quiz", "research", "organize"];
+const LEGACY_GENERAL_TUTOR_NAME: &str = "通用导师";
+const USAGE_GUIDE_TUTOR_NAME: &str = "Tutor Agent 使用指南";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TutorResourcePermissions {
@@ -124,10 +126,11 @@ impl TutorStore {
             .and_then(|text| load_file(&text).ok())
             .unwrap_or_default();
         let retired_capabilities_migrated = migrate_retired_capabilities(&mut value);
+        let usage_guide_migrated = migrate_untouched_general_tutor(&mut value);
         if !value.tutors.iter().any(|item| item.id == GENERAL_TUTOR_ID) {
             value.tutors.push(general_tutor());
-            save_file(&path, &value).expect("failed to seed General Tutor");
-        } else if migrated || retired_capabilities_migrated {
+            save_file(&path, &value).expect("failed to seed Usage Guide Tutor");
+        } else if migrated || retired_capabilities_migrated || usage_guide_migrated {
             save_file(&path, &value).expect("failed to migrate tutor store");
         }
         Self {
@@ -264,7 +267,7 @@ impl TutorStore {
     pub fn reset_general_tutor(&self, id: &str) -> Result<TutorProfile, TutorStoreError> {
         if id != GENERAL_TUTOR_ID {
             return Err(TutorStoreError::Validation(
-                "only the built-in General Tutor can reset its profile".into(),
+                "only the built-in Usage Guide Tutor can reset its profile".into(),
             ));
         }
         let mut value = self.value.lock().unwrap();
@@ -295,15 +298,19 @@ fn general_tutor() -> TutorProfile {
     let now = Utc::now();
     TutorProfile {
         id: GENERAL_TUTOR_ID.into(),
-        name: "通用导师".into(),
-        soul_markdown: default_general_soul(),
+        name: USAGE_GUIDE_TUTOR_NAME.into(),
+        soul_markdown: default_usage_guide_soul(),
         avatar: None,
         default_model_config_id: None,
         default_capability: "chat".into(),
-        allowed_capabilities: default_allowed_capabilities(),
-        learner_memory_access: true,
-        resource_permissions: TutorResourcePermissions::default(),
-        autonomous_memory: true,
+        allowed_capabilities: vec!["chat".into()],
+        learner_memory_access: false,
+        resource_permissions: TutorResourcePermissions {
+            knowledge_base_ids: Vec::new(),
+            notebook: false,
+            space: false,
+        },
+        autonomous_memory: false,
         built_in: true,
         archived: false,
         created_at: now,
@@ -392,6 +399,11 @@ fn legacy_soul(role: &str) -> String {
 
 fn default_general_soul() -> String {
     "# 核心身份\n\n你是一位通用学习导师，帮助学习者理解当前问题并持续推进学习。\n\n# 教学风格\n\n- 先确认学习者真正想解决的问题。\n- 使用清晰解释、追问和练习促进理解。\n- 根据学习者的反馈调整讲解深度与节奏。\n\n# 教学原则\n\n- 区分事实、推测和建议。\n- 不假装学习者已经理解。\n- 复杂问题先建立直觉，再展开细节。\n\n# 边界\n\n- 不记录敏感个人信息。\n- 不在证据不足时评价学习者的能力。"
+        .into()
+}
+
+fn default_usage_guide_soul() -> String {
+    "# 核心身份\n\n你是 Tutor Agent 内置的软件使用指南。你的职责是理解用户想完成的操作，并指出当前产品中准确的界面入口、按钮名称和操作顺序。\n\n# 回答方式\n\n- 使用用户当前交流的语言回答。\n- 如果目标不明确，先问用户想完成什么，不要直接倾倒完整功能列表。\n- 优先给出可执行的短步骤，并使用界面中真实可见的名称。\n- 先说明入口路径，再解释该能力的作用、限制和产出。\n- 不要声称你已经替用户点击按钮、读取本地数据或改变设置。\n\n# 主要界面\n\n- 左侧栏包含聊天、辅导机器人、知识库、笔记本、空间、记忆和设置。\n- 设置包含外观、LLM、嵌入模型、搜索、笔记本、能力和帮助。\n- 新会话可以选择持久 Tutor；不选择时使用临时助手。\n\n# 会话输入框\n\n输入框底部从左到右包含：\n\n1. 会话模式：Chat、Research、Quiz、Organize。Chat 是普通流式对话；Research 和 Quiz 先确认需求再启动 workflow；Organize 读取 Notebook 并提出需要审核的变更。\n2. 附件：把文件作为当前消息的临时上下文，不会自动保存到知识库或 Notebook。\n3. 资料源：一次关联一个知识库或 Notebook。知识库使用向量检索；Notebook 使用 Markdown 文本搜索。\n4. 空间：通过 @ 精确引用一条 Notebook 笔记、一次测验或一道题。\n5. 模型：在已配置的 LLM 服务之间选择。\n6. 发送：蓝色箭头发送；运行时同一位置变成停止按钮。\n\n# 常见工作流\n\n## 知识库\n\n先到“设置 > 嵌入模型”配置并测试嵌入服务，再进入“知识库”创建库并添加资料，最后回到聊天输入框的资料源下拉框选择该知识库。\n\n## Notebook\n\nNotebook 是 Markdown 工作区。用户可以直接使用应用本地目录，也可以在“设置 > 笔记本”绑定外部 Vault。需要搜索多条笔记时在资料源中选择 Notebook；需要精确指定一条时使用“空间”按钮的 @ 引用。\n\n## 记忆\n\nL1 是聊天、测验和 Notebook 等工作区证据；L2 是按模块整理的摘要；L3 从 L2 归纳跨模块的稳定目标、偏好和策略。用户在“记忆”中选择文档、运行更新或检查，并在审核界面确认变更。\n\n## Tutor\n\nTutor 拥有独立 Soul、默认模型、能力权限、资料权限和私有连续性记忆。用户在“辅导机器人”中管理 Tutor，并在新会话第一条消息前选择。\n\n# 边界\n\n- 只解释 Tutor Agent 的使用，不把普通学习问题冒充产品帮助。\n- 当界面版本或用户状态不确定时，明确说明并让用户描述当前可见内容。\n- 不把附件、知识库、Notebook 和 @ 引用说成同一种资料机制。"
         .into()
 }
 
@@ -503,6 +515,41 @@ fn migrate_retired_capabilities(value: &mut TutorFile) -> bool {
     changed
 }
 
+fn migrate_untouched_general_tutor(value: &mut TutorFile) -> bool {
+    let Some(tutor) = value
+        .tutors
+        .iter_mut()
+        .find(|tutor| tutor.id == GENERAL_TUTOR_ID)
+    else {
+        return false;
+    };
+    if !is_untouched_legacy_general_tutor(tutor) {
+        return false;
+    }
+
+    let created_at = tutor.created_at;
+    let mut guide = general_tutor();
+    guide.created_at = created_at;
+    guide.updated_at = Utc::now();
+    *tutor = guide;
+    true
+}
+
+fn is_untouched_legacy_general_tutor(tutor: &TutorProfile) -> bool {
+    tutor.id == GENERAL_TUTOR_ID
+        && tutor.name == LEGACY_GENERAL_TUTOR_NAME
+        && tutor.soul_markdown == default_general_soul()
+        && tutor.avatar.is_none()
+        && tutor.default_model_config_id.is_none()
+        && tutor.default_capability == "chat"
+        && tutor.allowed_capabilities == default_allowed_capabilities()
+        && tutor.learner_memory_access
+        && tutor.resource_permissions == TutorResourcePermissions::default()
+        && tutor.autonomous_memory
+        && tutor.built_in
+        && !tutor.archived
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,11 +573,93 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = TutorStore::new_with_root(dir.path());
         assert_eq!(store.list(false).len(), 1);
+        let guide = store.get(GENERAL_TUTOR_ID).unwrap();
+        assert_eq!(guide.name, USAGE_GUIDE_TUTOR_NAME);
+        assert_eq!(guide.allowed_capabilities, vec!["chat"]);
+        assert!(!guide.learner_memory_access);
+        assert!(!guide.resource_permissions.notebook);
+        assert!(!guide.autonomous_memory);
         drop(store);
 
         let reopened = TutorStore::new_with_root(dir.path());
         assert_eq!(reopened.list(false).len(), 1);
         assert!(reopened.get(GENERAL_TUTOR_ID).unwrap().built_in);
+    }
+
+    #[test]
+    fn migrates_only_untouched_general_tutor_to_usage_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = TutorProfile {
+            id: GENERAL_TUTOR_ID.into(),
+            name: LEGACY_GENERAL_TUTOR_NAME.into(),
+            soul_markdown: default_general_soul(),
+            avatar: None,
+            default_model_config_id: None,
+            default_capability: "chat".into(),
+            allowed_capabilities: default_allowed_capabilities(),
+            learner_memory_access: true,
+            resource_permissions: TutorResourcePermissions::default(),
+            autonomous_memory: true,
+            built_in: true,
+            archived: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        save_file(
+            &dir.path().join("tutors.json"),
+            &TutorFile {
+                schema_version: schema_version(),
+                tutors: vec![legacy],
+            },
+        )
+        .unwrap();
+
+        let store = TutorStore::new_with_root(dir.path());
+        let migrated = store.get(GENERAL_TUTOR_ID).unwrap();
+        assert_eq!(migrated.name, USAGE_GUIDE_TUTOR_NAME);
+        assert!(migrated.soul_markdown.contains("会话输入框"));
+        assert_eq!(migrated.allowed_capabilities, vec!["chat"]);
+    }
+
+    #[test]
+    fn preserves_customized_builtin_tutor_during_usage_guide_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut customized = TutorProfile {
+            id: GENERAL_TUTOR_ID.into(),
+            name: LEGACY_GENERAL_TUTOR_NAME.into(),
+            soul_markdown: default_general_soul(),
+            avatar: None,
+            default_model_config_id: None,
+            default_capability: "chat".into(),
+            allowed_capabilities: default_allowed_capabilities(),
+            learner_memory_access: true,
+            resource_permissions: TutorResourcePermissions::default(),
+            autonomous_memory: true,
+            built_in: true,
+            archived: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        customized
+            .soul_markdown
+            .push_str("\n\n# 用户自定义\n\n保留这段内容。");
+        save_file(
+            &dir.path().join("tutors.json"),
+            &TutorFile {
+                schema_version: schema_version(),
+                tutors: vec![customized],
+            },
+        )
+        .unwrap();
+
+        let store = TutorStore::new_with_root(dir.path());
+        let preserved = store.get(GENERAL_TUTOR_ID).unwrap();
+        assert_eq!(preserved.name, LEGACY_GENERAL_TUTOR_NAME);
+        assert!(preserved.soul_markdown.contains("用户自定义"));
+        assert_eq!(
+            preserved.allowed_capabilities,
+            default_allowed_capabilities()
+        );
     }
 
     #[test]

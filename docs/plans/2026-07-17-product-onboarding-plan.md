@@ -1,6 +1,6 @@
 # Product Onboarding Plan
 
-> Status: in progress | Date: 2026-07-17 | Last updated: 2026-07-17 | Scope: first-run onboarding, contextual empty states, one-time hints, and reusable in-app guidance.
+> Status: in progress | Date: 2026-07-17 | Last updated: 2026-07-20 | Scope: first-run onboarding, contextual empty states, persistent help guidance, and the built-in usage-guide Tutor.
 
 ## 1. Goal
 
@@ -11,7 +11,7 @@ The onboarding experience should connect existing product capabilities:
 
 ```text
 Model readiness -> Optional Tutor -> Knowledge Base -> Notebook -> Memory
-                                                        -> Conversation modes
+                                                        -> Conversation entry
                                                         -> Chat / Research / Quiz / Organize
 ```
 
@@ -21,7 +21,7 @@ separate tutorial workspace or simulated data model.
 ## 2. Product Decisions
 
 - First-run onboarding has six concise steps: model readiness, optional Tutor,
-  Knowledge Base, Notebook, Memory, and conversation-mode selection.
+  Knowledge Base, Notebook, Memory, and interface-faithful conversation entry.
 - The flow is nonblocking except when an LLM action genuinely requires a model.
 - An existing valid model configuration is detected and reused.
 - Tutor selection is optional; skipping it uses Temporary Assistant.
@@ -29,7 +29,13 @@ separate tutorial workspace or simulated data model.
 - Feature pages use compact contextual empty states instead of repeated modal
   walkthroughs.
 - Complex controls may show one concise, dismissible hint on first use.
-- Settings or Help can reopen onboarding without changing existing data.
+- Settings > Help is a non-linear guide center, separate from first-run
+  onboarding. It opens directly at the last viewed topic and never replays
+  onboarding progress by default.
+- Help illustrations mirror the real composer controls and terminology rather
+  than presenting generic feature cards.
+- The built-in Tutor is the permanent Usage Guide Tutor. It answers product-use
+  questions in normal Chat and points to exact UI labels and paths.
 - Closing an incomplete flow pauses it instead of marking it complete. A compact
   floating action resumes the current step without taking workspace layout.
 - Completion requires either launching a real starter task or explicitly
@@ -106,13 +112,39 @@ does not add four more top-level steps or a separate application route.
   Notebook permission and never applies changes before user review.
 - Code Exec remains an internal tool rather than a user-facing mode. Retired
   Deep Solve is not reintroduced.
+- The step also exposes an interface-faithful composer guide covering the mode
+  selector, attachment upload, Knowledge Base or Notebook source selector,
+  Space `@` references, model selector, and send/stop control. The visual order,
+  icons, and labels match the actual composer.
 
 The selected mode's start action opens a new conversation, selects that real
 mode, pre-fills an editable prompt without sending it, and completes onboarding.
 A user who does not want to launch a conversation may instead choose the
 explicit `Complete` action on this final step.
 
-## 4. Contextual Guidance
+## 4. Persistent Help Center
+
+Settings > Help is a durable reference surface, not a replay of the first-run
+wizard:
+
+- a compact topic rail allows direct access to composer controls, materials and
+  context, conversation modes, Knowledge Base, Notebook, Memory, and Tutors;
+- the last selected topic and composer-control focus are stored locally and
+  restored on the next visit;
+- topics do not use wizard checkmarks or imply a required order;
+- the composer topic uses an interactive replica of the real input box and
+  explains exactly where each entry is located and what it changes;
+- direct actions open the relevant real workspace or start a new Chat with the
+  built-in Usage Guide Tutor;
+- rerunning first-run setup remains a secondary explicit action and does not
+  replace the help center.
+
+The built-in `general-tutor` keeps its stable ID for session compatibility but
+is presented as the Usage Guide Tutor. New stores seed this profile directly.
+Existing untouched General Tutor profiles migrate once; user-customized
+built-in profiles are not overwritten silently.
+
+## 5. Contextual Guidance
 
 Empty states should focus on one next action and disappear when relevant data
 exists:
@@ -128,7 +160,7 @@ exists:
 Guidance must remain compact, use existing product commands, and avoid permanent
 instruction panels once the surface contains content.
 
-## 5. State Model
+## 6. State Model
 
 Persist guidance state in the existing local settings boundary, conceptually:
 
@@ -137,6 +169,15 @@ Persist guidance state in the existing local settings boundary, conceptually:
   "onboarding_version": 1,
   "onboarding_completed": true,
   "dismissed_context_hints": ["notebook.empty", "tutor.soul.first-edit"]
+}
+```
+
+Reusable help navigation is separate from onboarding completion, conceptually:
+
+```json
+{
+  "topic": "composer",
+  "composer_control": "source"
 }
 ```
 
@@ -150,8 +191,10 @@ Rules:
   and keeps a compact resume action visible until completion.
 - Hint identifiers are stable product keys rather than translated labels.
 - Generated content and stored user data are not onboarding state.
+- Opening Help never changes onboarding completion. Help remembers only its
+  own last topic and focused control.
 
-## 6. Implementation Phases
+## 7. Implementation Phases
 
 ### Phase 1: State and Entry Conditions
 
@@ -159,7 +202,8 @@ Rules:
 - [x] Detect model readiness from existing provider configuration and health
   checks.
 - [x] Decide first-run entry without delaying normal app startup.
-- [x] Add Settings or Help action to reopen onboarding.
+- [x] Keep an explicit secondary Help action to rerun first-time setup without
+  making onboarding replay the primary Help experience.
 - [x] Keep a non-layout floating resume action visible while onboarding remains
   incomplete.
 
@@ -178,8 +222,21 @@ Rules:
   light/dark themes.
 - [x] Distinguish pause from completion and provide an explicit final `Complete`
   action.
+- [x] Add the interface-faithful composer-control guide to the final step.
 
-### Phase 3: Contextual Empty States
+### Phase 3: Persistent Help and Usage Guide Tutor
+
+- [x] Replace the Help page's onboarding replay card with a non-linear topic
+  center that restores the last viewed topic.
+- [x] Cover mode, attachments, Knowledge Base/Notebook source association,
+  Space `@` targets, model selection, and send/stop using the real composer
+  vocabulary and visual order.
+- [x] Add direct actions to the relevant product surfaces and the built-in Usage
+  Guide Tutor.
+- [x] Seed and safely migrate the built-in Tutor to the Usage Guide identity
+  while preserving its stable ID and user-customized profiles.
+
+### Phase 4: Contextual Empty States
 
 - [x] Audit current Notebook, Quiz Bank, Memory, Tutor, and Research empty
   states.
@@ -188,7 +245,7 @@ Rules:
 - [ ] Add stable dismissible hint keys only for interactions that remain hard to
   discover after the empty state is gone.
 
-### Phase 4: Verification
+### Phase 5: Verification
 
 - [x] Test fresh profiles, dismissed flows, and reopened onboarding; a real
   configured desktop profile remains to be included in release QA.
@@ -201,8 +258,11 @@ Rules:
 - [ ] Complete keyboard-only, English-copy, and installed-desktop QA. Light and
   dark themes plus the `1100 x 700` minimum desktop viewport have been visually
   verified in the local UI.
+- [ ] Verify Help restores its topic/control state without replaying onboarding,
+  all composer entries are documented, and the Usage Guide Tutor starts a real
+  tutor-bound Chat.
 
-## 7. Acceptance Criteria
+## 8. Acceptance Criteria
 
 - A fresh user can configure or reuse a model, understand the three persistent
   knowledge surfaces, and reach a useful task through six concise steps.
@@ -213,14 +273,20 @@ Rules:
 - Dismissing an incomplete flow does not silently mark it complete; the user can
   resume it from the compact floating action.
 - Empty-state guidance disappears when its surface has content.
-- Reopening onboarding leaves all existing product data unchanged.
+- Opening Help returns to the last viewed topic without resetting progress or
+  replaying the first-run wizard.
+- A user can locate mode, upload, source, `@` target, model, and send controls
+  from an interface-faithful composer guide.
+- The built-in Usage Guide Tutor can answer software-use questions in a normal,
+  persistent Tutor-bound conversation.
 - Future releases can add targeted guidance through the versioned state without
   replaying the complete first-run flow.
 
-## 8. Deferred Work
+## 9. Deferred Work
 
 - Hosted onboarding analytics or funnels.
 - Interactive demo data or simulated conversations.
 - Long multi-page spotlight tours.
-- A separate tutorial mode or tutorial-only Tutor.
+- A separate tutorial-only runtime mode; the Usage Guide remains an ordinary
+  built-in Chat Tutor.
 - Visual-input onboarding until multimodal product requirements are approved.

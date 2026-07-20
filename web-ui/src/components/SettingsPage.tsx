@@ -37,6 +37,8 @@ import type {
   ThemeId,
 } from '../settings'
 import { chooseDesktopDirectory, getDesktopDataDir, openDesktopDataDir } from '../api'
+import type { ProductGuideDestination } from '../productGuide'
+import { ProductGuide } from './ProductGuide'
 
 interface Props {
   settings: LlmSettings
@@ -44,6 +46,8 @@ interface Props {
   onTabChange: (tab: SettingsTab) => void
   onChange: (settings: LlmSettings) => void
   onOpenOnboarding: () => void
+  onGuideNavigate: (destination: ProductGuideDestination) => void
+  onStartGuideTutor: () => void
 }
 
 const providerOptions: { value: LlmProvider; label: string; description: string }[] = [
@@ -117,8 +121,16 @@ const settingsTabs: Array<{
   { key: 'help', labelKey: 'settings.tabs.help', icon: CircleHelp },
 ]
 
-export function SettingsPage({ settings, activeTab, onTabChange, onChange, onOpenOnboarding }: Props) {
-  const { t, language } = useI18n()
+export function SettingsPage({
+  settings,
+  activeTab,
+  onTabChange,
+  onChange,
+  onOpenOnboarding,
+  onGuideNavigate,
+  onStartGuideTutor,
+}: Props) {
+  const { t } = useI18n()
   const [testState, setTestState] = useState<Record<string, ConfigTestState>>({})
   const [dataDir, setDataDir] = useState<string | null>(null)
   const [dataDirError, setDataDirError] = useState('')
@@ -1239,34 +1251,11 @@ export function SettingsPage({ settings, activeTab, onTabChange, onChange, onOpe
           )}
 
           {activeTab === 'help' && (
-            <SettingsPanel
-              icon={CircleHelp}
-              title={language === 'en-US' ? 'Help' : '帮助'}
-              description={language === 'en-US'
-                ? 'Review the getting-started guide and find the next useful action.'
-                : '重新查看首次使用流程，并快速找到下一步操作。'}
-            >
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-4">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">
-                    {language === 'en-US' ? 'Getting started' : '使用引导'}
-                  </div>
-                  <div className="mt-1 text-sm text-gray-500">
-                    {language === 'en-US'
-                      ? 'Review model, Tutor, Knowledge Base, Notebook, Memory, and conversation-mode guidance without changing existing data.'
-                      : '重新查看模型、导师、知识库、笔记本、记忆和会话模式，不会更改已有数据。'}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  onClick={onOpenOnboarding}
-                >
-                  <CircleHelp size={16} />
-                  {language === 'en-US' ? 'Open guide' : '重新查看'}
-                </button>
-              </div>
-            </SettingsPanel>
+            <ProductGuide
+              onNavigate={onGuideNavigate}
+              onStartGuideTutor={onStartGuideTutor}
+              onRestartOnboarding={onOpenOnboarding}
+            />
           )}
         </div>
       </div>

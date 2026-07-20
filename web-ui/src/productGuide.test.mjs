@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const ts = require('typescript')
+const source = readFileSync(new URL('./productGuide.ts', import.meta.url), 'utf8')
+const compiled = ts.transpileModule(source, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText
+const module = { exports: {} }
+Function('module', 'exports', compiled)(module, module.exports)
+
+const { guideTutorStarterPrompt, normalizeProductGuideState } = module.exports
+
+test('restores valid independent help navigation state', () => {
+  assert.deepEqual(normalizeProductGuideState({ topic: 'notebook', composerControl: 'mention' }), {
+    topic: 'notebook',
+    composerControl: 'mention',
+  })
+})
+
+test('repairs invalid help state without onboarding semantics', () => {
+  assert.deepEqual(normalizeProductGuideState({ topic: 'start', composerControl: 'upload' }), {
+    topic: 'composer',
+    composerControl: 'mode',
+  })
+})
+
+test('usage guide Tutor prompt follows the active UI language', () => {
+  assert.match(guideTutorStarterPrompt('zh-CN'), /准确的界面入口/)
+  assert.match(guideTutorStarterPrompt('en-US'), /exact controls/)
+})

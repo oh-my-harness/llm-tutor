@@ -231,8 +231,20 @@ User-created tutors expose a direct delete action on their row in the tutor
 rail. The product presents this as deletion, while storage uses archive
 semantics so existing tutor-bound sessions keep their identity and history.
 Archived tutors are removed from active management and future selection. The
-profile workspace does not duplicate the action, and the built-in General Tutor
-does not expose it because it cannot be deleted.
+profile workspace does not duplicate the action, and the built-in Usage Guide
+Tutor does not expose it because it cannot be deleted.
+
+The stable built-in profile with ID `general-tutor` is the product Usage Guide
+Tutor. It remains an ordinary tutor-bound Chat rather than a special tutorial
+runtime mode. Its Soul explains the current product structure, names exact UI
+labels and navigation paths, distinguishes attachments, associated sources,
+and explicit `@` references, and asks what the user is trying to accomplish
+before giving steps. It does not claim to click controls or inspect local data
+that was not supplied to the conversation.
+
+New stores seed the Usage Guide identity directly. An existing built-in profile
+is migrated only when its name and Soul still match the former untouched
+General Tutor defaults; user-customized built-in Souls are preserved.
 
 The Tutor page also provides a continuity view for private typed memory. Users
 can add, edit, resolve, reopen, delete, and reset entries without changing
@@ -264,7 +276,7 @@ state, and adds search when the tutor collection becomes long.
 Status: implemented in `v0.3.1`.
 
 - Add tutor store and CRUD API.
-- Add a built-in General Tutor.
+- Add a built-in Usage Guide Tutor with stable ID `general-tutor`.
 - Add tutor selection to the new-conversation screen.
 - Persist immutable `tutor_id` on sessions.
 - Apply tutor Soul, default model, and capability permissions.

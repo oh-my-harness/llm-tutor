@@ -1,0 +1,397 @@
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  AtSign,
+  Bot,
+  Brain,
+  CircleHelp,
+  Database,
+  FileQuestion,
+  FileText,
+  MessageSquare,
+  NotebookPen,
+  Paperclip,
+  SearchCheck,
+  Settings2,
+} from 'lucide-react'
+import { useI18n } from '../i18n'
+import {
+  loadProductGuideState,
+  productGuideTopics,
+  saveProductGuideState,
+  type ComposerGuideControl,
+  type ProductGuideDestination,
+  type ProductGuideTopic,
+} from '../productGuide'
+import { ComposerGuidePreview } from './ComposerGuidePreview'
+
+interface Props {
+  onNavigate: (destination: ProductGuideDestination) => void
+  onStartGuideTutor: () => void
+  onRestartOnboarding: () => void
+}
+
+const topicIcons: Record<ProductGuideTopic, ReactNode> = {
+  composer: <MessageSquare size={17} />,
+  materials: <AtSign size={17} />,
+  modes: <SearchCheck size={17} />,
+  knowledge: <Database size={17} />,
+  notebook: <NotebookPen size={17} />,
+  memory: <Brain size={17} />,
+  tutors: <Bot size={17} />,
+}
+
+export function ProductGuide({ onNavigate, onStartGuideTutor, onRestartOnboarding }: Props) {
+  const { language } = useI18n()
+  const copy = language === 'en-US' ? englishCopy : chineseCopy
+  const [guideState, setGuideState] = useState(loadProductGuideState)
+
+  useEffect(() => {
+    saveProductGuideState(guideState)
+  }, [guideState])
+
+  const selectTopic = (topic: ProductGuideTopic) => {
+    setGuideState((current) => ({ ...current, topic }))
+  }
+  const selectComposerControl = (composerControl: ComposerGuideControl) => {
+    setGuideState({ topic: 'composer', composerControl })
+  }
+
+  return (
+    <section className="min-w-0">
+      <header className="flex items-start justify-between gap-6 border-b border-gray-200 pb-5">
+        <div>
+          <div className="flex items-center gap-2 text-blue-600">
+            <CircleHelp size={20} />
+            <span className="text-sm font-semibold">{copy.eyebrow}</span>
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-gray-950">{copy.title}</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">{copy.description}</p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
+          onClick={onStartGuideTutor}
+        >
+          <Bot size={16} />
+          {copy.askGuide}
+        </button>
+      </header>
+
+      <div className="grid min-h-[31rem] grid-cols-1 gap-5 pt-5 2xl:grid-cols-[10.5rem_minmax(0,1fr)] 2xl:gap-6">
+        <nav className="border-b border-gray-200 pb-4 2xl:border-r 2xl:border-b-0 2xl:pr-4 2xl:pb-0" aria-label={copy.topicNavigation}>
+          <div className="mb-2 px-2 text-xs font-medium text-gray-400">{copy.topicsLabel}</div>
+          <div className="flex flex-wrap gap-1 2xl:block 2xl:space-y-1">
+            {productGuideTopics.map((topic) => (
+              <button
+                key={topic}
+                type="button"
+                className={`flex min-h-9 w-auto items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors 2xl:w-full ${
+                  guideState.topic === topic
+                    ? 'bg-blue-50 font-medium text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
+                }`}
+                aria-current={guideState.topic === topic ? 'page' : undefined}
+                onClick={() => selectTopic(topic)}
+              >
+                <span className="shrink-0">{topicIcons[topic]}</span>
+                <span>{copy.topics[topic]}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        <article className="min-w-0 pb-4">
+          {guideState.topic === 'composer' && (
+            <GuideSection title={copy.composer.title} description={copy.composer.description}>
+              <ComposerGuidePreview
+                control={guideState.composerControl}
+                onControlChange={(composerControl) => setGuideState((current) => ({ ...current, composerControl }))}
+              />
+              <div className="mt-5 flex justify-end">
+                <GuideAction onClick={() => onNavigate('chat')}>{copy.composer.openChat}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'materials' && (
+            <GuideSection title={copy.materials.title} description={copy.materials.description}>
+              <GuideRows items={[
+                { icon: <Paperclip size={18} />, title: copy.materials.attachmentTitle, text: copy.materials.attachmentText, action: copy.showInComposer, onClick: () => selectComposerControl('attachment') },
+                { icon: <Database size={18} />, title: copy.materials.sourceTitle, text: copy.materials.sourceText, action: copy.showInComposer, onClick: () => selectComposerControl('source') },
+                { icon: <AtSign size={18} />, title: copy.materials.mentionTitle, text: copy.materials.mentionText, action: copy.showInComposer, onClick: () => selectComposerControl('mention') },
+              ]} />
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'modes' && (
+            <GuideSection title={copy.modes.title} description={copy.modes.description}>
+              <GuideRows items={copy.modes.items.map((item) => ({ ...item, onClick: () => selectComposerControl('mode') }))} />
+              <div className="mt-5 flex justify-end">
+                <GuideAction onClick={() => onNavigate('chat')}>{copy.modes.openChat}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'knowledge' && (
+            <GuideSection title={copy.knowledge.title} description={copy.knowledge.description}>
+              <NumberedSteps items={copy.knowledge.steps} />
+              <div className="mt-5 flex flex-wrap gap-2">
+                <GuideAction onClick={() => onNavigate('embedding-settings')}>{copy.knowledge.embedding}</GuideAction>
+                <GuideAction onClick={() => onNavigate('knowledge')} primary>{copy.knowledge.open}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'notebook' && (
+            <GuideSection title={copy.notebook.title} description={copy.notebook.description}>
+              <NumberedSteps items={copy.notebook.steps} />
+              <div className="mt-5 flex flex-wrap gap-2">
+                <GuideAction onClick={() => onNavigate('notebook-settings')}>{copy.notebook.settings}</GuideAction>
+                <GuideAction onClick={() => onNavigate('notebook')} primary>{copy.notebook.open}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'memory' && (
+            <GuideSection title={copy.memory.title} description={copy.memory.description}>
+              <GuideRows items={copy.memory.items} />
+              <div className="mt-5 flex justify-end">
+                <GuideAction onClick={() => onNavigate('memory')} primary>{copy.memory.open}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+
+          {guideState.topic === 'tutors' && (
+            <GuideSection title={copy.tutors.title} description={copy.tutors.description}>
+              <NumberedSteps items={copy.tutors.steps} />
+              <div className="mt-5 flex flex-wrap gap-2">
+                <GuideAction onClick={() => onNavigate('tutors')}>{copy.tutors.manage}</GuideAction>
+                <GuideAction onClick={onStartGuideTutor} primary>{copy.askGuide}</GuideAction>
+              </div>
+            </GuideSection>
+          )}
+        </article>
+      </div>
+
+      <footer className="flex items-center justify-between border-t border-gray-200 pt-4 text-xs text-gray-500">
+        <span>{copy.remembered}</span>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-gray-100 hover:text-gray-900" onClick={onRestartOnboarding}>
+          <Settings2 size={14} />
+          {copy.restartOnboarding}
+        </button>
+      </footer>
+    </section>
+  )
+}
+
+function GuideSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-lg font-semibold text-gray-950">{title}</h3>
+      <p className="mt-1 mb-5 text-sm leading-6 text-gray-500">{description}</p>
+      {children}
+    </div>
+  )
+}
+
+function GuideRows({ items }: { items: Array<{ icon: ReactNode; title: string; text: string; action?: string; onClick?: () => void }> }) {
+  return (
+    <div className="divide-y divide-gray-100 border-y border-gray-100">
+      {items.map((item) => (
+        <div key={item.title} className="flex items-start gap-3 py-3.5">
+          <span className="mt-0.5 text-blue-600">{item.icon}</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-gray-900">{item.title}</div>
+            <p className="mt-1 text-sm leading-5 text-gray-500">{item.text}</p>
+          </div>
+          {item.action && item.onClick && (
+            <button type="button" className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50" onClick={item.onClick}>
+              {item.action}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NumberedSteps({ items }: { items: string[] }) {
+  return (
+    <ol className="divide-y divide-gray-100 border-y border-gray-100">
+      {items.map((item, index) => (
+        <li key={item} className="flex gap-3 py-3 text-sm leading-5 text-gray-600">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-semibold text-blue-700">{index + 1}</span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function GuideAction({ children, onClick, primary = false }: { children: ReactNode; onClick: () => void; primary?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex h-9 items-center rounded-md px-3 text-sm font-medium ${
+        primary ? 'bg-blue-600 text-white hover:bg-blue-700' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+const chineseCopy = {
+  eyebrow: 'Tutor Agent 使用指南',
+  title: '从真实入口开始',
+  description: '这里不是必须从头播放的教程。直接选择需要的主题；输入框示意与实际聊天界面的控件顺序和名称保持一致。',
+  askGuide: '询问使用指南',
+  topicNavigation: '帮助主题',
+  topicsLabel: '主题',
+  topics: {
+    composer: '输入框控件',
+    materials: '添加资料',
+    modes: '会话模式',
+    knowledge: '知识库',
+    notebook: '笔记本',
+    memory: '记忆',
+    tutors: '导师',
+  },
+  showInComposer: '查看入口',
+  remembered: '帮助页会记住上次查看的主题和控件。',
+  restartOnboarding: '重新运行首次配置',
+  composer: {
+    title: '认识会话输入框',
+    description: '点击示意输入框中的任意控件查看用途。真实聊天界面中的位置、顺序和标签与这里一致。',
+    openChat: '打开真实聊天界面',
+  },
+  materials: {
+    title: '三种添加资料的方式',
+    description: '它们的生命周期和检索范围不同，不应混为同一个“上传资料”入口。',
+    attachmentTitle: '附件：本条消息的临时上下文',
+    attachmentText: '适合临时阅读一个文件。不会自动入库，也不会在未来会话中继续可用。',
+    sourceTitle: '知识库或 Notebook：会话级资料源',
+    sourceText: '适合让 Agent 在整个会话中按需检索一组资料。当前只能关联一个知识库或 Notebook。',
+    mentionTitle: '@ 目标：精确引用已有内容',
+    mentionText: '适合明确指定某条笔记、某次测验或某道题，避免从整个资料源中猜测目标。',
+  },
+  modes: {
+    title: '选择会话模式',
+    description: '模式入口位于输入框左下角第一个按钮。模式决定交互方式，但不会替你发送第一条消息。',
+    openChat: '前往聊天选择模式',
+    items: [
+      { icon: <MessageSquare size={18} />, title: 'Chat', text: '普通流式多轮对话，可按需使用工具，不强制启动 workflow。', action: '查看入口' },
+      { icon: <SearchCheck size={18} />, title: 'Research', text: '先确认研究范围，再显式启动详细调研 workflow 并生成带引用报告。', action: '查看入口' },
+      { icon: <FileQuestion size={18} />, title: 'Quiz', text: '先确认主题和材料，再生成可持续作答与恢复的测验卡片。', action: '查看入口' },
+      { icon: <FileText size={18} />, title: 'Organize', text: '读取 Notebook 后提出可审核的整理建议，不会绕过确认直接写入。', action: '查看入口' },
+    ],
+  },
+  knowledge: {
+    title: '配置并使用知识库',
+    description: '知识库用于持久保存资料并通过向量检索为会话提供引用上下文。',
+    steps: ['在“设置 > 嵌入模型”添加并测试嵌入配置。', '进入“知识库”创建知识库并添加文档。', '回到聊天，打开输入框中的资料源下拉框，选择具体知识库。', '提问后检查回答中的引用；需要精确指定现有笔记时改用 @ 目标。'],
+    embedding: '配置嵌入模型',
+    open: '打开知识库',
+  },
+  notebook: {
+    title: '配置并使用 Notebook',
+    description: 'Notebook 是 Markdown 工作区。可直接使用应用本地目录，也可在桌面端绑定外部 Vault。',
+    steps: ['在“设置 > 笔记本”查看本地目录，或绑定一个外部 Markdown Vault。', '进入“空间 > 笔记本”创建、阅读和编辑笔记。', '在聊天资料源中选择 Notebook，可让 Agent 搜索多条笔记。', '若只需要一条笔记，使用“空间”按钮通过 @ 精确引用。'],
+    settings: 'Notebook 设置',
+    open: '打开 Notebook',
+  },
+  memory: {
+    title: '查看和更新记忆',
+    description: '记忆用于形成可靠的学习者画像与 Tutor 连续性，不等同于 Notebook 资料库。',
+    open: '打开记忆',
+    items: [
+      { icon: <FileText size={18} />, title: 'L1 工作区证据', text: '来自聊天、测验和 Notebook 等真实产品事件，是 L2 更新的证据来源。' },
+      { icon: <Database size={18} />, title: 'L2 模块摘要', text: '按聊天、测验、Notebook 等模块整理；选择文档后运行更新、检查或去重。' },
+      { icon: <Brain size={18} />, title: 'L3 跨模块记忆', text: '从 L2 归纳稳定的偏好、目标和策略，变更会先进入审核界面。' },
+    ],
+  },
+  tutors: {
+    title: '选择和管理 Tutor',
+    description: 'Tutor 是具有独立 Soul、默认模型、能力权限和私有连续性记忆的持久角色。',
+    steps: ['新会话开始前在输入框下方选择 Tutor；不选择时使用临时助手。', '到“辅导机器人”编辑 Soul、能力、资料权限和私有记忆。', '内置“使用指南”Tutor 专门回答软件操作问题，并会指出准确入口。'],
+    manage: '管理 Tutor',
+  },
+}
+
+const englishCopy: typeof chineseCopy = {
+  eyebrow: 'Tutor Agent Guide',
+  title: 'Start from the real controls',
+  description: 'This is not a wizard that must be replayed from the beginning. Choose any topic directly; composer labels and order match the real Chat UI.',
+  askGuide: 'Ask the Usage Guide',
+  topicNavigation: 'Help topics',
+  topicsLabel: 'Topics',
+  topics: {
+    composer: 'Composer controls',
+    materials: 'Add material',
+    modes: 'Conversation modes',
+    knowledge: 'Knowledge Base',
+    notebook: 'Notebook',
+    memory: 'Memory',
+    tutors: 'Tutors',
+  },
+  showInComposer: 'Show control',
+  remembered: 'Help remembers the last topic and composer control you viewed.',
+  restartOnboarding: 'Rerun first-time setup',
+  composer: {
+    title: 'Learn the conversation composer',
+    description: 'Click any control in this composer replica. Its position, order, and label match the real Chat interface.',
+    openChat: 'Open the real Chat interface',
+  },
+  materials: {
+    title: 'Three ways to add material',
+    description: 'They have different lifetimes and retrieval scopes and should not be treated as one upload feature.',
+    attachmentTitle: 'Attachment: temporary context for one message',
+    attachmentText: 'Use it to read a file once. It is not ingested and does not remain available to future conversations.',
+    sourceTitle: 'Knowledge Base or Notebook: conversation source',
+    sourceText: 'Use it when the Agent should search a collection throughout the conversation. One Knowledge Base or Notebook can be associated at a time.',
+    mentionTitle: '@ target: reference exact saved content',
+    mentionText: 'Use it to name one note, quiz, or question instead of asking the Agent to infer a target from a full source.',
+  },
+  modes: {
+    title: 'Choose a conversation mode',
+    description: 'The mode entry is the first button at the lower left of the composer. It changes interaction behavior but never sends the first message for you.',
+    openChat: 'Open Chat and choose a mode',
+    items: [
+      { icon: <MessageSquare size={18} />, title: 'Chat', text: 'Normal streaming conversation with optional tool use and no forced workflow.', action: 'Show control' },
+      { icon: <SearchCheck size={18} />, title: 'Research', text: 'Clarifies scope before explicitly starting detailed research and producing a cited report.', action: 'Show control' },
+      { icon: <FileQuestion size={18} />, title: 'Quiz', text: 'Confirms topic and material before creating a durable interactive quiz card.', action: 'Show control' },
+      { icon: <FileText size={18} />, title: 'Organize', text: 'Reads Notebook and proposes reviewable organization changes without bypassing approval.', action: 'Show control' },
+    ],
+  },
+  knowledge: {
+    title: 'Configure and use Knowledge Base',
+    description: 'Knowledge Base keeps durable material and supplies cited context through vector retrieval.',
+    steps: ['Add and test an embedding profile under Settings > Embedding.', 'Open Knowledge Base, create one, and add documents.', 'Return to Chat and select that Knowledge Base from the composer source menu.', 'Ask your question and inspect citations; use an @ target when you need one exact saved item.'],
+    embedding: 'Configure embedding',
+    open: 'Open Knowledge Base',
+  },
+  notebook: {
+    title: 'Configure and use Notebook',
+    description: 'Notebook is a Markdown workspace. Use the app-local directory or bind an external Vault on desktop.',
+    steps: ['Inspect the local directory or bind an external Markdown Vault under Settings > Notebook.', 'Create, read, and edit notes under Space > Notebook.', 'Select Notebook from the Chat source menu when the Agent should search multiple notes.', 'Use the Space button and @ reference when you need one exact note.'],
+    settings: 'Notebook settings',
+    open: 'Open Notebook',
+  },
+  memory: {
+    title: 'Inspect and update Memory',
+    description: 'Memory builds a reliable learner profile and Tutor continuity; it is not a Notebook document library.',
+    open: 'Open Memory',
+    items: [
+      { icon: <FileText size={18} />, title: 'L1 workspace evidence', text: 'Real Chat, Quiz, and Notebook product events that support L2 updates.' },
+      { icon: <Database size={18} />, title: 'L2 module summaries', text: 'Organized by Chat, Quiz, Notebook, and other modules; select a document to update, check, or deduplicate.' },
+      { icon: <Brain size={18} />, title: 'L3 cross-module memory', text: 'Stable preferences, goals, and strategies summarized from L2, with changes reviewed before application.' },
+    ],
+  },
+  tutors: {
+    title: 'Choose and manage Tutors',
+    description: 'A Tutor is a persistent role with its own Soul, default model, capabilities, permissions, and private continuity memory.',
+    steps: ['Choose a Tutor below the composer before the first message; no selection means Temporary Assistant.', 'Open Tutor Bot to edit Soul, capabilities, resource permissions, and private memory.', 'The built-in Usage Guide Tutor answers product-use questions and points to exact controls.'],
+    manage: 'Manage Tutors',
+  },
+}

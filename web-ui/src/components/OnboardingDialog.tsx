@@ -379,7 +379,7 @@ function GuideSteps({ items }: { items: string[] }) {
 const chineseCopy = {
   title: '开始使用',
   subtitle: '完成必要配置并开始真实学习任务',
-  steps: ['模型准备', '选择导师', '知识库', '笔记本', '记忆', '会话模式'],
+  steps: ['模型准备', '选择导师', '知识库', '笔记本', '记忆', '开始会话'],
   dismiss: '关闭使用引导',
   later: '稍后再说',
   back: '上一步',
@@ -444,15 +444,15 @@ const chineseCopy = {
     open: '打开记忆',
   },
   mode: {
-    title: '选择会话模式',
-    description: '逐项了解模式的适用场景和运行方式，再进入真实会话。起步内容可编辑且不会自动发送。',
+    title: '开始一段真实会话',
+    description: '先认识实际输入框的各个入口，再查看模式差异。起步内容可编辑且不会自动发送。',
   },
 }
 
 const englishCopy: typeof chineseCopy = {
   title: 'Get started',
   subtitle: 'Complete essential setup and start a real learning task',
-  steps: ['Model', 'Tutor', 'Knowledge', 'Notebook', 'Memory', 'Modes'],
+  steps: ['Model', 'Tutor', 'Knowledge', 'Notebook', 'Memory', 'Start chatting'],
   dismiss: 'Close onboarding',
   later: 'Maybe later',
   back: 'Back',
@@ -517,7 +517,7 @@ const englishCopy: typeof chineseCopy = {
     open: 'Open Memory',
   },
   mode: {
-    title: 'Choose a conversation mode',
-    description: 'Review when and how each mode runs, then enter a real conversation with an editable unsent starter prompt.',
+    title: 'Start a real conversation',
+    description: 'Learn the actual composer controls, then review mode behavior. Starter prompts stay editable and are never sent automatically.',
   },
 }

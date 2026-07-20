@@ -850,8 +850,8 @@ other generated learning records.
 - REQ-459: First-run onboarding shall provide six concise steps: verify or
   configure an available LLM, optionally choose or create a Tutor, configure
   and use a Knowledge Base, configure Notebook storage, understand and maintain
-  Memory, and select a Chat, Research, Quiz, or Organize conversation mode. Status:
-  implemented.
+  Memory, understand the real composer controls, and select a Chat, Research,
+  Quiz, or Organize conversation mode. Status: implemented.
 - REQ-460: The model step shall detect whether a usable model configuration
   already exists. When no usable configuration exists, it shall link directly
   to the relevant settings and offer the existing connection test. It shall
@@ -874,14 +874,15 @@ other generated learning records.
   real Memory workspace without modifying memory merely by viewing the guide.
   Status: implemented.
 - REQ-462: The final onboarding step shall provide a dedicated child interface
-  for Chat, Research, Quiz, and Organize. Each mode shall have an individual
-  introduction covering suitable scenarios, runtime or workflow behavior,
-  usable material, expected output, and an editable starter prompt. Selecting
-  its start action shall open a real new conversation in that mode without
-  automatically sending the prompt. The interface shall respect the selected
-  Tutor's allowed capabilities and Notebook permission. Notebook itself shall
-  remain a workspace rather than a conversation mode; internal Code Exec and
-  retired Deep Solve shall not appear. Status: implemented.
+  that first mirrors the real composer controls, then introduces Chat,
+  Research, Quiz, and Organize. Each mode shall cover suitable scenarios,
+  runtime or workflow behavior, usable material, expected output, and an
+  editable starter prompt. Selecting its start action shall open a real new
+  conversation in that mode without automatically sending the prompt. The
+  interface shall respect the selected Tutor's allowed capabilities and
+  Notebook permission. Notebook itself shall remain a workspace rather than a
+  conversation mode; internal Code Exec and retired Deep Solve shall not
+  appear. Status: implemented.
 - REQ-463: Empty product surfaces shall provide contextual guidance focused on
   the next meaningful action for that surface. Notebook, Quiz Bank, Memory,
   Tutor, and Research guidance shall disappear automatically once the relevant
@@ -892,10 +893,11 @@ other generated learning records.
   spotlight tours. Complex features may show a concise one-time hint when
   first used. Status: implemented for compact contextual guidance; no
   additional one-time interaction hints are currently enabled.
-- REQ-465: Settings or Help shall provide an explicit action to reopen the
-  onboarding flow, while the in-app manual remains available for complete
-  reference. Reopening onboarding shall not reset user data or configuration.
-  Status: implemented.
+- REQ-465: Settings > Help shall provide a persistent, non-linear guide center
+  rather than reopening first-run onboarding as its primary experience. Users
+  shall be able to enter any topic directly, and the last viewed topic shall be
+  restored locally without resetting onboarding state. Rerunning first-run
+  setup may remain a secondary explicit action. Status: implemented.
 - REQ-466: Onboarding state shall be local-first and versioned. At minimum it
   shall track an `onboarding_version`, completion state, and dismissed
   contextual hints so future releases can introduce only the relevant new
@@ -916,6 +918,24 @@ other generated learning records.
 - REQ-469: Onboarding analytics shall not require hosted telemetry for MVP.
   Completion and hint state shall stay in local settings unless the user later
   opts into a separately specified diagnostics mechanism. Status: implemented.
+- REQ-469A: Product guidance for Chat shall use an interface-faithful composer
+  illustration with the same order, icons, and labels as the real input box.
+  It shall cover conversation mode, attachment upload, Knowledge Base or
+  Notebook source association, Space `@` references, model selection, and the
+  send/stop control. Status: implemented.
+- REQ-469B: Guidance shall explain the operational difference between attaching
+  a temporary file, associating a Knowledge Base or Notebook for retrieval, and
+  explicitly referencing one Notebook or Quiz target with `@`. Status:
+  implemented.
+- REQ-469C: The stable built-in `general-tutor` profile shall serve as the
+  Usage Guide Tutor. It shall answer product-use questions in ordinary Chat,
+  name exact product paths and controls, and remain non-deletable. Existing
+  untouched General Tutor profiles may migrate to this identity, while
+  user-customized built-in profiles shall not be silently overwritten. Status:
+  implemented.
+- REQ-469D: Help shall provide a direct action that starts a real new Chat bound
+  to the Usage Guide Tutor. The action may prefill an editable prompt but shall
+  not send it automatically. Status: implemented.
 
 ## 25. Storage and Data
 

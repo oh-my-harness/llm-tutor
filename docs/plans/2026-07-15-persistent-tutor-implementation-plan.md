@@ -1,12 +1,12 @@
 # Persistent Tutor Implementation Plan
 
-> Status: in progress | Date: 2026-07-15 | Last updated: 2026-07-16 | Target: v0.3.1 stabilization and post-release development
+> Status: in progress | Date: 2026-07-15 | Last updated: 2026-07-20 | Target: v0.3.1 stabilization and post-release development
 >
 > Product design: `../specs/2026-07-15-persistent-tutor-design.md`
 
 Implementation progress (2026-07-16): the Phase 0/1 identity loop, bounded Soul
 runtime context, tutor default-model resolution, and server-enforced resource
-policy are implemented. Tutor CRUD, General Tutor seeding, immutable session
+policy are implemented. Tutor CRUD, Usage Guide Tutor seeding, immutable session
 binding, the optional Chat chooser, session restoration, Tutor management, and
 private Tutor Memory are released in `v0.3.1`. Private commitments, open
 loops, lesson plans, reflections, and strategies are isolated per Tutor,
@@ -95,8 +95,10 @@ TutorProfile
   updated_at
 ```
 
-The store seeds one built-in General Tutor on first use. It may be edited and
-reset to defaults, but not deleted. User-created tutors are currently archived
+The store seeds one built-in Usage Guide Tutor with stable ID `general-tutor`
+on first use. It may be edited and reset to defaults, but not deleted. Existing
+untouched General Tutor defaults migrate to the guide identity while customized
+built-in profiles remain unchanged. User-created tutors are currently archived
 through `DELETE /api/tutors/:id`; permanent deletion remains future work and
 must report affected sessions before asking the UI for an explicit retention
 choice.
@@ -162,6 +164,8 @@ Backend tasks:
 - [x] Add `crates/tutor-web/src/tutor_store.rs` with typed profile, permission,
   and validation models. Private memory models remain Phase 4 work.
 - [x] Seed the built-in General Tutor idempotently.
+- [x] Repurpose the stable built-in profile as the Usage Guide Tutor and migrate
+  only untouched former defaults.
 - [x] Add atomic create, list, get, update, archive, and reset operations.
 - [ ] Add explicit permanent deletion with affected-session preview and
   retention choice.
@@ -482,7 +486,7 @@ The initial implementation began with Phase 0 and Phase 1 only, delivering the
 identity loop before Tutor Memory. This slice is now complete:
 
 1. create `TutorStore` and CRUD routes;
-2. seed General Tutor;
+2. seed the stable built-in Tutor, now presented as the Usage Guide;
 3. add optional immutable `tutor_id` to session metadata and APIs;
 4. add the Chat empty-state tutor chooser;
 5. display and restore tutor identity in conversation UI;

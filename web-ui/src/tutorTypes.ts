@@ -4,6 +4,8 @@ export interface TutorResourcePermissions {
   space: boolean
 }
 
+export const BUILT_IN_GUIDE_TUTOR_ID = 'general-tutor'
+
 export interface TutorProfile {
   id: string
   name: string

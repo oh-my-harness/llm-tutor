@@ -37,6 +37,7 @@ import type { QuizSession } from './quizTypes'
 import { attachRestoredQuizzesToMessages, quizFromTrace } from './quizRestore'
 import { attachRestoredResearchReports, researchReportFromTracePayload } from './researchRestore'
 import type { ResearchReportTraceData } from './researchRestore'
+import { guideTutorStarterPrompt, type ProductGuideDestination } from './productGuide'
 import {
   appendCompletedSessionMessage,
   isCurrentSessionEvent,
@@ -54,7 +55,7 @@ import {
   titleFromMarkdown,
 } from './notebookSave'
 import type { NotebookVaultInfo, SaveToNotebookResult } from './notebookSave'
-import { fetchTutors, type TutorProfile, type TutorSummary } from './tutorTypes'
+import { BUILT_IN_GUIDE_TUTOR_ID, fetchTutors, type TutorProfile, type TutorSummary } from './tutorTypes'
 import { tutorBindingForCreate } from './tutorSession'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
@@ -1189,6 +1190,33 @@ export default function App() {
     setStarterDraft({ id: Date.now(), text: onboardingStarterPrompt(mode, llmSettings.language) })
   }, [completeOnboarding, handleTutorSelect, llmSettings.language, pushStatus, selectedTutorId, startNewChat, tutors])
 
+  const startGuideTutor = useCallback(() => {
+    const guideTutor = tutors.find((tutor) => tutor.id === BUILT_IN_GUIDE_TUTOR_ID)
+    if (!guideTutor) {
+      pushStatus({ kind: 'error', label: '使用指南不可用', detail: '内置使用指南 Tutor 尚未加载，请稍后重试。' })
+      return
+    }
+    startNewChat()
+    handleTutorSelect(guideTutor.id)
+    setCapability('chat')
+    setSelectedKnowledgeBaseId('')
+    setSelectedNotebookEnabled(false)
+    setStarterDraft({ id: Date.now(), text: guideTutorStarterPrompt(llmSettings.language) })
+  }, [handleTutorSelect, llmSettings.language, pushStatus, startNewChat, tutors])
+
+  const handleGuideNavigate = useCallback((destination: ProductGuideDestination) => {
+    if (destination === 'chat') {
+      startNewChat()
+      return
+    }
+    if (destination === 'embedding-settings' || destination === 'notebook-settings') {
+      setSettingsTab(destination === 'embedding-settings' ? 'embedding' : 'notebook')
+      setView('settings')
+      return
+    }
+    setView(destination === 'tutors' ? 'tutor' : destination)
+  }, [startNewChat])
+
   const handleCapabilityChange = useCallback(async (nextCapability: Capability) => {
     if (running) return
     const tutor = selectedTutorId ? tutors.find((item) => item.id === selectedTutorId) : null
@@ -1619,6 +1647,8 @@ export default function App() {
             onTabChange={setSettingsTab}
             onChange={handleSettingsChange}
             onOpenOnboarding={openOnboarding}
+            onGuideNavigate={handleGuideNavigate}
+            onStartGuideTutor={startGuideTutor}
           />
         )}
       </div>
