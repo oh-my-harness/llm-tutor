@@ -585,7 +585,9 @@ export function SettingsPage({
               </h2>
               <p className="mt-1 text-sm text-gray-600">{tabDescription(activeTab, t)}</p>
             </div>
-            <span className="ml-auto text-sm text-gray-500">{t('settings.saved')}</span>
+            {activeTab !== 'help' && (
+              <span className="ml-auto text-sm text-gray-500">{t('settings.saved')}</span>
+            )}
           </div>
 
           {activeTab === 'appearance' && (

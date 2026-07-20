@@ -26,7 +26,7 @@ export function ComposerGuidePreview({ control, onControlChange, compact = false
   return (
     <div>
       <div className="rounded-3xl border border-blue-100 bg-white shadow-sm">
-        <div className={`${compact ? 'min-h-16 px-5 py-4 text-sm' : 'min-h-24 px-5 py-5 text-base'} text-gray-400`}>
+        <div className={`${compact ? 'min-h-16 px-5 py-4 text-sm' : 'min-h-20 px-5 py-4 text-sm'} text-gray-400`}>
           {copy.placeholder}
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-blue-50 px-4 py-2">
@@ -52,14 +52,14 @@ export function ComposerGuidePreview({ control, onControlChange, compact = false
         </div>
       </div>
 
-      <div className={`${compact ? 'mt-3 px-1' : 'mt-5 border-l-2 border-blue-500 pl-5'}`} aria-live="polite">
+      <div className={`${compact ? 'mt-3 px-1' : 'mt-4 border-l-2 border-blue-500 pl-4'}`} aria-live="polite">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
           <span className="text-blue-600">{controlIcons[control]}</span>
           {detail.label}
         </div>
         <p className="mt-1 text-sm leading-5 text-gray-600">{detail.description}</p>
         {!compact && (
-          <ol className="mt-3 space-y-1.5 text-sm leading-5 text-gray-600">
+          <ol className="mt-2 space-y-1 text-sm leading-5 text-gray-600">
             {detail.steps.map((step, index) => (
               <li key={step} className="flex gap-2">
                 <span className="w-4 shrink-0 font-medium text-blue-700">{index + 1}.</span>

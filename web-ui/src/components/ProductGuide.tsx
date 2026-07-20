@@ -3,12 +3,10 @@ import {
   AtSign,
   Bot,
   Brain,
-  CircleHelp,
   Database,
   FileQuestion,
   FileText,
   MessageSquare,
-  NotebookPen,
   Paperclip,
   SearchCheck,
   Settings2,
@@ -30,16 +28,6 @@ interface Props {
   onRestartOnboarding: () => void
 }
 
-const topicIcons: Record<ProductGuideTopic, ReactNode> = {
-  composer: <MessageSquare size={17} />,
-  materials: <AtSign size={17} />,
-  modes: <SearchCheck size={17} />,
-  knowledge: <Database size={17} />,
-  notebook: <NotebookPen size={17} />,
-  memory: <Brain size={17} />,
-  tutors: <Bot size={17} />,
-}
-
 export function ProductGuide({ onNavigate, onStartGuideTutor, onRestartOnboarding }: Props) {
   const { language } = useI18n()
   const copy = language === 'en-US' ? englishCopy : chineseCopy
@@ -58,49 +46,39 @@ export function ProductGuide({ onNavigate, onStartGuideTutor, onRestartOnboardin
 
   return (
     <section className="min-w-0">
-      <header className="flex items-start justify-between gap-6 border-b border-gray-200 pb-5">
-        <div>
-          <div className="flex items-center gap-2 text-blue-600">
-            <CircleHelp size={20} />
-            <span className="text-sm font-semibold">{copy.eyebrow}</span>
-          </div>
-          <h2 className="mt-2 text-xl font-semibold text-gray-950">{copy.title}</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">{copy.description}</p>
-        </div>
+      <div className="flex items-center justify-between gap-4 border-b border-gray-200 pb-4">
+        <p className="min-w-0 text-sm leading-5 text-gray-500">{copy.description}</p>
         <button
           type="button"
-          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
+          className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-950"
           onClick={onStartGuideTutor}
         >
-          <Bot size={16} />
+          <Bot size={15} />
           {copy.askGuide}
         </button>
-      </header>
+      </div>
 
-      <div className="grid min-h-[31rem] grid-cols-1 gap-5 pt-5 2xl:grid-cols-[10.5rem_minmax(0,1fr)] 2xl:gap-6">
-        <nav className="border-b border-gray-200 pb-4 2xl:border-r 2xl:border-b-0 2xl:pr-4 2xl:pb-0" aria-label={copy.topicNavigation}>
-          <div className="mb-2 px-2 text-xs font-medium text-gray-400">{copy.topicsLabel}</div>
-          <div className="flex flex-wrap gap-1 2xl:block 2xl:space-y-1">
-            {productGuideTopics.map((topic) => (
-              <button
-                key={topic}
-                type="button"
-                className={`flex min-h-9 w-auto items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors 2xl:w-full ${
-                  guideState.topic === topic
-                    ? 'bg-blue-50 font-medium text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
-                }`}
-                aria-current={guideState.topic === topic ? 'page' : undefined}
-                onClick={() => selectTopic(topic)}
-              >
-                <span className="shrink-0">{topicIcons[topic]}</span>
-                <span>{copy.topics[topic]}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
+      <nav className="pt-4" aria-label={copy.topicNavigation}>
+        <div className="grid grid-cols-4 gap-1 rounded-lg bg-gray-100 p-1 xl:grid-cols-7">
+          {productGuideTopics.map((topic) => (
+            <button
+              key={topic}
+              type="button"
+              className={`flex h-9 min-w-0 items-center justify-center rounded-md px-2 text-sm transition-colors ${
+                guideState.topic === topic
+                  ? 'bg-white font-medium text-gray-950 shadow-sm'
+                  : 'text-gray-500 hover:bg-white/60 hover:text-gray-900'
+              }`}
+              aria-current={guideState.topic === topic ? 'page' : undefined}
+              onClick={() => selectTopic(topic)}
+            >
+              <span className="truncate">{copy.topics[topic]}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
 
-        <article className="min-w-0 pb-4">
+      <article className="min-h-[25rem] min-w-0 py-6">
           {guideState.topic === 'composer' && (
             <GuideSection title={copy.composer.title} description={copy.composer.description}>
               <ComposerGuidePreview
@@ -170,11 +148,9 @@ export function ProductGuide({ onNavigate, onStartGuideTutor, onRestartOnboardin
               </div>
             </GuideSection>
           )}
-        </article>
-      </div>
+      </article>
 
-      <footer className="flex items-center justify-between border-t border-gray-200 pt-4 text-xs text-gray-500">
-        <span>{copy.remembered}</span>
+      <footer className="flex justify-end border-t border-gray-200 pt-3 text-xs text-gray-500">
         <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-gray-100 hover:text-gray-900" onClick={onRestartOnboarding}>
           <Settings2 size={14} />
           {copy.restartOnboarding}
@@ -243,12 +219,9 @@ function GuideAction({ children, onClick, primary = false }: { children: ReactNo
 }
 
 const chineseCopy = {
-  eyebrow: 'Tutor Agent 使用指南',
-  title: '从真实入口开始',
-  description: '这里不是必须从头播放的教程。直接选择需要的主题；输入框示意与实际聊天界面的控件顺序和名称保持一致。',
-  askGuide: '询问使用指南',
+  description: '选择主题查看对应入口和操作方式。',
+  askGuide: '问使用指南',
   topicNavigation: '帮助主题',
-  topicsLabel: '主题',
   topics: {
     composer: '输入框控件',
     materials: '添加资料',
@@ -259,7 +232,6 @@ const chineseCopy = {
     tutors: '导师',
   },
   showInComposer: '查看入口',
-  remembered: '帮助页会记住上次查看的主题和控件。',
   restartOnboarding: '重新运行首次配置',
   composer: {
     title: '认识会话输入框',
@@ -320,12 +292,9 @@ const chineseCopy = {
 }
 
 const englishCopy: typeof chineseCopy = {
-  eyebrow: 'Tutor Agent Guide',
-  title: 'Start from the real controls',
-  description: 'This is not a wizard that must be replayed from the beginning. Choose any topic directly; composer labels and order match the real Chat UI.',
-  askGuide: 'Ask the Usage Guide',
+  description: 'Choose a topic to see its controls and workflow.',
+  askGuide: 'Ask Usage Guide',
   topicNavigation: 'Help topics',
-  topicsLabel: 'Topics',
   topics: {
     composer: 'Composer controls',
     materials: 'Add material',
@@ -336,7 +305,6 @@ const englishCopy: typeof chineseCopy = {
     tutors: 'Tutors',
   },
   showInComposer: 'Show control',
-  remembered: 'Help remembers the last topic and composer control you viewed.',
   restartOnboarding: 'Rerun first-time setup',
   composer: {
     title: 'Learn the conversation composer',
