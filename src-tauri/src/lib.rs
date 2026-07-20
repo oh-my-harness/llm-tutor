@@ -15,6 +15,9 @@ use tauri_plugin_shell::ShellExt;
 #[cfg(not(debug_assertions))]
 use tauri_plugin_shell::process::CommandChild;
 
+#[cfg(target_os = "windows")]
+mod native_window;
+
 struct BackendState {
     url: String,
     data_dir: PathBuf,
@@ -105,6 +108,17 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
     clipboard.set_text(text).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn set_native_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    native_window::apply_theme(&window, &theme)?;
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, theme);
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -116,9 +130,15 @@ pub fn run() {
             open_data_dir,
             open_external_url,
             read_clipboard_text,
-            write_clipboard_text
+            write_clipboard_text,
+            set_native_window_theme
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                native_window::configure(&window)?;
+            }
+
             let port = find_free_port()?;
             let url = format!("http://127.0.0.1:{port}");
             let data_dir = app_data_dir(app)?;

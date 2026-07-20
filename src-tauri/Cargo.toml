@@ -16,3 +16,9 @@ arboard = "3.6.1"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-shell = "2.3.5"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Graphics_Dwm",
+  "Win32_UI_WindowsAndMessaging",
+] }

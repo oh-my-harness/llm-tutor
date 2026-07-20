@@ -1008,11 +1008,13 @@ other generated learning records.
   Status: in progress; framework and first Notebook/generic action slice are implemented.
 - REQ-574: The desktop app shall prefer native desktop affordances for file/folder selection, revealing local files, external link opening, and future app-level shortcuts where appropriate. Status: in progress; shared directory picker helper, Notebook Vault folder binding, native clipboard, data directory reveal, and external-link opening are implemented.
 - REQ-575: Desktop polish shall preserve the local-first sidecar architecture and shall not rewrite existing backend routes as Tauri commands unless a native capability requires it. Status: implemented.
-- REQ-576: The Windows desktop app shall use frameless app-owned window chrome
-  without an upper-left app icon or product-name label, while preserving window
-  drag, double-click maximize/restore, minimize, maximize, close, keyboard
-  focus, and resize behavior. macOS and Linux shall retain native title bars.
-  Status: implemented.
+- REQ-576: The Windows desktop app shall retain native window chrome and system
+  caption controls while hiding the upper-left caption icon and visually
+  suppressing the product-name label through a thin Windows-only adapter. Native
+  drag, Snap Layouts, double-click maximize/restore, minimize, maximize, close,
+  keyboard behavior, resize, taskbar icon, and Alt+Tab icon shall remain intact.
+  macOS and Linux shall retain their unmodified native title bars. Status:
+  implemented.
 
 ## 30. Acceptance Baseline
 

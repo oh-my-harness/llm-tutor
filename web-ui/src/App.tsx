@@ -14,7 +14,6 @@ import { OnboardingDialog } from './components/OnboardingDialog'
 import { onboardingModeBlock, onboardingStarterPrompt, type OnboardingMode } from './onboardingModes'
 import { OnboardingResumeButton } from './components/OnboardingResumeButton'
 import { AppView, Sidebar } from './components/Sidebar'
-import { DesktopTitleBar } from './components/DesktopTitleBar'
 import type { DeepSolveTraceEntry } from './components/DeepSolveMessage'
 import type { SourceReference, SourceTarget } from './components/MarkdownMessage'
 import { AgentStatus } from './agentStatus'
@@ -47,7 +46,7 @@ import {
   reconcileSessionRunState,
 } from './sessionResilience'
 import { I18nProvider, translate, type TranslationKey } from './i18n'
-import { openExternalUrl } from './api'
+import { openExternalUrl, setNativeWindowTheme } from './api'
 import {
   normalizeNotebookEntryPath,
   normalizeNotebookFolderPath,
@@ -719,6 +718,12 @@ export default function App() {
       setOnboardingOpen(true)
     }
   }, [llmSettings.onboardingCompleted, llmSettings.onboardingVersion, settingsHydrated])
+
+  useEffect(() => {
+    void setNativeWindowTheme(llmSettings.theme).catch((error) => {
+      console.warn('failed to update native window theme', error)
+    })
+  }, [llmSettings.theme])
 
   useEffect(() => {
     refreshSessions().catch((err) => {
@@ -1508,9 +1513,7 @@ export default function App() {
 
   return (
     <I18nProvider language={llmSettings.language}>
-    <div className="app-shell flex h-screen flex-col overflow-hidden" data-theme={llmSettings.theme}>
-      <DesktopTitleBar language={llmSettings.language} />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+    <div className="app-shell flex h-screen overflow-hidden" data-theme={llmSettings.theme}>
       <Sidebar
         activeView={view}
         activeSessionId={view === 'chat' ? sessionId : null}
@@ -1654,7 +1657,6 @@ export default function App() {
             onStartGuideTutor={startGuideTutor}
           />
         )}
-      </div>
       </div>
 
       <ApprovalDialog request={pendingApproval} onDecision={handleApproval} />

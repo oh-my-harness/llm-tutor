@@ -93,6 +93,12 @@ export async function writeClipboardText(text: string): Promise<boolean> {
   return true
 }
 
+export async function setNativeWindowTheme(theme: string): Promise<void> {
+  const { invoke, isTauri } = await import('@tauri-apps/api/core')
+  if (!isTauri()) return
+  await invoke('set_native_window_theme', { theme })
+}
+
 async function initialize() {
   const { invoke, isTauri } = await import('@tauri-apps/api/core')
   if (!isTauri()) return
