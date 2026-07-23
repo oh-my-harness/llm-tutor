@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 
 use crate::tutor_memory_store::{
@@ -86,7 +86,7 @@ impl Tool for ReadTutorMemoryTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let include_resolved = args["include_resolved"].as_bool().unwrap_or(false);
             let kind = optional_kind(&args, "kind")?;
@@ -98,7 +98,7 @@ impl Tool for ReadTutorMemoryTool {
             let mut entries = self
                 .store
                 .list(&self.tutor_id, include_resolved)
-                .map_err(|error| ToolError::Execution(error.to_string()))?;
+                .map_err(|error| tool_execution_failure(error.to_string()))?;
             entries.retain(|entry| kind.is_none_or(|kind| entry.kind == kind));
             if let Some(query) = query {
                 entries.retain(|entry| {
@@ -109,33 +109,33 @@ impl Tool for ReadTutorMemoryTool {
                             .is_some_and(|value| value.to_lowercase().contains(&query))
                 });
             }
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: if entries.is_empty() {
-                        "No private continuity memory is recorded for this tutor.".into()
-                    } else {
-                        entries
-                            .iter()
-                            .map(|entry| {
-                                format!(
-                                    "- [{}] {}{} (id: {})",
-                                    kind_name(entry.kind),
-                                    entry.text,
-                                    entry
-                                        .next_action
-                                        .as_deref()
-                                        .map(|action| format!("; next: {action}"))
-                                        .unwrap_or_default(),
-                                    entry.id
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    },
-                }],
-                details: json!({ "tutor_id": self.tutor_id, "entries": entries }),
-                terminate: false,
-            })
+            let text = if entries.is_empty() {
+                "No private continuity memory is recorded for this tutor.".into()
+            } else {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "- [{}] {}{} (id: {})",
+                            kind_name(entry.kind),
+                            entry.text,
+                            entry
+                                .next_action
+                                .as_deref()
+                                .map(|action| format!("; next: {action}"))
+                                .unwrap_or_default(),
+                            entry.id
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            Ok(ToolResult::ephemeral(
+                vec![DataBlock::text(text)],
+                format!("Read {} private tutor memory item(s).", entries.len()),
+                json!({ "tutor_id": self.tutor_id, "entries": entries }),
+                false,
+            ))
         })
     }
 }
@@ -168,7 +168,7 @@ impl Tool for RememberForLaterTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let kind = required_kind(&args, "kind")?;
             let text = required_string(&args, "text")?;
@@ -185,14 +185,17 @@ impl Tool for RememberForLaterTool {
                         source_message_id: optional_string(&args, "source_message_id"),
                     },
                 )
-                .map_err(|error| ToolError::Execution(error.to_string()))?;
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!("Saved private tutor memory: {}", entry.text),
-                }],
-                details: json!({ "tutor_id": self.tutor_id, "entry": entry }),
-                terminate: false,
-            })
+                .map_err(|error| tool_execution_failure(error.to_string()))?;
+            let content = vec![DataBlock::text(format!(
+                "Saved private tutor memory: {}",
+                entry.text
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({ "tutor_id": self.tutor_id, "entry": entry }),
+                false,
+            ))
         })
     }
 }
@@ -223,7 +226,7 @@ impl Tool for ResolveTutorMemoryTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let entry_id = required_string(&args, "entry_id")?;
             let entry = self
@@ -233,28 +236,31 @@ impl Tool for ResolveTutorMemoryTool {
                     &entry_id,
                     optional_string(&args, "resolution_note"),
                 )
-                .map_err(|error| ToolError::Execution(error.to_string()))?;
+                .map_err(|error| tool_execution_failure(error.to_string()))?;
             debug_assert_eq!(entry.status, TutorMemoryStatus::Resolved);
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!("Closed private tutor memory: {}", entry.text),
-                }],
-                details: json!({ "tutor_id": self.tutor_id, "entry": entry }),
-                terminate: false,
-            })
+            let content = vec![DataBlock::text(format!(
+                "Closed private tutor memory: {}",
+                entry.text
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({ "tutor_id": self.tutor_id, "entry": entry }),
+                false,
+            ))
         })
     }
 }
 
-fn required_kind(args: &serde_json::Value, key: &str) -> Result<TutorMemoryKind, ToolError> {
+fn required_kind(args: &serde_json::Value, key: &str) -> Result<TutorMemoryKind, ToolFailure> {
     optional_kind(args, key)?
-        .ok_or_else(|| ToolError::InvalidArguments(format!("{key} is required")))
+        .ok_or_else(|| ToolFailure::invalid_arguments(format!("{key} is required")))
 }
 
 fn optional_kind(
     args: &serde_json::Value,
     key: &str,
-) -> Result<Option<TutorMemoryKind>, ToolError> {
+) -> Result<Option<TutorMemoryKind>, ToolFailure> {
     let Some(value) = args[key].as_str() else {
         return Ok(None);
     };
@@ -265,7 +271,7 @@ fn optional_kind(
         "reflection" => TutorMemoryKind::Reflection,
         "strategy" => TutorMemoryKind::Strategy,
         other => {
-            return Err(ToolError::InvalidArguments(format!(
+            return Err(ToolFailure::invalid_arguments(format!(
                 "unsupported tutor memory kind `{other}`"
             )));
         }
@@ -273,9 +279,9 @@ fn optional_kind(
     Ok(Some(kind))
 }
 
-fn required_string(args: &serde_json::Value, key: &str) -> Result<String, ToolError> {
+fn required_string(args: &serde_json::Value, key: &str) -> Result<String, ToolFailure> {
     optional_string(args, key)
-        .ok_or_else(|| ToolError::InvalidArguments(format!("{key} is required")))
+        .ok_or_else(|| ToolFailure::invalid_arguments(format!("{key} is required")))
 }
 
 fn optional_string(args: &serde_json::Value, key: &str) -> Option<String> {
@@ -296,6 +302,10 @@ fn kind_name(kind: TutorMemoryKind) -> &'static str {
     }
 }
 
+fn tool_execution_failure(message: impl Into<String>) -> ToolFailure {
+    ToolFailure::new("tutor_memory_failed", message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +318,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use llm_adapter::provider::Provider;
 use llm_harness_agent::Session;
-use llm_harness_types::{AgentMessage, ExecutionEnv, Tool};
+use llm_harness_types::{AgentMessage, ExecutionEnv, RunRequest, Tool};
 use tokio_util::sync::CancellationToken;
 use tutor_rag::KnowledgeRetriever;
 
@@ -200,13 +200,29 @@ impl CapabilityRouter {
         capability: Capability,
         messages: Vec<AgentMessage>,
     ) -> Result<String> {
+        self.run_request(capability, RunRequest::new(messages))
+            .await
+    }
+
+    /// Route a typed runtime request without exposing its extensions to prompts or Session.
+    pub async fn run_request(&self, capability: Capability, request: RunRequest) -> Result<String> {
         match capability {
-            Capability::Chat => crate::chat::run_chat_with_messages(self, messages).await,
-            Capability::Research => crate::chat::run_research_with_messages(self, messages).await,
-            Capability::Organize => crate::chat::run_organize_with_messages(self, messages).await,
-            Capability::Quiz => crate::chat::run_quiz_with_messages(self, messages).await,
+            Capability::Chat => {
+                crate::chat::run_conversation_with_request(self, "chat", request, None, None).await
+            }
+            Capability::Research => {
+                crate::chat::run_conversation_with_request(self, "research", request, None, None)
+                    .await
+            }
+            Capability::Organize => {
+                crate::chat::run_conversation_with_request(self, "organize", request, None, None)
+                    .await
+            }
+            Capability::Quiz => {
+                crate::chat::run_conversation_with_request(self, "quiz", request, None, None).await
+            }
             Capability::CodeExec => {
-                crate::code_exec::run_code_exec_with_messages(self, messages).await
+                crate::code_exec::run_code_exec_with_request(self, request, None, None).await
             }
         }
     }
@@ -230,28 +246,69 @@ impl CapabilityRouter {
         question: &str,
         abort_token: Option<CancellationToken>,
     ) -> Result<String> {
+        self.run_request_with_session_cancel(
+            capability,
+            session,
+            RunRequest::from_text(question),
+            abort_token,
+        )
+        .await
+    }
+
+    /// Route a typed runtime request using a durable session and optional cancellation.
+    pub async fn run_request_with_session_cancel(
+        &self,
+        capability: Capability,
+        session: Session,
+        request: RunRequest,
+        abort_token: Option<CancellationToken>,
+    ) -> Result<String> {
         match capability {
             Capability::Chat => {
-                crate::chat::run_chat_with_session_cancel(self, session, question, abort_token)
-                    .await
+                crate::chat::run_conversation_with_request(
+                    self,
+                    "chat",
+                    request,
+                    Some(session),
+                    abort_token,
+                )
+                .await
             }
             Capability::Research => {
-                crate::chat::run_research_with_session_cancel(self, session, question, abort_token)
-                    .await
+                crate::chat::run_conversation_with_request(
+                    self,
+                    "research",
+                    request,
+                    Some(session),
+                    abort_token,
+                )
+                .await
             }
             Capability::Organize => {
-                crate::chat::run_organize_with_session_cancel(self, session, question, abort_token)
-                    .await
+                crate::chat::run_conversation_with_request(
+                    self,
+                    "organize",
+                    request,
+                    Some(session),
+                    abort_token,
+                )
+                .await
             }
             Capability::Quiz => {
-                crate::chat::run_quiz_with_session_cancel(self, session, question, abort_token)
-                    .await
+                crate::chat::run_conversation_with_request(
+                    self,
+                    "quiz",
+                    request,
+                    Some(session),
+                    abort_token,
+                )
+                .await
             }
             Capability::CodeExec => {
-                crate::code_exec::run_code_exec_with_session_cancel(
+                crate::code_exec::run_code_exec_with_request(
                     self,
-                    session,
-                    question,
+                    request,
+                    Some(session),
                     abort_token,
                 )
                 .await

@@ -268,10 +268,10 @@ fallback generator.
    `collect_sources -> generate_questions -> verify_questions -> publish_questions`.
 3. `collect_sources` is a product executor step that prepares source chunks and
    generation instructions in workflow context.
-4. `generate_questions` is a runtime LLM step. It must call
-   `submit_step_result` with structured question JSON.
-5. `verify_questions` is a runtime LLM step. It must call `submit_step_result`
-   with `{"verdict":"pass","issues":[]}` or
+4. `generate_questions` is a runtime structured LLM step. Its final assistant
+   text must be the question JSON object.
+5. `verify_questions` is a runtime structured LLM step. Its final assistant
+   text must be `{"verdict":"pass","issues":[]}` or
    `{"verdict":"fail","action":"repair","issues":[...]}`.
 6. The workflow judge routes a verifier repair back to `generate_questions`
    once. A second verifier failure aborts the workflow instead of publishing weak
@@ -394,7 +394,7 @@ Note: V1 does not introduce separate quiz trace persistence. Future quiz generat
 - [x] Move verifier repair routing from the transitional direct-call path into
   `WorkflowEngine` transitions.
 - [x] Move generation and verifier LLM calls from workflow executor internals
-  into native runtime LLM steps using `submit_step_result`.
+  into native runtime structured LLM steps.
 
 ## 9. Acceptance Criteria
 

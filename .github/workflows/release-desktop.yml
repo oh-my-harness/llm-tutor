@@ -41,6 +41,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Audit runtime Tool session projections
+        shell: pwsh
+        run: ./scripts/check-tool-projections.ps1
+
       - name: Configure private Git dependencies
         shell: bash
         env:

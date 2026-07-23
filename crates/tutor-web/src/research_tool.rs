@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 use tutor_agent::CapabilityRouter;
 
@@ -54,7 +54,7 @@ impl Tool for ProposeResearchPlanTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let title = optional_string(&args, "title").unwrap_or_else(|| "Research plan".into());
             let topic = optional_string(&args, "topic").unwrap_or_else(|| "selected topic".into());
@@ -70,13 +70,13 @@ impl Tool for ProposeResearchPlanTool {
             let use_notebook = args["use_notebook"].as_bool().unwrap_or(false);
             let use_knowledge_base = args["use_knowledge_base"].as_bool().unwrap_or(false);
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Proposed research plan: {title}. Topic: {topic}. Scope: {scope}. Ask the user to confirm or revise before starting detailed research."
-                    ),
-                }],
-                details: json!({
+            let content = vec![DataBlock::text(format!(
+                "Proposed research plan: {title}. Topic: {topic}. Scope: {scope}. Ask the user to confirm or revise before starting detailed research."
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "title": title,
                     "topic": topic,
                     "scope": scope,
@@ -89,8 +89,8 @@ impl Tool for ProposeResearchPlanTool {
                     "steps": steps,
                     "questions": questions,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -127,10 +127,10 @@ impl Tool for CreateResearchReportTool {
         &'a self,
         args: serde_json::Value,
         ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let request = optional_string(&args, "request").ok_or_else(|| {
-                ToolError::InvalidArguments("create_research_report requires request".into())
+                ToolFailure::invalid_arguments("create_research_report requires request")
             })?;
             let requested_title = optional_string(&args, "title");
             let run = tutor_agent::research::run_research_workflow_with_runtime(
@@ -142,27 +142,27 @@ impl Tool for CreateResearchReportTool {
                 Some(ctx.abort.clone()),
             )
             .await
-            .map_err(|err| ToolError::Execution(err.to_string()))?;
+            .map_err(|err| tool_execution_failure(err.to_string()))?;
             let title = requested_title.unwrap_or_else(|| {
                 report_title_from_markdown(&run.markdown)
                     .unwrap_or_else(|| report_title_from_request(&request))
             });
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Research report \"{title}\" is ready with {} source(s). The product UI will render the report from tool metadata.",
-                        run.sources.len()
-                    ),
-                }],
-                details: json!({
+            let content = vec![DataBlock::text(format!(
+                "Research report \"{title}\" is ready with {} source(s). The product UI will render the report from tool metadata.",
+                run.sources.len()
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "title": title,
                     "request": request,
                     "markdown": run.markdown,
                     "sources": run.sources,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -221,6 +221,10 @@ fn string_array(args: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn tool_execution_failure(message: impl Into<String>) -> ToolFailure {
+    ToolFailure::new("research_tool_failed", message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +237,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(OsEnv::new(std::env::temp_dir())),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,

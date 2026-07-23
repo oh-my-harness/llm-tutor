@@ -25,6 +25,7 @@ pub fn build_workflow_engine_config(
         env_factory: Arc::new(FixedEnvFactory::new(env)),
         session_factory: Arc::new(JsonlSessionFactory),
         session_base_dir,
+        customize_builder: None,
     }
 }
 
@@ -79,7 +80,7 @@ mod tests {
     use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
     use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
     use llm_harness_runtime::workflow::model::{
-        ConditionExpr, Edge, EdgeCondition, Step, StepResult, Workflow,
+        ConditionExpr, Edge, EdgeCondition, Step, StepResult, StructuredStatus, Workflow,
     };
 
     struct FixedExecutor;
@@ -93,6 +94,7 @@ mod tests {
                 Ok(StepResult {
                     output: "runtime workflow executed".into(),
                     structured: Some(serde_json::json!({ "ok": true })),
+                    structured_status: StructuredStatus::NotRequired,
                     tool_calls_count: 0,
                     session_id: String::new(),
                     cost: CostAggregate::default(),
@@ -162,6 +164,7 @@ mod tests {
                     Ok(StepResult {
                         output: "runtime declarative route executed".into(),
                         structured: None,
+                        structured_status: StructuredStatus::NotRequired,
                         tool_calls_count: 0,
                         session_id: String::new(),
                         cost: CostAggregate::default(),

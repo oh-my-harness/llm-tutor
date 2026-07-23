@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
@@ -84,29 +84,31 @@ impl Tool for WebSearchTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let query = args["query"].as_str().unwrap_or("").to_string();
             if query.trim().is_empty() {
-                return Err(ToolError::InvalidArguments("query is empty".into()));
+                return Err(ToolFailure::invalid_arguments("query is empty"));
             }
 
             let results = self
                 .search(&query)
                 .await
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| ToolFailure::new("web_search_failed", err.to_string()))?;
             let text = format_results(&self.config.provider, &query, &results);
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text }],
-                details: json!({
+            let model_content = vec![DataBlock::text(text)];
+            Ok(ToolResult::projected(
+                model_content.clone(),
+                model_content,
+                json!({
                     "query": query,
                     "provider": self.config.provider,
                     "results": results.len(),
                     "items": result_details(&results),
                     "sources": source_details(&results),
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -739,6 +741,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,

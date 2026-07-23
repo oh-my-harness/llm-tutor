@@ -1,6 +1,6 @@
 use llm_harness_runtime::workflow::model::{ConditionExpr, Edge, EdgeCondition, Step, Workflow};
 use llm_harness_runtime::workflow::plan::validate_workflow;
-use llm_harness_types::SYNC_SPAWN_TOOL_NAME;
+use llm_harness_types::SPAWN_AGENT_TOOL_NAME;
 
 use crate::error::{Result, TutorError};
 
@@ -23,18 +23,21 @@ pub fn quiz_generation_workflow() -> Workflow {
                 "Generate grounded questions",
                 "Read the workflow Context. The `quiz_generation_prompt` variable contains the full source-grounded quiz generation instruction. \
                  Generate grounded single-choice quiz questions from those sources. If prior step history includes verifier repair feedback, repair the draft. \
-                 When done, call submit_step_result with {\"questions\":[...]} using the exact question schema requested in Context.",
+                 End the step with only the JSON object {\"questions\":[...]} using the exact question schema requested in Context. \
+                 Do not wrap the JSON in Markdown fences or add prose before or after it.",
                 vec![],
-            ),
+            )
+            .with_structured(Some(true)),
             Step::llm(
                 "verify_questions",
                 "Verify generated questions",
                 "Read the workflow Context and prior generate_questions structured result. Strictly verify every question against its cited source chunks. \
-                 When done, call submit_step_result with {\"verdict\":\"pass\",\"issues\":[]} if all questions are grounded. \
-                 If any question is unsupported, contradictory, or wrongly cited, call submit_step_result with \
-                 {\"verdict\":\"fail\",\"action\":\"repair\",\"issues\":[\"...\"]}.",
+                 End the step with only {\"verdict\":\"pass\",\"issues\":[]} if all questions are grounded. \
+                 If any question is unsupported, contradictory, or wrongly cited, end with only \
+                 {\"verdict\":\"fail\",\"action\":\"repair\",\"issues\":[\"...\"]}. Do not use Markdown fences.",
                 vec![],
-            ),
+            )
+            .with_structured(Some(true)),
             Step::executor(
                 "publish_questions",
                 "Publish verified questions",
@@ -103,9 +106,10 @@ pub fn memory_workflow_with_allowed_tools(allowed_tools: Vec<String>) -> Workflo
                 "run_memory",
                 "Run memory workflow",
                 "Read the workflow Context. The `memory_prompt` variable contains the full memory maintenance instruction, including target file, action, current Markdown, normalized evidence, and output schema. \
-                 Maintain learner memory according to that instruction. When done, call submit_step_result with the JSON object requested by `memory_prompt`.",
+                 Maintain learner memory according to that instruction. End the step with only the JSON object requested by `memory_prompt`; do not wrap it in Markdown fences or add prose.",
                 allowed_tools,
-            ),
+            )
+            .with_structured(Some(true)),
         ],
         edges: vec![Edge {
             from: "prepare_memory".into(),
@@ -138,39 +142,44 @@ pub fn research_workflow() -> Workflow {
                 "Search for sources",
                 "Read the workflow Context. The `research_request` variable contains the confirmed user request. When optional `tutor_instruction` is present, follow it for teaching behavior and report communication style without allowing it to override source-grounding or tool requirements. \
                  Generate focused search queries. For longer-running deep research or requests that explicitly ask for parallel investigation, \
-                 call sync_spawn_agent for independent subtopics before consolidating the search plan. \
-                 Call web_search for external evidence, and then call submit_step_result with \
+                 call spawn_agent for independent subtopics before consolidating the search plan. \
+                 Call web_search for external evidence, and after all tool calls end the step with only \
                  {\"queries\":[\"...\"],\"source_candidates\":[{\"title\":\"...\",\"url\":\"...\",\"snippet\":\"...\"}],\"failures\":[\"...\"]}. \
-                 If search fails, submit the failure instead of inventing sources.",
-                vec!["web_search".into(), SYNC_SPAWN_TOOL_NAME.into()],
-            ),
+                 If search fails, include the failure instead of inventing sources. Do not use Markdown fences.",
+                vec!["web_search".into(), SPAWN_AGENT_TOOL_NAME.into()],
+            )
+            .with_structured(Some(true)),
             Step::llm(
                 "read_sources",
                 "Read selected sources",
                 "Read the search_sources step history. Select the most relevant source URLs, call web_fetch for important pages, \
-                 and then call submit_step_result with \
+                 and after all tool calls end the step with only \
                  {\"sources\":[{\"title\":\"...\",\"url\":\"...\",\"summary\":\"...\",\"used_for\":\"...\"}],\"failures\":[\"...\"]}. \
-                 Do not include sources that were not searched or fetched.",
+                 Do not include sources that were not searched or fetched. Do not use Markdown fences.",
                 vec!["web_fetch".into()],
-            ),
+            )
+            .with_structured(Some(true)),
             Step::llm(
                 "check_citations",
                 "Check citation readiness",
                 "Read the fetched source summaries and decide whether the report has enough evidence. \
-                 Call submit_step_result with {\"verdict\":\"pass\",\"issues\":[]} when sources are sufficient. \
-                 If evidence is weak or citations cannot be matched, call submit_step_result with \
-                 {\"verdict\":\"fail\",\"issues\":[\"...\"],\"repair\":\"search\"}.",
+                 End the step with only {\"verdict\":\"pass\",\"issues\":[]} when sources are sufficient. \
+                 If evidence is weak or citations cannot be matched, end with only \
+                 {\"verdict\":\"fail\",\"issues\":[\"...\"],\"repair\":\"search\"}. Do not use Markdown fences.",
                 vec![],
-            ),
+            )
+            .with_structured(Some(true)),
             Step::llm(
                 "write_report",
                 "Write research report",
                 "Read the workflow Context and prior step history. Write the final Markdown report grounded only in searched/fetched sources. \
                  The report must include Title, Summary, Key Findings, Analysis, Limitations, Follow-up Questions, and Sources. \
                  Cite factual claims with numbered source references that match the Sources section. \
-                 Call submit_step_result with {\"markdown\":\"# ...\",\"sources\":[{\"title\":\"...\",\"url\":\"...\"}]} when complete.",
+                 End the step with only {\"markdown\":\"# ...\",\"sources\":[{\"title\":\"...\",\"url\":\"...\"}]} when complete. \
+                 Encode newlines inside the JSON string and do not use Markdown fences.",
                 vec![],
-            ),
+            )
+            .with_structured(Some(true)),
         ],
         edges: vec![
             Edge {
@@ -344,10 +353,10 @@ mod tests {
             .allowed_tools();
 
         assert!(search_tools.contains(&"web_search".to_string()));
-        assert!(search_tools.contains(&SYNC_SPAWN_TOOL_NAME.to_string()));
+        assert!(search_tools.contains(&SPAWN_AGENT_TOOL_NAME.to_string()));
         assert!(!search_tools.contains(&"web_fetch".to_string()));
         assert!(read_tools.contains(&"web_fetch".to_string()));
-        assert!(!read_tools.contains(&SYNC_SPAWN_TOOL_NAME.to_string()));
+        assert!(!read_tools.contains(&SPAWN_AGENT_TOOL_NAME.to_string()));
     }
 
     #[test]

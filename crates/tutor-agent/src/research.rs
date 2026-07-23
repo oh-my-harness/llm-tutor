@@ -9,7 +9,7 @@ use llm_harness_runtime::workflow::engine::{
 };
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
-use llm_harness_runtime::workflow::model::{StepResult, Transition};
+use llm_harness_runtime::workflow::model::{StepResult, StructuredStatus, Transition};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tutor_tools::{RagSearchTool, WebFetchTool, WebSearchTool};
@@ -354,6 +354,7 @@ fn workflow_step_result(output: String, structured: serde_json::Value) -> StepRe
     StepResult {
         output,
         structured: Some(structured),
+        structured_status: StructuredStatus::NotRequired,
         tool_calls_count: 0,
         session_id: String::new(),
         cost: CostAggregate::default(),

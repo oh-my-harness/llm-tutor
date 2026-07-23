@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 
 static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
@@ -63,12 +63,12 @@ impl Tool for WriteMemoryTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let approved = args["approved"].as_bool().unwrap_or(false);
             if !approved {
-                return Err(ToolError::InvalidArguments(
-                    "write_memory requires explicit user approval".into(),
+                return Err(ToolFailure::invalid_arguments(
+                    "write_memory requires explicit user approval",
                 ));
             }
 
@@ -76,15 +76,15 @@ impl Tool for WriteMemoryTool {
                 .as_str()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| ToolError::InvalidArguments("text is required".into()))?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("text is required"))?;
             if text.len() > 500 {
-                return Err(ToolError::InvalidArguments(
-                    "memory text must be 500 characters or fewer".into(),
+                return Err(ToolFailure::invalid_arguments(
+                    "memory text must be 500 characters or fewer",
                 ));
             }
             if text.lines().count() > 3 {
-                return Err(ToolError::InvalidArguments(
-                    "memory text must be concise and at most 3 lines".into(),
+                return Err(ToolFailure::invalid_arguments(
+                    "memory text must be concise and at most 3 lines",
                 ));
             }
 
@@ -94,15 +94,15 @@ impl Tool for WriteMemoryTool {
                 .filter(|value| !value.is_empty())
                 .unwrap_or("Explicit preferences");
             if section.len() > 80 || section.contains('\n') || section.contains('\r') {
-                return Err(ToolError::InvalidArguments(
-                    "section must be a short single-line heading".into(),
+                return Err(ToolFailure::invalid_arguments(
+                    "section must be a short single-line heading",
                 ));
             }
 
             let path = self.root.join("L3").join("preferences.md");
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|err| ToolError::Execution(err.to_string()))?;
+                    .map_err(|err| ToolFailure::new("memory_write_failed", err.to_string()))?;
             }
 
             let mut markdown = std::fs::read_to_string(&path).unwrap_or_default();
@@ -111,20 +111,23 @@ impl Tool for WriteMemoryTool {
             }
             let marker = memory_marker();
             append_preference(&mut markdown, section, text, &marker);
-            std::fs::write(&path, markdown).map_err(|err| ToolError::Execution(err.to_string()))?;
+            std::fs::write(&path, markdown)
+                .map_err(|err| ToolFailure::new("memory_write_failed", err.to_string()))?;
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!("Saved memory to L3/preferences.md: {text}"),
-                }],
-                details: json!({
+            let model_content = vec![DataBlock::text(format!(
+                "Saved memory to L3/preferences.md: {text}"
+            ))];
+            Ok(ToolResult::projected(
+                model_content.clone(),
+                model_content,
+                json!({
                     "file": "L3/preferences.md",
                     "section": section,
                     "marker": marker,
                     "text": text,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -173,6 +176,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,

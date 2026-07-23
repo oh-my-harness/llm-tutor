@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 
 use crate::quiz_store::QuizDifficulty;
@@ -74,7 +74,7 @@ impl Tool for ProposeQuizPlanTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let title = optional_string(&args, "title").unwrap_or_else(|| "Quiz plan".into());
             let topic =
@@ -97,13 +97,13 @@ impl Tool for ProposeQuizPlanTool {
                 })
                 .unwrap_or_default();
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Proposed quiz plan: {title}, topic {topic}, {question_count} {difficulty} questions from {source}. Ask the user to confirm before creating it."
-                    ),
-                }],
-                details: json!({
+            let content = vec![DataBlock::text(format!(
+                "Proposed quiz plan: {title}, topic {topic}, {question_count} {difficulty} questions from {source}. Ask the user to confirm before creating it."
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "title": title,
                     "topic": topic,
                     "source": source,
@@ -111,8 +111,8 @@ impl Tool for ProposeQuizPlanTool {
                     "question_count": question_count,
                     "notes": notes,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -175,7 +175,7 @@ impl Tool for CreateQuizTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let requested_kb =
                 optional_string(&args, "kb_id").or_else(|| self.default_kb_id.clone());
@@ -210,23 +210,23 @@ impl Tool for CreateQuizTool {
             };
             let quiz = create_quiz_for_request(&state, request)
                 .await
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Created Quiz \"{}\" with {} questions. The product UI will render the interactive quiz card.",
-                        quiz.title,
-                        quiz.questions.len()
-                    ),
-                }],
-                details: json!({
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
+            let content = vec![DataBlock::text(format!(
+                "Created Quiz \"{}\" with {} questions. The product UI will render the interactive quiz card.",
+                quiz.title,
+                quiz.questions.len()
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "quiz_id": quiz.id,
                     "title": quiz.title,
                     "question_count": quiz.questions.len(),
                     "quiz": quiz,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -236,17 +236,17 @@ fn validate_quiz_resource_policy(
     notebook_allowed: bool,
     requested_kb_id: Option<&str>,
     notebook_entry_id: Option<&str>,
-) -> Result<(), ToolError> {
+) -> Result<(), ToolFailure> {
     if let (Some(allowed), Some(kb_id)) = (allowed_kb_ids, requested_kb_id)
         && !allowed.iter().any(|id| id == kb_id)
     {
-        return Err(ToolError::Execution(
-            "Tutor is not allowed to use this Knowledge Base".into(),
+        return Err(tool_execution_failure(
+            "Tutor is not allowed to use this Knowledge Base",
         ));
     }
     if notebook_entry_id.is_some() && !notebook_allowed {
-        return Err(ToolError::Execution(
-            "Tutor is not allowed to use Notebook entries".into(),
+        return Err(tool_execution_failure(
+            "Tutor is not allowed to use Notebook entries",
         ));
     }
     Ok(())
@@ -260,15 +260,19 @@ fn optional_string(args: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn parse_difficulty(value: &str) -> Result<QuizDifficulty, ToolError> {
+fn parse_difficulty(value: &str) -> Result<QuizDifficulty, ToolFailure> {
     match value.trim().to_ascii_lowercase().as_str() {
         "easy" => Ok(QuizDifficulty::Easy),
         "medium" => Ok(QuizDifficulty::Medium),
         "hard" => Ok(QuizDifficulty::Hard),
-        other => Err(ToolError::InvalidArguments(format!(
+        other => Err(ToolFailure::invalid_arguments(format!(
             "unsupported difficulty `{other}`"
         ))),
     }
+}
+
+fn tool_execution_failure(message: impl Into<String>) -> ToolFailure {
+    ToolFailure::new("quiz_tool_failed", message)
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 use std::sync::Arc;
 use tutor_rag::KnowledgeRetriever;
@@ -68,7 +68,7 @@ impl Tool for RagSearchTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let query = args["query"].as_str().unwrap_or("").to_string();
             let kb = args["kb"]
@@ -78,38 +78,46 @@ impl Tool for RagSearchTool {
                 .or_else(|| self.associated_kb.clone());
 
             let Some(kb) = kb else {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.".into(),
-                    }],
-                    details: json!({ "query": query, "kb": null, "hits": 0, "configured": false }),
-                    terminate: false,
-                });
+                return Ok(ToolResult::projected(
+                    vec![DataBlock::text(
+                        "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.",
+                    )],
+                    vec![DataBlock::text(
+                        "RAG is not associated with this conversation.",
+                    )],
+                    json!({ "query": query, "kb": null, "hits": 0, "configured": false }),
+                    false,
+                ));
             };
 
             let Some(retriever) = &self.retriever else {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.".into(),
-                    }],
-                    details: json!({ "query": query, "kb": kb, "hits": 0, "configured": false }),
-                    terminate: false,
-                });
+                return Ok(ToolResult::projected(
+                    vec![DataBlock::text(
+                        "RAG is not associated with this conversation. Continue without course knowledge, or ask the user to select a knowledge base.",
+                    )],
+                    vec![DataBlock::text(
+                        "RAG is not associated with this conversation.",
+                    )],
+                    json!({ "query": query, "kb": kb, "hits": 0, "configured": false }),
+                    false,
+                ));
             };
 
             let hits = retriever
                 .search(Some(&kb), &query, 5)
                 .await
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| ToolFailure::new("rag_search_failed", err.to_string()))?;
 
             if hits.is_empty() {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: format!("[RAG:{kb}] No relevant passages found for \"{query}\"."),
-                    }],
-                    details: json!({ "query": query, "kb": kb, "hits": 0, "configured": true }),
-                    terminate: false,
-                });
+                let content = vec![DataBlock::text(format!(
+                    "[RAG:{kb}] No relevant passages found for \"{query}\"."
+                ))];
+                return Ok(ToolResult::projected(
+                    content.clone(),
+                    content,
+                    json!({ "query": query, "kb": kb, "hits": 0, "configured": true }),
+                    false,
+                ));
             }
 
             let text = hits
@@ -147,17 +155,21 @@ impl Tool for RagSearchTool {
                 })
                 .collect::<Vec<_>>();
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text }],
-                details: json!({
+            Ok(ToolResult::ephemeral(
+                vec![DataBlock::text(text)],
+                format!(
+                    "Searched course knowledge `{kb}` for `{query}` and found {} result(s).",
+                    hits.len()
+                ),
+                json!({
                     "query": query,
                     "kb": kb,
                     "hits": hits.len(),
                     "configured": true,
                     "sources": details_hits,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -175,6 +187,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,
@@ -201,9 +216,9 @@ mod tests {
         let args = serde_json::json!({ "query": "integration by parts", "kb": "calculus" });
         let ctx = make_ctx();
         let result = tool.execute(args, &ctx).await.unwrap();
-        assert!(!result.content.is_empty());
-        match &result.content[0] {
-            ContentBlock::Text { text } => assert!(!text.is_empty()),
+        assert!(!result.model_content.is_empty());
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => assert!(!text.is_empty()),
             _ => panic!("expected text content"),
         }
     }

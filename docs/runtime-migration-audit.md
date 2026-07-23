@@ -6,16 +6,18 @@ Date: 2026-07-08
 > retired. Its references in this audit record the migration state on the audit
 > date and do not describe a capability available for new runs.
 >
-> Update (2026-07-23): runtime branch `codex/session-projection` at `8ab2a377`
-> now contains Knowledge Milestone A1-A5 and introduces breaking Tool,
-> workflow, run-context, and Session Projection contracts. The repository is
-> still pinned to `e200c12`; the staged A6 migration is defined in
+> Update (2026-07-23): the repository is now pinned to runtime branch
+> `codex/session-projection` at `8ab2a377` and adapter `16a22ad`. The A1/A2
+> Tool, workflow, run-context, and Session Projection baseline has been
+> migrated. Knowledge source and product-path work remains staged in
 > `docs/plans/2026-07-23-runtime-knowledge-a6-migration-plan.md`.
 
 ## Current Evidence
 
-- `llm-harness-runtime` main HEAD is `bea5374690192f2e32943073ced10f66c120db91`; the project is pinned to issue #43 fix branch commit `e200c12a69b896a0d9ab70d2752f9dafcbfc07ad`.
-- The fix branch is behind open PR #44 and is not yet merged, so this is a deliberate temporary pin to validate OpenAI-compatible tool-call adjacency.
+- The project pins all `llm-harness-*` crates to
+  `8ab2a3770bee0e7a1731b8074552ef9b6d70653a`.
+- The aligned `llm-api-adapter` revision is
+  `16a22ad284b8deb8c3a77664a0876f565f4a6eb9`.
 - `Cargo.toml` and `Cargo.lock` pin all `llm-harness-*` crates to the same
   runtime revision.
 - `main` is synchronized with `origin/main` after the latest runtime migration
@@ -40,12 +42,19 @@ Date: 2026-07-08
     covers the same contract for the Code Exec harness path.
 - Automatic compaction calls runtime `AgentHarness::compact()` and reads compact
   summaries from runtime `SessionEntryPayload::Compaction`.
-- Deep Solve, Quiz generation, and Memory workflows run through runtime
-  `WorkflowEngine`.
-- Deep Solve and Memory use runtime declarative edge routing through a thin
-  no-op marker judge.
-- Quiz uses runtime LLM workflow steps and `submit_step_result` for generated
-  questions and verifier results.
+- Quiz generation, Memory maintenance, and detailed Research run through
+  runtime `WorkflowEngine`.
+- Memory and Research use runtime declarative edge routing through a thin no-op
+  marker judge.
+- Quiz, Memory, and Research LLM steps declare structured output and finish
+  with JSON assistant text; runtime populates `StepResult.structured`.
+- Ordinary Chat, Research conversation, Organize, Quiz conversation, and Code
+  Exec now enter the harness through `RunRequest`. Product integration coverage
+  proves a typed extension reaches a Chat product Tool through
+  `ToolContext.run`.
+- All 26 production Tools use explicit `Projected` or `Ephemeral` Session
+  projection. The checked inventory lives in
+  `docs/runtime-tool-projections.json`.
 - Workflow step progress was consumed from runtime `WorkflowEvent::StepProgress`
   on `bea5374`; `cc0b737` temporarily removed that event; `e200c12` exposes it
   again. The product bridge currently still emits workflow step
@@ -100,11 +109,16 @@ mentions, and citations.
 
 ## Latest Runtime API Recheck
 
-Checked against local runtime checkout
-`llm-harness-runtime-6a63eaf83d5f868e/e200c12` on 2026-07-08.
+Checked against runtime `codex/session-projection` commit `8ab2a377` on
+2026-07-23.
 
 | Area | Runtime evidence | Product decision |
 | --- | --- | --- |
+| Typed run context | `AgentHarness::run(RunRequest)` constructs one immutable `RunContext`, and Tools receive it through `ToolContext.run`. | Ordinary product capabilities now use `RunRequest`; integration coverage proves typed extensions reach Chat Tools. |
+| Workflow run context | `WorkflowEngine::run_llm_step` still starts each step through `harness.prompt(&prompt_text)`, with no extension-bearing request. | Keep Knowledge out of workflow steps until runtime can propagate trusted extensions; do not add product-owned run state. |
+| Tool Session projection | `ToolResult::projected` and `ToolResult::ephemeral` control durable model-visible Tool content. | All production Tools have an audited explicit projection; Full and struct-literal results fail the release audit. |
+| Structured workflow output | `Step::with_structured(Some(true))` extracts final assistant JSON and supports provider response-format escalation. | Quiz, Memory, and Research use structured final output; product code retains domain deserialization and validation. |
+| Knowledge citation validation | `CitationValidator` reads run-local evidence, but the plugin does not validate the candidate final answer before persistence. | Treat Knowledge product cutover as blocked until runtime owns the final-answer validation boundary. |
 | Declarative workflow routing | `workflow::judge::EdgeConditionJudge` and `NoopJudge` exist, but both are still `pub(crate)`. `WorkflowEngine` can auto-select the edge judge only when the provided judge reports `is_noop()`. | Keep the tiny `RuntimeDeclarativeJudge` marker until runtime exposes a public constructor/helper. |
 | Bounded verifier repair | `WorkflowEngine::with_max_steps` is a global step-count guard. Runtime docs recommend loop counters in structured state for custom routing; no transition-level visit cap is public. | Keep `QuizWorkflowJudge` for the current "repair once, then fail" semantic verifier loop. |
 | Harness setup | `HarnessBuilder` exposes `system_prompt`, `model_info`, `final_answer_mode`, provider registration, tools, and plugin hook registration. | Chat and Code Exec use `HarnessBuilder`; product hook vectors are injected through a tiny plugin. |
@@ -112,25 +126,28 @@ Checked against local runtime checkout
 | Streaming deltas | Runtime still emits raw `TextDelta` without final/progress classification; classification is available at terminal message events. | Keep live streaming as raw text for now, while durable bubbles use final-answer events. |
 | Model metadata | Runtime accepts `ModelInfo` for context budgeting and compaction, but does not provide provider-normalized metadata discovery. | Keep product settings diagnostics for `/models` probing and inference until adapter/runtime owns discovery. |
 | Budget policy | Runtime still exposes `BudgetControlAdapter` as a `ShouldStopHook`, and `HarnessBuilder::budget` wires it into loop stop behavior. `HarnessBuilder` does inject `CostAccumulatorHook`, and the harness exposes `usage()`. | Emit and consume runtime usage traces from `AgentHarness::usage()` for observability, but keep budget limits as product config only until runtime separates accounting from loop continuation. |
-| Workflow usage | `WorkflowEngine::run()` returns `TaskResult.cost`, aggregated from step results. `WorkflowEngine::total_cost()` is also available for an active engine. | Deep Solve emits `runtime_usage` from `TaskResult.cost`. Quiz and Memory workflow helpers return their domain output plus runtime cost; Memory traces also preserve the cost payload. A future UI pass can decide how to summarize non-chat workflow costs. |
-| Tool-call adjacency | PR #44 keeps provider-neutral runtime conversion from inserting assistant messages between consecutive tool results. | `llm-tutor` pins to the PR commit to validate Research/multi-tool paths until the fix is merged upstream. |
+| Workflow usage | `WorkflowEngine::run()` returns `TaskResult.cost`, aggregated from step results. `WorkflowEngine::total_cost()` is also available for an active engine. | Quiz, Memory, and Research workflow helpers return runtime cost with their domain output. |
+| Tool-call adjacency | The reviewed baseline retains provider-neutral ordering for consecutive tool results. | Keep provider-specific normalization in runtime/adapter code and cover product multi-tool paths through integration tests. |
 
 ## Next Runtime API Requests
 
-1. Public declarative workflow constructor or no-op judge helper.
-2. Declarative bounded semantic repair / step visit policies.
-3. Provider-aware typed structured output helper.
-4. Tool-using structured generation helper.
-5. Safe budget policy helper that separates accounting from loop continuation.
-6. Normalized model metadata discovery.
-7. Per-delta final/progress classification for streaming UI.
+1. Workflow-level propagation of trusted `RunRequest` extensions.
+2. Final-answer Knowledge citation validation with the current `RunContext`.
+3. Public declarative workflow constructor or no-op judge helper.
+4. Declarative bounded semantic repair / step visit policies.
+5. Provider-aware typed structured domain output helper.
+6. Safe budget policy helper that separates accounting from loop continuation.
+7. Normalized model metadata discovery.
+8. Per-delta final/progress classification for streaming UI.
 
 ## Verification Coverage
 
 - `cargo test -p tutor-agent --test mock_integration` covers ordinary harness
   setup, runtime final/progress splitting for Chat and Code Exec, tool routing,
-  runtime usage traces for Chat, Code Exec, and Deep Solve, Deep Solve workflow
-  events, and Code Exec sandbox execution.
+  typed RunRequest extension propagation, runtime usage traces, Research
+  workflow behavior, and Code Exec sandbox execution.
+- `scripts/check-tool-projections.ps1` compares every production Tool name with
+  the reviewed projection inventory and rejects Full/struct-literal results.
 - `cargo test -p tutor-agent quiz --lib` covers Quiz runtime workflow generation,
   verifier repair, publish behavior, and returned workflow cost.
 - `cargo test -p tutor-agent memory --lib` covers Memory runtime workflow output

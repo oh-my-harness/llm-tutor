@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::{ContentBlock, ExecutionEnv, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, ExecutionEnv, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -62,19 +62,19 @@ impl Tool for CodeExecTool {
         &'a self,
         args: serde_json::Value,
         ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let language = args["language"].as_str().unwrap_or("bash");
             let code = args["code"]
                 .as_str()
-                .ok_or_else(|| ToolError::InvalidArguments("missing code".into()))?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("missing code"))?;
 
             // Create a temp working directory
             let work_dir = ctx
                 .env
                 .create_temp_dir("tutor_code_exec")
                 .await
-                .map_err(|e| ToolError::Execution(e.to_string()))?;
+                .map_err(|e| ToolFailure::new("execution_failed", e.to_string()))?;
 
             let env = OsEnv::new(&work_dir);
 
@@ -83,7 +83,7 @@ impl Tool for CodeExecTool {
                 "python" => ("script.py", python_command(), vec!["script.py"]),
                 "bash" => ("script.sh", "bash", vec!["script.sh"]),
                 other => {
-                    return Err(ToolError::InvalidArguments(format!(
+                    return Err(ToolFailure::invalid_arguments(format!(
                         "unsupported language: {other}"
                     )));
                 }
@@ -95,7 +95,7 @@ impl Tool for CodeExecTool {
                 CancellationToken::new(),
             )
             .await
-            .map_err(|e| ToolError::Execution(e.to_string()))?;
+            .map_err(|e| ToolFailure::new("execution_failed", e.to_string()))?;
 
             // Execute — ShellFailed means non-zero exit, NOT a system error
             let output = tokio::time::timeout(
@@ -108,8 +108,8 @@ impl Tool for CodeExecTool {
                     .output(),
             )
             .await
-            .map_err(|_| ToolError::Execution("timeout".into()))?
-            .map_err(|e| ToolError::Execution(format!("io error: {e}")))?;
+            .map_err(|_| ToolFailure::new("execution_timeout", "Code execution timed out."))?
+            .map_err(|e| ToolFailure::new("execution_failed", format!("io error: {e}")))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -126,16 +126,18 @@ impl Tool for CodeExecTool {
                 }
             );
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text: output }],
-                details: json!({
+            let model_content = vec![DataBlock::text(output)];
+            Ok(ToolResult::projected(
+                model_content.clone(),
+                model_content,
+                json!({
                     "language": language,
                     "exit_code": exit_code,
                     "stdout": stdout,
                     "stderr": stderr,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -155,6 +157,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(OsEnv::new(tmp)),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,
@@ -184,8 +189,8 @@ mod tests {
             "code": "print('hello from test')"
         });
         let result = tool.execute(args, &make_ctx(tmp.path())).await.unwrap();
-        let text = match &result.content[0] {
-            llm_harness_types::ContentBlock::Text { text } => text.clone(),
+        let text = match &result.model_content[0] {
+            llm_harness_types::DataBlock::Text { text, .. } => text.clone(),
             _ => panic!("expected text"),
         };
         assert!(text.contains("hello from test"), "got: {text}");

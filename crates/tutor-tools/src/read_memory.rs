@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 
 static SCHEMA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
@@ -67,7 +67,7 @@ impl Tool for ReadMemoryTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let scope = args["scope"].as_str().unwrap_or("all");
             let query = args["query"]
@@ -76,7 +76,7 @@ impl Tool for ReadMemoryTool {
                 .map(str::trim)
                 .map(ToOwned::to_owned);
             let selected = selected_files(scope).ok_or_else(|| {
-                ToolError::InvalidArguments(format!("unsupported memory scope `{scope}`"))
+                ToolFailure::invalid_arguments(format!("unsupported memory scope `{scope}`"))
             })?;
 
             let mut files = Vec::new();
@@ -93,34 +93,35 @@ impl Tool for ReadMemoryTool {
             }
 
             if sections.is_empty() {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "No learner memory has been recorded yet.".into(),
-                    }],
-                    details: json!({
+                return Ok(ToolResult::ephemeral(
+                    vec![DataBlock::text("No learner memory has been recorded yet.")],
+                    "Checked learner memory; no entries were available.",
+                    json!({
                         "scope": scope,
                         "query": query,
                         "files": [],
                         "empty": true,
                     }),
-                    terminate: false,
-                });
+                    false,
+                ));
             }
 
             let markdown = sections.join("\n\n---\n\n");
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: markdown.clone(),
-                }],
-                details: json!({
+            Ok(ToolResult::ephemeral(
+                vec![DataBlock::text(markdown.clone())],
+                format!(
+                    "Read learner memory scope `{scope}` from {} file(s).",
+                    files.len()
+                ),
+                json!({
                     "scope": scope,
                     "query": query,
                     "files": files,
                     "empty": false,
                     "markdown": markdown,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -155,6 +156,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,
@@ -184,8 +188,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.details["empty"], true);
-        match &result.content[0] {
-            ContentBlock::Text { text } => assert!(text.contains("No learner memory")),
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => assert!(text.contains("No learner memory")),
             _ => panic!("expected text content"),
         }
     }
@@ -213,8 +217,8 @@ mod tests {
             .unwrap();
         assert_eq!(result.details["empty"], false);
         assert_eq!(result.details["files"][0], "L3/profile.md");
-        match &result.content[0] {
-            ContentBlock::Text { text } => {
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => {
                 assert!(text.contains("Needs examples"));
                 assert!(!text.contains("Concise"));
             }

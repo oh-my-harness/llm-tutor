@@ -20,6 +20,23 @@
 
 ## Friction Points
 
+- **Workflow LLM steps cannot receive trusted `RunRequest` extensions**
+  - Checked against `codex/session-projection` commit `8ab2a377` on 2026-07-23.
+    Ordinary product Chat now calls `AgentHarness::run(RunRequest)` and an
+    integration test proves that a typed extension reaches
+    `ToolContext.run`.
+  - `WorkflowEngine::run_llm_step` still calls `harness.prompt(&prompt_text)`.
+    This creates a fresh request with no product extensions. The shared and
+    per-step builder customizers can install plugins and tools, but cannot
+    attach immutable trusted access data to the step's `RunContext`.
+  - Impact: `KnowledgePlugin` can be mounted on Research/Quiz step harnesses,
+    but `KnowledgeRequestContext::from_run` will fail closed because the
+    `KnowledgeAccessContext` cannot reach those tool calls.
+  - Suggestion: let `WorkflowEngine::run` accept a typed workflow request whose
+    extensions are propagated to every LLM step, or add a trusted per-step
+    `RunRequest` factory to `WorkflowEngineConfig`. The runtime should preserve
+    extension non-serialization and run-local immutability.
+
 - **Knowledge citation validation needs a final-answer runtime boundary**
   - Checked against `codex/session-projection` commit `8ab2a377` on 2026-07-23.
     `KnowledgeReadTool` correctly issues and verifies evidence, registers a
@@ -37,7 +54,7 @@
     `KnowledgePlugin` install a validator that can reject/repair unknown
     handles before final-answer persistence.
 
-- **Runtime `workflow` / issue #43 fix branch can compile, with provider tool-call adjacency improved**
+- **Historical: runtime `workflow` / issue #43 fix branch compiled, with provider tool-call adjacency improved**
   - `llm-tutor` tested `llm-harness-runtime` issue #43 fix branch commit `e200c12` and aligned `llm-api-adapter` to `69a868f`.
   - Runtime issue #43 remains open, but PR #44 (`Fix provider-specific tool message normalization boundary`) contains the relevant fix. The default converter no longer inserts an empty assistant between consecutive tool result messages, preserving OpenAI-compatible `assistant tool_calls -> tool -> tool` adjacency.
   - The branch adds workflow/subagent APIs and re-exports chat provider types from `llm_harness_loop`, but it still depends on the external `llm-api-adapter` repo. Embedding traits/types are not re-exported, so RAG code still needs a direct adapter dependency.
@@ -45,7 +62,7 @@
   - `submit_step_result` behaves as a terminal structured step response in workflow tests; no extra follow-up text turn is required for Memory/Quiz workflow mocks.
   - Suggestion: merge PR #44 into the main/workflow line, re-export embedding provider types or provide a runtime embedding boundary, and keep provider-specific message normalization in adapter/provider code rather than the provider-neutral runtime converter.
 
-- **Status update: runtime workflow support is now available and consumed**
+- **Historical migration log: runtime workflow support became available and was consumed**
   - `llm-tutor` now pins `llm-harness-runtime` to workflow branch commit `cc0b737`, which includes expanded workflow and spawn/subagent modules. Current product flows consume `WorkflowEngine` plus the runtime JSONL session factory; no separate free-form subagent is needed for the migrated paths.
   - The old adapter pin conflict is resolved by aligning `llm-api-adapter` to the runtime-compatible revision.
   - First migration step: Deep Solve now defines its phase graph as an `llm_harness_runtime::workflow::model::Workflow` and validates it through `validate_workflow` before execution.
@@ -71,7 +88,10 @@
   - Twenty-first migration step: Quiz and Memory workflow helpers now return runtime `TaskResult.cost` alongside domain output, so callers no longer need to reconstruct workflow usage from app-layer state.
   - Twenty-second migration step: upgraded runtime crates to PR #44 commit `e200c12` and adapter to `69a868f`. Chat/Code Exec returned to `HarnessBuilder`, with product hooks injected through a minimal plugin, so runtime owns cost hook injection again.
   - Twenty-third migration step: Research detailed runs now use runtime `WorkflowEngine` with explicit search, read, citation-check, and report steps. Product code only prepares the confirmed request, mounts existing tools, bridges workflow events into Research trace events, and persists the final report back to the current runtime session.
-  - Completion audit: the project pin is `e200c12`; `cargo tree -p tutor-agent` shows one `llm_adapter` source (`69a868f`) and one runtime revision. Active source no longer contains the legacy Deep Solve phase-loop or app-side declarative edge evaluation paths. Chat/Code Exec construct harnesses through `HarnessBuilder`.
+  - Historical completion audit at that checkpoint: the project pin was
+    `e200c12`; `cargo tree -p tutor-agent` showed one `llm_adapter` source
+    (`69a868f`) and one runtime revision. Active source no longer contained the
+    legacy Deep Solve phase loop or app-side declarative edge evaluation paths.
   - Remaining migration target: settings diagnostics still use a direct adapter probe because they are provider connectivity checks, not agent orchestration. Further cleanup depends on runtime/adapter support for provider-native structured LLM step options, public declarative/no-op judge helpers, typed validation/retry helpers, safe budget policies, and normalized model metadata discovery.
 
 - **WorkflowEngine needs an app-friendly cancellation handle**
@@ -120,14 +140,20 @@
   - Actual: commit `c6eba08` pulls submodule `examples/coding-agent` with URL `git@github.com:oh-my-harness/coding-agent.git`, which Cargo reports as an invalid relative URL.
   - Suggestion: use a valid absolute SSH URL such as `ssh://git@github.com/oh-my-harness/coding-agent.git`, or avoid requiring example submodules for library consumption.
 
-- **Structured-output generation still needs app-level boilerplate**
+- **Typed structured-output validation still needs app-level boilerplate**
   - Expected: product flows like quiz generation can ask the framework for typed JSON output with provider-aware schema support, retries, and validation error reporting.
-  - Actual: runtime LLM steps can collect structured results through `submit_step_result`, but provider-native JSON schema response formats are not exposed at the workflow step level. The legacy direct helpers have been removed, so runtime workflow paths now place schema instructions in prompts and validate submitted JSON in product code.
+  - Actual: runtime LLM steps declared with `with_structured(Some(true))`
+    extract JSON from the final assistant text and can upgrade to a native JSON
+    response format when the provider reports support. Product code still
+    supplies prompt-level shape instructions and performs domain deserialization
+    and validation after the runtime returns `serde_json::Value`.
   - Suggestion: add a runtime or agent helper such as `generate_structured<T>(prompt, schema/options)` that uses provider capabilities, validates typed output, and returns structured errors suitable for UI display.
 
 - **Structured product flows cannot yet combine typed output with normal tool orchestration**
   - Expected: a product flow such as Quiz can ask the model to call tools like `read_memory`, then return validated typed JSON questions in one runtime-managed flow.
-  - Actual: Chat, Research, Deep Solve, and Quiz runtime workflows can mount runtime tools, and Quiz now uses `submit_step_result` for structured quiz output. However, provider-native typed JSON schema, retries, and validation are still product-layer responsibilities.
+  - Actual: Research, Quiz, and Memory workflow steps can mount tools and end
+    with runtime-extracted structured JSON. The remaining gap is typed schema
+    ownership and domain validation, not a synthetic submit Tool.
   - Suggestion: add a runtime pattern for "tool-using structured generation", for example `AgentHarness::generate_structured_with_tools<T>()`, where tools, trace events, schema output, validation, and retries are all runtime-managed.
 
 - **Default workflow judge helpers are still not public**
@@ -173,10 +199,13 @@
   - Product workaround: `llm-tutor` installs a thin `OpenAiSafeContextConverter` that delegates to runtime's `DefaultConvertToLlm` and then drops assistant history messages with no text and no tool invocations. Tool-call assistant messages are preserved, so OpenAI tool-call adjacency remains intact.
   - Suggestion: handle this at the adapter/runtime boundary, either by omitting reasoning-only assistant messages for OpenAI-compatible wire formats or by mapping provider-supported reasoning history into a valid content representation.
 
-- **Resolved: workflow tests now follow runtime submit-step terminal semantics**
-  - Expected: runtime `submit_step_result` should be enough to complete an LLM workflow step and provide structured output to the workflow engine.
-  - Actual: older product tests expected a follow-up plain text assistant message after each `submit_step_result`, which no longer reflects the latest runtime workflow behavior.
-  - Change: Memory and Quiz workflow tests now model `submit_step_result` as the terminal step response, reducing unnecessary mock calls and aligning with runtime-managed structured step output.
+- **Resolved: workflow steps use runtime structured final output**
+  - Runtime commit `8ab2a377` removed the synthetic
+    `submit_step_result` Tool contract.
+  - Research, Quiz, and Memory LLM steps now declare
+    `with_structured(Some(true))`, finish with a plain JSON assistant response,
+    and route on `StepResult.structured`.
+  - Product prompts and mocks no longer reference `submit_step_result`.
 
 - **Resolved: workflow step progress events are available again on `e200c12`**
   - Expected: product UI should reuse runtime workflow progress events for step-internal tool/message boundaries instead of inventing a parallel progress model.
@@ -195,11 +224,13 @@
 
 | Gap | Description | Severity |
 |-----|-------------|----------|
+| Workflow steps cannot receive run extensions | Trusted Knowledge access reaches ordinary Chat tools but cannot reach Research/Quiz workflow step tools | High |
+| No final-answer Knowledge citation validation boundary | The product cannot atomically reject forged or unread handles without duplicating runtime run state | High |
 | No test-helper constructors for hook context types | Building `BeforeToolCallCtx` in tests is unnecessarily hard | Medium |
 | Session options/metadata missing from root/prelude exports | Apps need mixed import paths for common session operations | Low |
 | SessionInfo does not update metadata name | Session titles need app-layer workaround | Medium |
 | AuditEntry hash fields leak implementation detail | Callers must provide hash-chain fields that the sink overwrites | Low |
-| WorkflowEngine migration bridge still needs thin product adapters | Product flows now run through `WorkflowEngine`, but still need executor state mapping, product trace bridges, and structured `submit_step_result` prompt/result validation until runtime exposes typed workflow helpers | Low |
+| WorkflowEngine migration bridge still needs thin product adapters | Product flows still need executor state mapping, product trace bridges, and typed domain validation around runtime structured output | Low |
 | No typed structured-output helper | Product flows must duplicate JSON extraction, schema hints, validation, and retry policy | Medium |
 | No tool-using structured-generation helper | Product flows such as Quiz cannot combine `read_memory` tool orchestration with typed JSON output without a parallel loop | Medium |
 | No public declarative/no-op workflow judge helper | Product workflows need a tiny marker judge to opt into runtime's built-in declarative edge router | Low |

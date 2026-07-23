@@ -5,7 +5,7 @@ use llm_harness_agent::{AgentHarness, AgentHarnessEvent, Session};
 use llm_harness_loop::FinalAnswerMode;
 use llm_harness_types::{
     AgentEvent, AgentMessage, AssistantMessage, AssistantMessageKind, CompactionError,
-    ContentBlock, HarnessError, StopReason, UserMessage,
+    ContentBlock, HarnessError, RunRequest, StopReason, UserMessage,
 };
 use tokio_util::sync::CancellationToken;
 use tutor_tools::{CodeExecTool, RagSearchTool, WebFetchTool, WebSearchTool};
@@ -25,15 +25,7 @@ pub async fn run_chat_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(
-        router,
-        "chat",
-        chat_system_prompt(),
-        Some(messages),
-        None,
-        None,
-    )
-    .await
+    run_conversation_with_request(router, "chat", RunRequest::new(messages), None, None).await
 }
 
 pub async fn run_chat_with_session(
@@ -50,11 +42,10 @@ pub async fn run_chat_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    run_chat_inner(
+    run_conversation_with_request(
         router,
         "chat",
-        chat_system_prompt(),
-        Some(vec![user_message(question)]),
+        RunRequest::from_text(question),
         Some(session),
         abort_token,
     )
@@ -65,15 +56,7 @@ pub async fn run_research_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(
-        router,
-        "research",
-        research_system_prompt(),
-        Some(messages),
-        None,
-        None,
-    )
-    .await
+    run_conversation_with_request(router, "research", RunRequest::new(messages), None, None).await
 }
 
 pub async fn run_research_with_session(
@@ -90,11 +73,10 @@ pub async fn run_research_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    run_chat_inner(
+    run_conversation_with_request(
         router,
         "research",
-        research_system_prompt(),
-        Some(vec![user_message(question)]),
+        RunRequest::from_text(question),
         Some(session),
         abort_token,
     )
@@ -105,15 +87,7 @@ pub async fn run_organize_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(
-        router,
-        "organize",
-        organize_system_prompt(),
-        Some(messages),
-        None,
-        None,
-    )
-    .await
+    run_conversation_with_request(router, "organize", RunRequest::new(messages), None, None).await
 }
 
 pub async fn run_organize_with_session(
@@ -130,11 +104,10 @@ pub async fn run_organize_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    run_chat_inner(
+    run_conversation_with_request(
         router,
         "organize",
-        organize_system_prompt(),
-        Some(vec![user_message(question)]),
+        RunRequest::from_text(question),
         Some(session),
         abort_token,
     )
@@ -145,15 +118,7 @@ pub async fn run_quiz_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_chat_inner(
-        router,
-        "quiz",
-        quiz_system_prompt(),
-        Some(messages),
-        None,
-        None,
-    )
-    .await
+    run_conversation_with_request(router, "quiz", RunRequest::new(messages), None, None).await
 }
 
 pub async fn run_quiz_with_session(
@@ -170,25 +135,34 @@ pub async fn run_quiz_with_session_cancel(
     question: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    run_chat_inner(
+    run_conversation_with_request(
         router,
         "quiz",
-        quiz_system_prompt(),
-        Some(vec![user_message(question)]),
+        RunRequest::from_text(question),
         Some(session),
         abort_token,
     )
     .await
 }
 
-async fn run_chat_inner(
+pub(crate) async fn run_conversation_with_request(
     router: &CapabilityRouter,
     capability: &'static str,
-    system_prompt: String,
-    messages: Option<Vec<AgentMessage>>,
+    request: RunRequest,
     session: Option<Session>,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
+    let system_prompt = match capability {
+        "chat" => chat_system_prompt(),
+        "research" => research_system_prompt(),
+        "organize" => organize_system_prompt(),
+        "quiz" => quiz_system_prompt(),
+        other => {
+            return Err(TutorError::Internal(format!(
+                "unsupported conversational capability: {other}"
+            )));
+        }
+    };
     let system_prompt = router.apply_runtime_instructions(&system_prompt);
     emit_trace(
         &router.event_sink,
@@ -262,11 +236,7 @@ async fn run_chat_inner(
     }
     let mut rx = harness.subscribe();
     let prompt_harness = harness.clone();
-    let prompt_task = tokio::spawn(async move {
-        prompt_harness
-            .prompt_with_messages(messages.unwrap_or_default())
-            .await
-    });
+    let prompt_task = tokio::spawn(async move { prompt_harness.run(request).await });
 
     // Collect the last complete assistant message.
     let mut last_text = String::new();

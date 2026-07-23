@@ -1,0 +1,132 @@
+[
+  {
+    "tool": "code_exec",
+    "projection": "projected",
+    "reason": "Persist the bounded execution result and metadata used by the explanation turn."
+  },
+  {
+    "tool": "rag_search",
+    "projection": "ephemeral",
+    "reason": "Legacy full chunk bodies remain model-visible only until runtime Knowledge replaces this tool."
+  },
+  {
+    "tool": "read_memory",
+    "projection": "ephemeral",
+    "reason": "Learner memory bodies are private context and must not be copied into Tool session entries."
+  },
+  {
+    "tool": "web_fetch",
+    "projection": "ephemeral",
+    "reason": "Fetched page bodies may be large or sensitive; only a receipt is durable."
+  },
+  {
+    "tool": "web_search",
+    "projection": "projected",
+    "reason": "Bounded public search results are useful durable evidence candidates."
+  },
+  {
+    "tool": "write_memory",
+    "projection": "projected",
+    "reason": "Persist the bounded mutation receipt, not additional hidden source context."
+  },
+  {
+    "tool": "list_memory_events",
+    "projection": "projected",
+    "reason": "Bounded L1 summaries are durable discovery results."
+  },
+  {
+    "tool": "search_memory_events",
+    "projection": "projected",
+    "reason": "Bounded L1 summaries are durable discovery results."
+  },
+  {
+    "tool": "read_memory_event",
+    "projection": "ephemeral",
+    "reason": "Complete L1 evidence is private workflow context."
+  },
+  {
+    "tool": "read_memory_context",
+    "projection": "ephemeral",
+    "reason": "Complete surrounding L1 evidence is private workflow context."
+  },
+  {
+    "tool": "read_memory_source",
+    "projection": "ephemeral",
+    "reason": "Resolved source bodies are private workflow context."
+  },
+  {
+    "tool": "list_memory_entries",
+    "projection": "projected",
+    "reason": "Bounded L2 summaries are durable discovery results."
+  },
+  {
+    "tool": "search_memory_entries",
+    "projection": "projected",
+    "reason": "Bounded L2 summaries are durable discovery results."
+  },
+  {
+    "tool": "read_memory_entry",
+    "projection": "ephemeral",
+    "reason": "Complete L2 memory is private workflow context."
+  },
+  {
+    "tool": "read_memory_entry_sources",
+    "projection": "ephemeral",
+    "reason": "Complete supporting L1 evidence is private workflow context."
+  },
+  {
+    "tool": "propose_quiz_plan",
+    "projection": "projected",
+    "reason": "Persist the bounded user-review proposal."
+  },
+  {
+    "tool": "create_quiz",
+    "projection": "projected",
+    "reason": "Persist quiz artifact identity and bounded creation metadata."
+  },
+  {
+    "tool": "propose_research_plan",
+    "projection": "projected",
+    "reason": "Persist the bounded user-review proposal."
+  },
+  {
+    "tool": "create_research_report",
+    "projection": "projected",
+    "reason": "Persist report artifact identity and bounded creation metadata."
+  },
+  {
+    "tool": "read_space_item",
+    "projection": "ephemeral",
+    "reason": "Notebook and Quiz bodies are private context; only the read receipt is durable."
+  },
+  {
+    "tool": "search_notebook",
+    "projection": "projected",
+    "reason": "Bounded Notebook summaries are durable discovery results."
+  },
+  {
+    "tool": "list_notebook_tree",
+    "projection": "projected",
+    "reason": "Bounded folder and note metadata is safe durable discovery context."
+  },
+  {
+    "tool": "propose_notebook_edit",
+    "projection": "projected",
+    "reason": "Persist the user-review proposal and confirmation requirement."
+  },
+  {
+    "tool": "read_tutor_memory",
+    "projection": "ephemeral",
+    "reason": "Tutor continuity memory is private context."
+  },
+  {
+    "tool": "remember_for_later",
+    "projection": "projected",
+    "reason": "Persist the bounded continuity-memory mutation receipt."
+  },
+  {
+    "tool": "resolve_tutor_memory",
+    "projection": "projected",
+    "reason": "Persist the bounded continuity-memory resolution receipt."
+  }
+]

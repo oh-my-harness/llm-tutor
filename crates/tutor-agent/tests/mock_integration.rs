@@ -10,7 +10,10 @@ use llm_harness_loop::{
 };
 use llm_harness_runtime::observability::audit::AuditSink;
 use llm_harness_runtime_sandbox_os::OsEnv;
-use llm_harness_types::{AgentMessage, AssistantMessageKind, ExecutionEnv};
+use llm_harness_types::{
+    AgentMessage, AssistantMessageKind, DataBlock, ExecutionEnv, RunRequest, Tool, ToolContext,
+    ToolFailure, ToolResult,
+};
 use tempfile::TempDir;
 use tutor_agent::capability::Capability;
 use tutor_agent::chat::{assistant_message, user_message};
@@ -108,12 +111,82 @@ impl EventSink for TraceRecorder {
     }
 }
 
+#[derive(Clone)]
+struct TestAccessMarker(&'static str);
+
+struct CaptureRunExtensionTool {
+    captured: Arc<Mutex<Option<String>>>,
+    schema: serde_json::Value,
+}
+
+impl Tool for CaptureRunExtensionTool {
+    fn name(&self) -> &str {
+        "capture_run_extension"
+    }
+
+    fn description(&self) -> &str {
+        "Capture a typed run extension for an integration test."
+    }
+
+    fn parameters_schema(&self) -> &serde_json::Value {
+        &self.schema
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _args: serde_json::Value,
+        ctx: &'a ToolContext,
+    ) -> BoxFuture<'a, std::result::Result<ToolResult, ToolFailure>> {
+        let captured = self.captured.clone();
+        let marker = ctx
+            .run
+            .extension::<TestAccessMarker>()
+            .map(|marker| marker.0.to_string());
+        Box::pin(async move {
+            *captured.lock().unwrap() = marker;
+            let model_content = vec![DataBlock::text("captured")];
+            Ok(ToolResult::projected(
+                model_content.clone(),
+                model_content,
+                serde_json::Value::Null,
+                false,
+            ))
+        })
+    }
+}
+
 #[tokio::test]
 async fn smoke_chat_text_only() {
     let responses = vec![MockResponse::text("Hello from mock tutor.")];
     let router = make_router(responses, make_governance(None));
     let answer = router.run(Capability::Chat, "what is 2+2?").await.unwrap();
     assert!(!answer.is_empty());
+}
+
+#[tokio::test]
+async fn chat_run_request_extension_reaches_product_tool_context() {
+    let captured = Arc::new(Mutex::new(None));
+    let router = make_router(
+        vec![
+            MockResponse::tool_use("capture-1", "capture_run_extension", "{}"),
+            MockResponse::text("done"),
+        ],
+        make_governance(None),
+    )
+    .with_product_tool(Arc::new(CaptureRunExtensionTool {
+        captured: captured.clone(),
+        schema: serde_json::json!({"type":"object","properties":{}}),
+    }));
+
+    router
+        .run_request(
+            Capability::Chat,
+            RunRequest::from_text("capture access").with_extension(TestAccessMarker("course-kb-1")),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(captured.lock().unwrap().as_deref(), Some("course-kb-1"));
 }
 
 #[tokio::test]
@@ -408,25 +481,15 @@ async fn research_explicit_start_enters_search_path() {
     let sink = Arc::new(TraceRecorder::default());
     let router = make_router(
         vec![
-            MockResponse::tool_use(
-                "submit-search",
-                "submit_step_result",
-                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-read",
-                "submit_step_result",
-                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-check",
-                "submit_step_result",
-                r#"{"result":{"verdict":"pass","issues":[]}}"#,
-            ),
-            MockResponse::tool_use(
-                "submit-report",
-                "submit_step_result",
-                r##"{"result":{"markdown":"# Report\n\n## Summary\n\nSearched the topic.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
+            MockResponse::text(r#"{"verdict":"pass","issues":[]}"#),
+            MockResponse::text(
+                r##"{"markdown":"# Report\n\n## Summary\n\nSearched the topic.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}"##,
             ),
         ],
         make_governance(None),
@@ -491,25 +554,15 @@ async fn research_workflow_accepts_confirmed_chinese_context() {
     let sink = Arc::new(TraceRecorder::default());
     let router = make_router(
         vec![
-            MockResponse::tool_use(
-                "submit-search",
-                "submit_step_result",
-                r#"{"result":{"queries":["Transformer architecture"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"queries":["Transformer architecture"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-read",
-                "submit_step_result",
-                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"Transformer architecture"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"Transformer architecture"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-check",
-                "submit_step_result",
-                r#"{"result":{"verdict":"pass","issues":[]}}"#,
-            ),
-            MockResponse::tool_use(
-                "submit-report",
-                "submit_step_result",
-                r##"{"result":{"markdown":"# Transformer Report\n\n## Summary\n\nConfirmed Chinese request.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
+            MockResponse::text(r#"{"verdict":"pass","issues":[]}"#),
+            MockResponse::text(
+                r##"{"markdown":"# Transformer Report\n\n## Summary\n\nConfirmed Chinese request.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}"##,
             ),
         ],
         make_governance(None),
@@ -550,25 +603,15 @@ async fn research_workflow_persists_final_report_to_session() {
     let inspect_session = Session::new(storage);
     let router = make_router(
         vec![
-            MockResponse::tool_use(
-                "submit-search",
-                "submit_step_result",
-                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"queries":["agent research workflow"],"source_candidates":[{"title":"Mock","url":"https://example.test","snippet":"Mock source"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-read",
-                "submit_step_result",
-                r#"{"result":{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}}"#,
+            MockResponse::text(
+                r#"{"sources":[{"title":"Mock","url":"https://example.test","summary":"Mock source summary","used_for":"workflow architecture"}],"failures":[]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-check",
-                "submit_step_result",
-                r#"{"result":{"verdict":"pass","issues":[]}}"#,
-            ),
-            MockResponse::tool_use(
-                "submit-report",
-                "submit_step_result",
-                r##"{"result":{"markdown":"# Report\n\n## Summary\n\nPersisted report.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}}"##,
+            MockResponse::text(r#"{"verdict":"pass","issues":[]}"#),
+            MockResponse::text(
+                r##"{"markdown":"# Report\n\n## Summary\n\nPersisted report.\n\n## Key Findings\n\n- Finding. [1]\n\n## Analysis\n\nAnalysis.\n\n## Limitations\n\nLimited.\n\n## Follow-up Questions\n\n- Next?\n\n## Sources\n\n[1] Mock - https://example.test","sources":[{"title":"Mock","url":"https://example.test"}]}"##,
             ),
         ],
         make_governance(None),
@@ -605,35 +648,19 @@ async fn research_workflow_persists_final_report_to_session() {
 async fn research_workflow_fails_clearly_after_citation_repair_attempt() {
     let router = make_router(
         vec![
-            MockResponse::tool_use(
-                "submit-search-1",
-                "submit_step_result",
-                r#"{"result":{"queries":["agent research workflow"],"source_candidates":[],"failures":["search unavailable"]}}"#,
+            MockResponse::text(
+                r#"{"queries":["agent research workflow"],"source_candidates":[],"failures":["search unavailable"]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-read-1",
-                "submit_step_result",
-                r#"{"result":{"sources":[],"failures":["no sources to fetch"]}}"#,
+            MockResponse::text(r#"{"sources":[],"failures":["no sources to fetch"]}"#),
+            MockResponse::text(
+                r#"{"verdict":"fail","issues":["no verified sources"],"repair":"search"}"#,
             ),
-            MockResponse::tool_use(
-                "submit-check-1",
-                "submit_step_result",
-                r#"{"result":{"verdict":"fail","issues":["no verified sources"]}}"#,
+            MockResponse::text(
+                r#"{"queries":["agent research workflow retry"],"source_candidates":[],"failures":["search still unavailable"]}"#,
             ),
-            MockResponse::tool_use(
-                "submit-search-2",
-                "submit_step_result",
-                r#"{"result":{"queries":["agent research workflow retry"],"source_candidates":[],"failures":["search still unavailable"]}}"#,
-            ),
-            MockResponse::tool_use(
-                "submit-read-2",
-                "submit_step_result",
-                r#"{"result":{"sources":[],"failures":["fetch still unavailable"]}}"#,
-            ),
-            MockResponse::tool_use(
-                "submit-check-2",
-                "submit_step_result",
-                r#"{"result":{"verdict":"fail","issues":["citations still unverified"]}}"#,
+            MockResponse::text(r#"{"sources":[],"failures":["fetch still unavailable"]}"#),
+            MockResponse::text(
+                r#"{"verdict":"fail","issues":["citations still unverified"],"repair":"search"}"#,
             ),
         ],
         make_governance(None),

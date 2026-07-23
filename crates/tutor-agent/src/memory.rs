@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
-use llm_harness_runtime::workflow::model::StepResult;
+use llm_harness_runtime::workflow::model::{StepResult, StructuredStatus};
 use llm_harness_types::Tool;
 use serde::{Deserialize, Serialize};
 
@@ -177,6 +177,7 @@ impl StepExecutor for PrepareMemoryWorkflowExecutor {
             Ok(StepResult {
                 output: "memory workflow input prepared".into(),
                 structured: Some(serde_json::json!({ "prepared": true })),
+                structured_status: StructuredStatus::NotRequired,
                 tool_calls_count: 0,
                 session_id: String::new(),
                 cost: CostAggregate::default(),
@@ -476,10 +477,8 @@ mod tests {
     #[tokio::test]
     async fn runtime_workflow_runs_memory_llm_step() {
         let dir = tempfile::TempDir::new().unwrap();
-        let client = Arc::new(MockLlmClient::new(vec![MockResponse::tool_use(
-            "memory-submit",
-            "submit_step_result",
-            r##"{"result":{"summary":"One update ready.","findings":[],"changes":[{"id":"change_1","op":"insert","section":"Weak topics","entry_id":null,"after_entry_id":null,"text":"Learner should review OPC distractors.","refs":["quiz:event-1"],"reason":"Repeated quiz error"}]}}"##,
+        let client = Arc::new(MockLlmClient::new(vec![MockResponse::text(
+            r##"{"summary":"One update ready.","findings":[],"changes":[{"id":"change_1","op":"insert","section":"Weak topics","entry_id":null,"after_entry_id":null,"text":"Learner should review OPC distractors.","refs":["quiz:event-1"],"reason":"Repeated quiz error"}]}"##,
         )]));
         let input = MemoryWorkflowInput {
             target_path: "L2/quiz.md".into(),

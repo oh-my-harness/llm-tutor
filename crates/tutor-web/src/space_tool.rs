@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 
 use crate::notebook_store::{NotebookEntrySummary, NotebookStore};
@@ -92,29 +92,30 @@ impl Tool for ReadSpaceItemTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let mention = mention_from_args(args)?;
             let Some((resolved_id, markdown)) =
                 resolve_space_mention_markdown(&self.notebook, &self.quizzes, &mention)
             else {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "Space item not found. Ask the user to choose the item again from the Space picker.".into(),
-                    }],
-                    details: json!({
+                let content = vec![DataBlock::text(
+                    "Space item not found. Ask the user to choose the item again from the Space picker.",
+                )];
+                return Ok(ToolResult::projected(
+                    content.clone(),
+                    content,
+                    json!({
                         "found": false,
                         "requested": mention,
                     }),
-                    terminate: false,
-                });
+                    false,
+                ));
             };
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: markdown.clone(),
-                }],
-                details: json!({
+            Ok(ToolResult::ephemeral(
+                vec![DataBlock::text(markdown.clone())],
+                format!("Read Space item `{resolved_id}`."),
+                json!({
                     "found": true,
                     "id": resolved_id,
                     "item_type": mention.mention_type,
@@ -123,8 +124,8 @@ impl Tool for ReadSpaceItemTool {
                     "title": mention.title,
                     "markdown": markdown,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -165,13 +166,13 @@ impl Tool for SearchNotebookTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let query = args["query"]
                 .as_str()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| ToolError::InvalidArguments("query is required".into()))?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("query is required"))?;
             let limit = args["limit"]
                 .as_u64()
                 .map(|value| value.clamp(1, 10) as usize)
@@ -206,14 +207,16 @@ impl Tool for SearchNotebookTool {
                     .join("\n\n")
             };
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text }],
-                details: json!({
+            let content = vec![DataBlock::text(text)];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "query": query,
                     "hits": hits,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -250,7 +253,7 @@ impl Tool for ListNotebookTreeTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let limit = args["limit"]
                 .as_u64()
@@ -312,14 +315,16 @@ impl Tool for ListNotebookTreeTool {
                 format!("{folder_text}\n\n{entry_text}")
             };
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text }],
-                details: json!({
+            let content = vec![DataBlock::text(text)];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "folders": folders,
                     "entries": entries,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -403,32 +408,32 @@ impl Tool for ProposeNotebookEditTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let entry_id = args["entry_id"]
                 .as_str()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| ToolError::InvalidArguments("entry_id is required".into()))?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("entry_id is required"))?;
             let Some(entry) = self.notebook.get(entry_id) else {
-                return Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "Notebook entry not found. Ask the user to choose the entry again from the Space picker.".into(),
-                    }],
-                    details: json!({
+                let content = vec![DataBlock::text(
+                    "Notebook entry not found. Ask the user to choose the entry again from the Space picker.",
+                )];
+                return Ok(ToolResult::projected(
+                    content.clone(),
+                    content,
+                    json!({
                         "found": false,
                         "entry_id": entry_id,
                     }),
-                    terminate: false,
-                });
+                    false,
+                ));
             };
             let proposed_markdown = args["proposed_markdown"]
                 .as_str()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ToolError::InvalidArguments("proposed_markdown is required".into())
-                })?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("proposed_markdown is required"))?;
             let proposed_title = args["proposed_title"]
                 .as_str()
                 .map(str::trim)
@@ -465,14 +470,14 @@ impl Tool for ProposeNotebookEditTool {
                 })
                 .unwrap_or_default();
 
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: format!(
-                        "Notebook {proposal_kind} proposal is ready for user review. It has not been applied. Entry: {}.",
-                        entry.title
-                    ),
-                }],
-                details: json!({
+            let content = vec![DataBlock::text(format!(
+                "Notebook {proposal_kind} proposal is ready for user review. It has not been applied. Entry: {}.",
+                entry.title
+            ))];
+            Ok(ToolResult::projected(
+                content.clone(),
+                content,
+                json!({
                     "found": true,
                     "proposal_kind": proposal_kind,
                     "entry_id": entry.id,
@@ -486,8 +491,8 @@ impl Tool for ProposeNotebookEditTool {
                     "merge_source_entry_ids": merge_source_entry_ids,
                     "requires_confirmation": true,
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -603,17 +608,17 @@ fn notebook_snippet(markdown: &str, terms: &[String]) -> String {
     }
 }
 
-fn mention_from_args(args: serde_json::Value) -> Result<SpaceMention, ToolError> {
+fn mention_from_args(args: serde_json::Value) -> Result<SpaceMention, ToolFailure> {
     let item_type = args["item_type"]
         .as_str()
         .or_else(|| args["type"].as_str())
-        .ok_or_else(|| ToolError::InvalidArguments("item_type is required".into()))?;
+        .ok_or_else(|| ToolFailure::invalid_arguments("item_type is required"))?;
     let mention_type = match item_type {
         "notebook_entry" => SpaceMentionType::NotebookEntry,
         "quiz_session" => SpaceMentionType::QuizSession,
         "quiz_question" => SpaceMentionType::QuizQuestion,
         other => {
-            return Err(ToolError::InvalidArguments(format!(
+            return Err(ToolFailure::invalid_arguments(format!(
                 "unsupported space item type `{other}`"
             )));
         }
@@ -644,7 +649,7 @@ fn mention_from_args(args: serde_json::Value) -> Result<SpaceMention, ToolError>
                 }
             })
         })
-        .ok_or_else(|| ToolError::InvalidArguments("target_id is required".into()))?;
+        .ok_or_else(|| ToolFailure::invalid_arguments("target_id is required"))?;
 
     Ok(SpaceMention {
         id: mention_id,
@@ -674,6 +679,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,
@@ -725,8 +733,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.details["found"], true);
-        match &result.content[0] {
-            ContentBlock::Text { text } => assert!(text.contains("Alignment marks")),
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => assert!(text.contains("Alignment marks")),
             _ => panic!("expected text content"),
         }
     }
@@ -808,8 +816,8 @@ mod tests {
 
         assert_eq!(result.details["hits"][0]["id"], entry.id);
         assert_eq!(result.details["hits"][0]["path"], "concepts/Lithography.md");
-        match &result.content[0] {
-            ContentBlock::Text { text } => {
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => {
                 assert!(text.contains("concepts/Lithography.md"));
                 assert!(text.contains("mask alignment"));
             }
@@ -853,8 +861,10 @@ mod tests {
             result.details["entries"][0]["path"],
             "concepts/lithography/TCC.md"
         );
-        match &result.content[0] {
-            ContentBlock::Text { text } => assert!(text.contains("concepts/lithography/TCC.md")),
+        match &result.model_content[0] {
+            DataBlock::Text { text, .. } => {
+                assert!(text.contains("concepts/lithography/TCC.md"))
+            }
             _ => panic!("expected text content"),
         }
     }

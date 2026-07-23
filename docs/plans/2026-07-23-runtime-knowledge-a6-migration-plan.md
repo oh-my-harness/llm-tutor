@@ -1,6 +1,7 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: planned | Date: 2026-07-23 | Tracks:
+> Status: in progress (Phase 0 baseline implemented; two upstream gates open) |
+> Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
 > [`llm-harness-runtime@8ab2a377`](https://github.com/oh-my-harness/llm-harness-runtime/commit/8ab2a3770bee0e7a1731b8074552ef9b6d70653a)
@@ -65,7 +66,12 @@ shall not replace LanceDB in the product.
 
 The current implementation has the following migration surface:
 
-- Root runtime dependencies are pinned to `e200c12`.
+- Root runtime dependencies are pinned to `8ab2a377`; `llm_adapter` is aligned
+  to `16a22ad`.
+- All 26 production Tools use `ToolFailure`, typed result data, and an explicit
+  `Projected` or `Ephemeral` Session projection.
+- Ordinary capability runs accept `RunRequest`; the legacy message/string
+  methods construct one as a compatibility wrapper.
 - `tutor-rag::KnowledgeRetriever` exposes product-defined search.
 - `tutor-tools::RagSearchTool` accepts a model-provided optional `kb` argument.
 - `RagSearchTool` returns complete chunk bodies in the search response.
@@ -77,9 +83,9 @@ The current implementation has the following migration surface:
 - The web layer checks Tutor resource permissions, but the authorization is not
   represented as a trusted run-scoped Knowledge context.
 
-The runtime update is itself a migration. The repository currently contains 26
-`Tool` implementations and 25 direct `ToolResult` initializers. They must be
-updated for A2 before Knowledge integration can compile reliably.
+The A1/A2 API baseline is complete. The remaining migration replaces the
+legacy retrieval boundary with runtime Knowledge while preserving the product
+storage and UI behavior.
 
 ## 4. Ownership Boundaries
 
@@ -240,24 +246,39 @@ run-state or receipt validator.
 
 ### Phase 0: Runtime A1/A2 baseline
 
-- [ ] Pin all runtime crates to the reviewed A1-A5 revision, or a newer reviewed
+- [x] Pin all runtime crates to the reviewed A1-A5 revision, or a newer reviewed
   merge commit containing the same contracts.
-- [ ] Align `llm_adapter` and regenerate `Cargo.lock`.
-- [ ] Migrate every `Tool::execute` from `ToolError` to `ToolFailure`.
-- [ ] Migrate `ToolResult.content` to `model_content`, typed extensions, and an
+- [x] Align `llm_adapter` and regenerate `Cargo.lock`.
+- [x] Migrate every `Tool::execute` from `ToolError` to `ToolFailure`.
+- [x] Migrate `ToolResult.content` to `model_content`, typed extensions, and an
   explicit Session projection.
-- [ ] Add a projection audit test or static inventory so a new Tool cannot
-  silently inherit unsafe persistence.
-- [ ] Replace removed runtime workflow APIs:
+- [x] Add a projection audit and checked static inventory so a new Tool cannot
+  silently inherit unsafe persistence:
+  `scripts/check-tool-projections.ps1` and
+  `docs/runtime-tool-projections.json`.
+- [x] Replace removed runtime workflow APIs:
   - `human_approval` wrapper with the current `BeforeToolCallHook` boundary;
   - `SYNC_SPAWN_TOOL_NAME` / `sync_spawn_agent` with current spawn behavior;
   - `submit_step_result` prompts/mocks with structured LLM step output;
   - old workflow result fields and test `ToolContext` construction.
-- [ ] Prove `RunRequest` extensions reach ordinary Chat Tool calls.
+- [x] Prove `RunRequest` extensions reach ordinary Chat Tool calls.
 - [ ] Prove how extensions and Knowledge plugins reach each Research/Quiz
   workflow LLM step. Record a runtime issue before adding a product workaround
   if the workflow boundary cannot carry them.
 - [ ] Resolve the runtime-owned final-answer citation validation boundary.
+
+Open upstream gates:
+
+- `WorkflowEngine::run_llm_step` currently starts each step with
+  `harness.prompt(&prompt_text)`, so a product `RunRequest` extension cannot
+  reach the step's `ToolContext.run`. `customize_builder` can install a plugin
+  but cannot supply trusted per-run extensions.
+- `KnowledgePlugin` does not install a final-answer citation validator, and
+  `AgentHarness::run` does not return the completed `RunContext`.
+
+Both gaps are recorded in `docs/framework-feedback.md`. Phase 1 source work may
+continue independently, but Chat/Research/Quiz Knowledge cutover must not claim
+completion until the relevant runtime-owned boundaries exist.
 
 Checkpoint:
 
@@ -367,8 +388,8 @@ Acceptance:
   steps.
 - [ ] Map validated Knowledge refs into `QuizCitation` metadata.
 - [ ] Preserve conversation, Notebook, and no-KB Quiz source paths.
-- [ ] Remove stale `submit_step_result` mocks/prompts as part of the runtime
-  workflow migration.
+- [x] Remove stale `submit_step_result` mocks/prompts as part of the Phase 0
+  runtime workflow migration.
 
 Acceptance:
 

@@ -5,7 +5,7 @@ use llm_harness_runtime::control::cost::CostAggregate;
 use llm_harness_runtime::workflow::engine::{WorkflowEngine, WorkflowEngineConfig};
 use llm_harness_runtime::workflow::executor::{ExecutorCtx, StepExecutor};
 use llm_harness_runtime::workflow::judge::{StepCtx, StepTransitionJudge};
-use llm_harness_runtime::workflow::model::{StepResult, Transition};
+use llm_harness_runtime::workflow::model::{StepResult, StructuredStatus, Transition};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, TutorError};
@@ -230,6 +230,7 @@ fn workflow_step_result(output: String, structured: serde_json::Value) -> StepRe
     StepResult {
         output,
         structured: Some(structured),
+        structured_status: StructuredStatus::NotRequired,
         tool_calls_count: 0,
         session_id: String::new(),
         cost: CostAggregate::default(),
@@ -431,26 +432,16 @@ mod tests {
     async fn runtime_workflow_repairs_and_publishes_quiz() {
         let dir = tempfile::TempDir::new().unwrap();
         let client = Arc::new(MockLlmClient::new(vec![
-            MockResponse::tool_use(
-                "gen-1",
-                "submit_step_result",
-                r#"{"result":{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
+            MockResponse::text(
+                r#"{"questions":[{"stem":"Wrong draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":1,"explanation":"The source supports correcting mask patterns.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#,
             ),
-            MockResponse::tool_use(
-                "verify-1",
-                "submit_step_result",
-                r#"{"result":{"verdict":"fail","action":"repair","issues":["correct answer contradicts explanation and source"]}}"#,
+            MockResponse::text(
+                r#"{"verdict":"fail","action":"repair","issues":["correct answer contradicts explanation and source"]}"#,
             ),
-            MockResponse::tool_use(
-                "gen-2",
-                "submit_step_result",
-                r#"{"result":{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}}"#,
+            MockResponse::text(
+                r#"{"questions":[{"stem":"Repaired draft","options":["Corrects mask patterns","Ignores masks"],"correct_option_index":0,"explanation":"The source supports correcting mask patterns; ignoring masks is not supported.","supporting_quote":"OPC corrects lithography mask patterns","citation_indices":[0],"tags":["OPC"]}]}"#,
             ),
-            MockResponse::tool_use(
-                "verify-2",
-                "submit_step_result",
-                r#"{"result":{"verdict":"pass","issues":[]}}"#,
-            ),
+            MockResponse::text(r#"{"verdict":"pass","issues":[]}"#),
         ]));
         let engine_config = build_workflow_engine_config(
             client.clone(),

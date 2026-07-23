@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use llm_harness_runtime::control::human_approval::HumanApprovalWrapper;
 use llm_harness_runtime::observability::audit::{AuditEntry, AuditEventType, AuditSink};
+use llm_harness_types::BeforeToolCallHook;
 use uuid::Uuid;
 
 /// Session-wide governance configuration shared across all harnesses.
@@ -12,8 +12,8 @@ pub struct GovernanceConfig {
     pub budget_limit_usd: f64,
     /// Optional audit sink for writing structured learning-trail events.
     pub audit: Option<Arc<dyn AuditSink>>,
-    /// Optional human approval gate (wraps `BeforeToolCallHook`).
-    pub approval: Option<Arc<HumanApprovalWrapper>>,
+    /// Optional human approval gate.
+    pub approval: Option<Arc<dyn BeforeToolCallHook>>,
     /// When true, `code_exec` calls require human approval.
     pub require_code_exec_approval: bool,
 }
@@ -32,7 +32,7 @@ impl GovernanceConfig {
         }
     }
 
-    pub fn with_approval(mut self, approval: Arc<HumanApprovalWrapper>) -> Self {
+    pub fn with_approval(mut self, approval: Arc<dyn BeforeToolCallHook>) -> Self {
         self.approval = Some(approval);
         self
     }

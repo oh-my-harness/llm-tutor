@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde_json::json;
 use std::time::Duration;
 
@@ -62,21 +62,22 @@ impl Tool for WebFetchTool {
         &'a self,
         args: serde_json::Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let url = args["url"].as_str().unwrap_or("").trim().to_string();
             if url.is_empty() {
-                return Err(ToolError::InvalidArguments("url is empty".into()));
+                return Err(ToolFailure::invalid_arguments("url is empty"));
             }
 
             let fetched = self
                 .fetch_url(&url)
                 .await
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| ToolFailure::new("web_fetch_failed", err.to_string()))?;
             let text = format_fetch_result(&fetched);
-            Ok(ToolResult {
-                content: vec![ContentBlock::Text { text }],
-                details: json!({
+            Ok(ToolResult::ephemeral(
+                vec![DataBlock::text(text)],
+                format!("Fetched web source {} ({})", fetched.title, fetched.url),
+                json!({
                     "url": fetched.url,
                     "title": fetched.title,
                     "description": fetched.description,
@@ -93,8 +94,8 @@ impl Tool for WebFetchTool {
                         "score": null,
                     }],
                 }),
-                terminate: false,
-            })
+                false,
+            ))
         })
     }
 }
@@ -302,6 +303,9 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "test-id".into(),
             turn_index: 0,

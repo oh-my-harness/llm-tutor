@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use llm_harness_agent::{AgentHarnessEvent, Session};
-use llm_harness_loop::{CompositeBeforeToolCallHook, FinalAnswerMode};
-use llm_harness_types::{AgentEvent, AgentMessage, AssistantMessageKind, BeforeToolCallHook};
+use llm_harness_loop::FinalAnswerMode;
+use llm_harness_types::{
+    AgentEvent, AgentMessage, AssistantMessageKind, BeforeToolCallHook, RunRequest,
+};
 use tokio_util::sync::CancellationToken;
 use tutor_tools::CodeExecTool;
 
@@ -20,7 +22,7 @@ pub async fn run_code_exec_with_messages(
     router: &CapabilityRouter,
     messages: Vec<AgentMessage>,
 ) -> Result<String> {
-    run_code_exec_inner(router, Some(messages), None, None).await
+    run_code_exec_with_request(router, RunRequest::new(messages), None, None).await
 }
 
 pub async fn run_code_exec_with_session(
@@ -37,18 +39,18 @@ pub async fn run_code_exec_with_session_cancel(
     request: &str,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
-    run_code_exec_inner(
+    run_code_exec_with_request(
         router,
-        Some(vec![crate::chat::user_message(request)]),
+        RunRequest::from_text(request),
         Some(session),
         abort_token,
     )
     .await
 }
 
-async fn run_code_exec_inner(
+pub(crate) async fn run_code_exec_with_request(
     router: &CapabilityRouter,
-    messages: Option<Vec<AgentMessage>>,
+    request: RunRequest,
     session: Option<Session>,
     abort_token: Option<CancellationToken>,
 ) -> Result<String> {
@@ -62,9 +64,7 @@ async fn run_code_exec_inner(
     let tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![Arc::new(CodeExecTool::new())];
     let before_tool_call: Vec<Arc<dyn BeforeToolCallHook>> =
         if let Some(approval) = &router.governance.approval {
-            vec![Arc::new(CompositeBeforeToolCallHook::new(vec![
-                approval.clone() as Arc<dyn BeforeToolCallHook>,
-            ]))]
+            vec![approval.clone()]
         } else {
             vec![]
         };
@@ -102,11 +102,7 @@ async fn run_code_exec_inner(
     }
     let mut rx = harness.subscribe();
     let prompt_harness = harness.clone();
-    let prompt_task = tokio::spawn(async move {
-        prompt_harness
-            .prompt_with_messages(messages.unwrap_or_default())
-            .await
-    });
+    let prompt_task = tokio::spawn(async move { prompt_harness.run(request).await });
 
     let mut last_text = String::new();
     let mut last_error: Option<String> = None;

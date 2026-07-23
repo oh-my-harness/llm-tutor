@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
-use llm_harness_types::{ContentBlock, Tool, ToolContext, ToolError, ToolResult};
+use llm_harness_types::{DataBlock, Tool, ToolContext, ToolFailure, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -248,7 +248,7 @@ impl Tool for ListMemoryEventsTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let surface = optional_string(&args, "surface");
             let session_id = optional_string(&args, "session_id");
@@ -257,7 +257,7 @@ impl Tool for ListMemoryEventsTool {
             let page = self
                 .store
                 .query_events(surface, None, session_id, cursor, limit)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             self.tracker.record_activity(
                 "discovering_sources",
                 self.name(),
@@ -296,11 +296,11 @@ impl Tool for SearchMemoryEventsTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let query = optional_string(&args, "query")
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| ToolError::InvalidArguments("query is required".into()))?;
+                .ok_or_else(|| ToolFailure::invalid_arguments("query is required"))?;
             let surface = optional_string(&args, "surface");
             let session_id = optional_string(&args, "session_id");
             let cursor = optional_string(&args, "cursor");
@@ -308,7 +308,7 @@ impl Tool for SearchMemoryEventsTool {
             let page = self
                 .store
                 .query_events(surface, Some(query), session_id, cursor, limit)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             self.tracker.record_activity(
                 "discovering_sources",
                 self.name(),
@@ -352,13 +352,13 @@ impl Tool for ReadMemoryEventTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let event_id = required_string(&args, "event_id")?;
             let event = self
                 .store
                 .read_event(event_id)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             let reference = event_reference(&event);
             self.tracker.record_l1(
                 "reading_evidence",
@@ -366,8 +366,9 @@ impl Tool for ReadMemoryEventTool {
                 format!("Read {} evidence", reference),
                 vec![reference.clone()],
             );
-            Ok(json_tool_result(
+            Ok(json_ephemeral_result(
                 json!({"reference": reference, "event": event}),
+                "Read one L1 memory event.",
             ))
         })
     }
@@ -401,7 +402,7 @@ impl Tool for ReadMemoryContextTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let event_id = required_string(&args, "event_id")?;
             let context = self
@@ -411,7 +412,7 @@ impl Tool for ReadMemoryContextTool {
                     args["before"].as_u64().unwrap_or(2) as usize,
                     args["after"].as_u64().unwrap_or(2) as usize,
                 )
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             let refs = std::iter::once(&context.event)
                 .chain(context.before.iter())
                 .chain(context.after.iter())
@@ -423,8 +424,9 @@ impl Tool for ReadMemoryContextTool {
                 format!("Read {} contextual L1 events", refs.len()),
                 refs.clone(),
             );
-            Ok(json_tool_result(
+            Ok(json_ephemeral_result(
                 json!({"references": refs, "context": context}),
+                "Read contextual L1 memory events.",
             ))
         })
     }
@@ -454,13 +456,13 @@ impl Tool for ReadMemorySourceTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let reference = required_string(&args, "reference")?;
             let source = self
                 .store
                 .resolve_source_ref(reference)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             let canonical_reference = event_reference(&source.event);
             self.tracker.record_resolution(
                 "reading_evidence",
@@ -469,11 +471,14 @@ impl Tool for ReadMemorySourceTool {
                 reference,
                 &canonical_reference,
             );
-            Ok(json_tool_result(json!({
-                "requested_reference": reference,
-                "canonical_reference": canonical_reference,
-                "event": source.event,
-            })))
+            Ok(json_ephemeral_result(
+                json!({
+                    "requested_reference": reference,
+                    "canonical_reference": canonical_reference,
+                    "event": source.event,
+                }),
+                "Resolved one L1 memory source.",
+            ))
         })
     }
 }
@@ -496,7 +501,7 @@ impl Tool for ListMemoryEntriesTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let paths = selected_l2_paths(&args, &self.allowed_paths)?;
             let cursor = optional_string(&args, "cursor");
@@ -504,7 +509,7 @@ impl Tool for ListMemoryEntriesTool {
             let page = self
                 .store
                 .query_l2_entries(&paths, None, cursor, limit)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             self.tracker.record_activity(
                 "discovering_l2_sources",
                 self.name(),
@@ -542,7 +547,7 @@ impl Tool for SearchMemoryEntriesTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let query = required_string(&args, "query")?;
             let paths = selected_l2_paths(&args, &self.allowed_paths)?;
@@ -551,7 +556,7 @@ impl Tool for SearchMemoryEntriesTool {
             let page = self
                 .store
                 .query_l2_entries(&paths, Some(query), cursor, limit)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             self.tracker.record_activity(
                 "discovering_l2_sources",
                 self.name(),
@@ -585,13 +590,13 @@ impl Tool for ReadMemoryEntryTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let reference = required_string(&args, "reference")?;
             let entry = self
                 .store
                 .read_l2_entry(reference)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             ensure_l2_path_allowed(&entry.path, &self.allowed_paths)?;
             self.tracker.record_l2(
                 "reading_l2_evidence",
@@ -599,7 +604,10 @@ impl Tool for ReadMemoryEntryTool {
                 format!("Read {} L2 evidence", entry.reference),
                 vec![entry.reference.clone()],
             );
-            Ok(json_tool_result(json!({ "memory": entry })))
+            Ok(json_ephemeral_result(
+                json!({ "memory": entry }),
+                "Read one L2 memory entry.",
+            ))
         })
     }
 }
@@ -622,13 +630,13 @@ impl Tool for ReadMemoryEntrySourcesTool {
         &'a self,
         args: Value,
         _ctx: &'a ToolContext,
-    ) -> BoxFuture<'a, Result<ToolResult, ToolError>> {
+    ) -> BoxFuture<'a, Result<ToolResult, ToolFailure>> {
         Box::pin(async move {
             let reference = required_string(&args, "reference")?;
             let sources = self
                 .store
                 .read_l2_entry_sources(reference)
-                .map_err(|err| ToolError::Execution(err.to_string()))?;
+                .map_err(|err| tool_execution_failure(err.to_string()))?;
             ensure_l2_path_allowed(&sources.memory.path, &self.allowed_paths)?;
             let l1_refs = sources
                 .sources
@@ -651,11 +659,14 @@ impl Tool for ReadMemoryEntrySourcesTool {
                 format!("Read {} supporting L1 source events", l1_refs.len()),
                 l1_refs.clone(),
             );
-            Ok(json_tool_result(json!({
-                "memory": sources.memory,
-                "source_references": l1_refs,
-                "sources": sources.sources,
-            })))
+            Ok(json_ephemeral_result(
+                json!({
+                    "memory": sources.memory,
+                    "source_references": l1_refs,
+                    "sources": sources.sources,
+                }),
+                "Read supporting L1 memory sources.",
+            ))
         })
     }
 }
@@ -685,7 +696,7 @@ fn l2_entry_read_schema() -> Value {
     })
 }
 
-fn selected_l2_paths(args: &Value, allowed_paths: &[String]) -> Result<Vec<String>, ToolError> {
+fn selected_l2_paths(args: &Value, allowed_paths: &[String]) -> Result<Vec<String>, ToolFailure> {
     let mut selected = args["paths"]
         .as_array()
         .map(|paths| {
@@ -712,11 +723,11 @@ fn selected_l2_paths(args: &Value, allowed_paths: &[String]) -> Result<Vec<Strin
     Ok(selected)
 }
 
-fn ensure_l2_path_allowed(path: &str, allowed_paths: &[String]) -> Result<(), ToolError> {
+fn ensure_l2_path_allowed(path: &str, allowed_paths: &[String]) -> Result<(), ToolFailure> {
     if allowed_paths.iter().any(|allowed| allowed == path) {
         Ok(())
     } else {
-        Err(ToolError::InvalidArguments(format!(
+        Err(ToolFailure::invalid_arguments(format!(
             "L2 memory path `{path}` is not available for this target"
         )))
     }
@@ -783,19 +794,27 @@ fn optional_string<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
+fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolFailure> {
     optional_string(args, key)
-        .ok_or_else(|| ToolError::InvalidArguments(format!("{key} is required")))
+        .ok_or_else(|| ToolFailure::invalid_arguments(format!("{key} is required")))
 }
 
 fn json_tool_result(value: Value) -> ToolResult {
-    ToolResult {
-        content: vec![ContentBlock::Text {
-            text: value.to_string(),
-        }],
-        details: value,
-        terminate: false,
-    }
+    let content = vec![DataBlock::text(value.to_string())];
+    ToolResult::projected(content.clone(), content, value, false)
+}
+
+fn json_ephemeral_result(value: Value, summary: impl Into<String>) -> ToolResult {
+    ToolResult::ephemeral(
+        vec![DataBlock::text(value.to_string())],
+        summary,
+        value,
+        false,
+    )
+}
+
+fn tool_execution_failure(message: impl Into<String>) -> ToolFailure {
+    ToolFailure::new("memory_tool_failed", message)
 }
 
 #[cfg(test)]
@@ -810,6 +829,9 @@ mod tests {
         let (update_tx, _update_rx) = mpsc::channel(1);
         ToolContext {
             env: Arc::new(UnsupportedEnv::new()),
+            run: Arc::new(llm_harness_types::RunContext::new(
+                llm_harness_types::RunRequest::default(),
+            )),
             abort: CancellationToken::new(),
             tool_use_id: "memory-tool-test".into(),
             turn_index: 0,
