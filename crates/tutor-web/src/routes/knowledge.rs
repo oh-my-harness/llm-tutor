@@ -832,16 +832,8 @@ async fn reindex_knowledge_base(
                 let jobs = task_state.jobs.clone();
                 let job_id_for_progress = job_id.clone();
                 let document_name = document.name.clone();
-                let progress_base = if document_count == 0 {
-                    10
-                } else {
-                    10 + (index * 80 / document_count) as u8
-                };
-                let progress_span = if document_count == 0 {
-                    80
-                } else {
-                    (80 / document_count).max(1) as u8
-                };
+                let progress_base = 10 + (index * 80 / document_count) as u8;
+                let progress_span = (80 / document_count).max(1) as u8;
                 let chunks = rag
                     .ingest_text_with_progress(
                         &kb,

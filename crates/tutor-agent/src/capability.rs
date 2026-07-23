@@ -11,6 +11,7 @@ use tutor_rag::KnowledgeRetriever;
 use crate::error::{Result, TutorError};
 use crate::event_sink::SharedEventSink;
 use crate::governance::GovernanceConfig;
+use crate::knowledge::KnowledgeRuntime;
 use crate::llm_provider::LlmConfig;
 use tutor_tools::{ReadMemoryTool, WebSearchConfig, WriteMemoryTool};
 
@@ -55,6 +56,7 @@ pub struct CapabilityRouter {
     pub event_sink: Option<SharedEventSink>,
     pub retriever: Option<Arc<dyn KnowledgeRetriever>>,
     pub associated_kb: Option<String>,
+    pub knowledge_runtime: Option<KnowledgeRuntime>,
     pub web_search: Option<WebSearchConfig>,
     pub product_tools: Vec<Arc<dyn Tool>>,
     pub workflow_root: Option<PathBuf>,
@@ -73,6 +75,7 @@ impl CapabilityRouter {
             event_sink: None,
             retriever: None,
             associated_kb: None,
+            knowledge_runtime: None,
             web_search: None,
             product_tools: vec![],
             workflow_root: None,
@@ -105,6 +108,11 @@ impl CapabilityRouter {
         if !kb.trim().is_empty() {
             self.associated_kb = Some(kb);
         }
+        self
+    }
+
+    pub fn with_knowledge_runtime(mut self, runtime: KnowledgeRuntime) -> Self {
+        self.knowledge_runtime = Some(runtime);
         self
     }
 

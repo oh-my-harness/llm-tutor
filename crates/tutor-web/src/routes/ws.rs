@@ -13,7 +13,11 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt, future::BoxFuture};
 use llm_harness_runtime_audit_jsonl::JsonlAuditSink;
+use llm_harness_runtime_knowledge::{
+    EvidenceAuthority, KnowledgeAccessContext, KnowledgeScope, PrincipalRef,
+};
 use llm_harness_runtime_sandbox_os::OsEnv;
+use llm_harness_types::RunRequest;
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 use tutor_agent::event_sink::{EventSink, SharedEventSink};
@@ -48,6 +52,7 @@ struct WsState {
     quizzes: Arc<QuizStore>,
     tutors: Arc<TutorStore>,
     tutor_memory: Arc<TutorMemoryStore>,
+    evidence_authority: Arc<EvidenceAuthority>,
     rag_root: PathBuf,
 }
 
@@ -432,6 +437,44 @@ async fn handle_socket(socket: WebSocket, state: WsState, session_id: String) {
     send_task.abort();
 }
 
+fn course_evidence_authority() -> Arc<EvidenceAuthority> {
+    let mut secret = Vec::with_capacity(32);
+    secret.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
+    secret.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
+    Arc::new(
+        EvidenceAuthority::new(secret, [tutor_agent::course_evidence_provider_id()])
+            .expect("generated evidence secret and registered provider are valid"),
+    )
+}
+
+fn course_knowledge_access_context(
+    session_id: &str,
+    knowledge_base_id: &str,
+    tutor: Option<&TutorProfile>,
+) -> KnowledgeAccessContext {
+    let mut scope = KnowledgeScope::new(tutor_rag::COURSE_KNOWLEDGE_NAMESPACE);
+    scope.project = Some(session_id.to_string());
+    scope.attributes.insert(
+        tutor_rag::KNOWLEDGE_BASE_SCOPE_ATTRIBUTE.into(),
+        knowledge_base_id.to_string(),
+    );
+    let mut access =
+        KnowledgeAccessContext::new(scope, PrincipalRef::new("local-user", "local_user"));
+    access.authorization_version = Some(match tutor {
+        Some(tutor) => {
+            let mut knowledge_base_ids = tutor.resource_permissions.knowledge_base_ids.clone();
+            knowledge_base_ids.sort();
+            format!(
+                "tutor:{}:course-knowledge:{}",
+                tutor.id,
+                knowledge_base_ids.join(",")
+            )
+        }
+        None => "local-user:course-knowledge:v1".into(),
+    });
+    access
+}
+
 pub fn ws_router(
     pool: Arc<SessionPool>,
     knowledge: Arc<KnowledgeStore>,
@@ -449,6 +492,7 @@ pub fn ws_router(
         quizzes,
         tutors: tutor_runtime.profiles,
         tutor_memory: tutor_runtime.memory,
+        evidence_authority: course_evidence_authority(),
         rag_root: rag_root.into(),
     };
     Router::new()
@@ -465,6 +509,7 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         quizzes,
         tutors,
         tutor_memory,
+        evidence_authority,
         rag_root,
     } = state;
     let TutorMessageInput {
@@ -681,7 +726,14 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
         }
         if let Some(embedding) = entry.embedding.clone() {
             let retriever = tutor_rag::LanceDbRag::new(rag_root, embedding);
-            router = router.with_retriever(Arc::new(retriever));
+            router = router.with_retriever(Arc::new(retriever.clone()));
+            if let Some(kb) = entry.kb.as_deref() {
+                let knowledge_runtime = tutor_agent::assemble_course_knowledge(
+                    tutor_rag::LanceDbKnowledgeSource::new(retriever, kb),
+                    evidence_authority.clone(),
+                )?;
+                router = router.with_knowledge_runtime(knowledge_runtime);
+            }
         }
         if let Some(kb) = entry.kb.clone() {
             router = router.with_associated_kb(kb);
@@ -706,11 +758,17 @@ async fn run_tutor_message(state: WsState, input: TutorMessageInput) -> &'static
                 )
                 .await;
         }
+        let request = match entry.kb.as_deref() {
+            Some(kb) => RunRequest::from_text(resolved_content.content).with_extension(
+                course_knowledge_access_context(&entry.id, kb, bound_tutor.as_ref()),
+            ),
+            None => RunRequest::from_text(resolved_content.content),
+        };
         let answer = router
-            .run_with_session_cancel(
+            .run_request_with_session_cancel(
                 capability,
                 runtime_session,
-                &resolved_content.content,
+                request,
                 Some(cancel.clone()),
             )
             .await?;
@@ -1029,6 +1087,31 @@ fn create_quiz_llm_config_for_session(config: Option<LlmSessionConfig>) -> Optio
 mod tests {
     use super::*;
     use crate::notebook_store::{NotebookEntryInput, NotebookEntryType};
+
+    #[test]
+    fn course_knowledge_access_is_scoped_to_the_session_and_selected_kb() {
+        let access = course_knowledge_access_context("session-a", "kb-a", None);
+
+        assert_eq!(
+            access.scope.namespace,
+            tutor_rag::COURSE_KNOWLEDGE_NAMESPACE
+        );
+        assert_eq!(access.scope.project.as_deref(), Some("session-a"));
+        assert_eq!(
+            access
+                .scope
+                .attributes
+                .get(tutor_rag::KNOWLEDGE_BASE_SCOPE_ATTRIBUTE)
+                .map(String::as_str),
+            Some("kb-a")
+        );
+        assert_eq!(access.principal.subject, "local-user");
+        assert_eq!(access.principal.principal_type, "local_user");
+        assert_eq!(
+            access.authorization_version.as_deref(),
+            Some("local-user:course-knowledge:v1")
+        );
+    }
 
     #[test]
     fn resolves_space_mentions_into_turn_context() {

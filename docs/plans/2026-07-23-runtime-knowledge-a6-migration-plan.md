@@ -1,6 +1,6 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: in progress (Phase 0-1 implemented; two upstream gates open) |
+> Status: in progress (Phase 0-2 implemented; two upstream gates open) |
 > Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
@@ -80,6 +80,12 @@ The current implementation has the following migration surface:
 - Document reindex uses one LanceDB merge operation, and
   `POST /api/knowledge-bases/{kb}/reindex` rebuilds the new index from
   product-stored document text.
+- Each Knowledge-enabled ordinary run now carries a fresh, typed
+  `KnowledgeAccessContext` derived from its session, selected KB, and current
+  Tutor permissions.
+- A single process-held `EvidenceAuthority`, product authorizer, registry, and
+  `KnowledgePlugin` are assembled without exposing the secret or trusted scope
+  to prompts, Tool arguments, Session data, or frontend state.
 - `tutor-rag::KnowledgeRetriever` exposes product-defined search.
 - `tutor-tools::RagSearchTool` accepts a model-provided optional `kb` argument.
 - `RagSearchTool` returns complete chunk bodies in the search response.
@@ -335,28 +341,31 @@ Contract tests:
 
 ### Phase 2: Access and runtime assembly
 
-- [ ] Add the product `KnowledgeAuthorizer`.
-- [ ] Build `KnowledgeRegistry`, process-held `EvidenceAuthority`, provider ID,
+- [x] Add the product `KnowledgeAuthorizer`.
+- [x] Build `KnowledgeRegistry`, process-held `EvidenceAuthority`, provider ID,
   and `KnowledgePlugin` through one assembly helper.
-- [ ] Generate the evidence secret in trusted process state; never expose it to
+- [x] Generate the evidence secret in trusted process state; never expose it to
   the model, Session, logs, or frontend.
-- [ ] Replace `prompt_with_messages` with
-  `run(RunRequest::new(...).with_extension(access))` for Knowledge-enabled
-  ordinary runs.
-- [ ] Derive access only from the session record, selected KB, bound Tutor, and
+- [x] Use a typed `RunRequest::with_extension(access)` through
+  `run_request_with_session_cancel` for Knowledge-enabled ordinary runs.
+- [x] Derive access only from the session record, selected KB, bound Tutor, and
   current resource permissions.
-- [ ] Ensure background/rejoined runs keep their immutable original run access;
+- [x] Ensure background/rejoined runs keep their immutable original run access;
   a new user turn receives a newly evaluated context.
+
+Implementation note: the assembled plugin is held by `CapabilityRouter` but is
+not registered alongside legacy `rag_search`. Phase 3 performs that Tool
+cutover atomically, so the model never sees two supported KB protocols.
 
 Security tests:
 
-- absent context fails closed;
-- no selected KB exposes no course source;
-- forged source ID fails;
-- forged item ID/revision fails;
-- changing model Tool arguments cannot change the selected KB;
-- Tutor permission removal prevents the next run;
-- concurrent sessions bound to different KBs cannot cross-read.
+- [x] absent context fails closed;
+- [x] no selected KB assembles no course runtime;
+- [x] forged source ID fails;
+- [x] forged item ID/revision fails;
+- [x] changing model Tool arguments cannot change the selected KB;
+- [x] Tutor permission removal prevents the next run;
+- [x] sessions bound to different KBs cannot cross-read.
 
 ### Phase 3: Chat migration
 

@@ -15,6 +15,7 @@ llm-harness-agent  = { workspace = true }
 llm-harness-types  = { workspace = true }
 llm-harness-loop = { workspace = true }
 llm-harness-runtime = { workspace = true }
+llm-harness-runtime-knowledge = { workspace = true }
 llm-harness-runtime-sandbox-os = { workspace = true }
 llm-harness-runtime-audit-jsonl = { workspace = true }
 llm_adapter.workspace = true
