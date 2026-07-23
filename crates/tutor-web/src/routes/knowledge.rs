@@ -745,16 +745,6 @@ async fn reindex_document(
     tokio::spawn(async move {
         let result = async {
             let rag = tutor_rag::LanceDbRag::new(state.rag_root.clone(), item.embedding);
-            update_job(
-                &task_state.jobs,
-                &job_id,
-                "delete",
-                "Removing old chunks",
-                18,
-                None,
-            );
-            rag.delete_source(&kb, document.index_source()).await?;
-
             let jobs = task_state.jobs.clone();
             let job_id_for_progress = job_id.clone();
             let chunks = rag
@@ -796,6 +786,110 @@ async fn reindex_document(
                 }),
             );
             Ok((view, chunks))
+        }
+        .await;
+        finish_job(&task_state.jobs, &job_id, result);
+    });
+
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job": job })),
+    )
+        .into_response()
+}
+
+async fn reindex_knowledge_base(
+    State(state): State<KnowledgeState>,
+    Path(kb): Path<String>,
+) -> impl IntoResponse {
+    let Some(item) = state.store.get(&kb) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "knowledge base not found" })),
+        )
+            .into_response();
+    };
+
+    let job = state.jobs.create();
+    let job_id = job.id.clone();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        let result = async {
+            let document_count = item.documents.len();
+            let rag = tutor_rag::LanceDbRag::new(task_state.rag_root.clone(), item.embedding);
+            let mut total_chunks = 0;
+
+            for (index, document) in item.documents.iter().enumerate() {
+                let text = task_state
+                    .store
+                    .document_text(&kb, &document.id)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "stored content is missing for document `{}`",
+                            document.name
+                        )
+                    })?;
+                let jobs = task_state.jobs.clone();
+                let job_id_for_progress = job_id.clone();
+                let document_name = document.name.clone();
+                let progress_base = if document_count == 0 {
+                    10
+                } else {
+                    10 + (index * 80 / document_count) as u8
+                };
+                let progress_span = if document_count == 0 {
+                    80
+                } else {
+                    (80 / document_count).max(1) as u8
+                };
+                let chunks = rag
+                    .ingest_text_with_progress(
+                        &kb,
+                        document.index_source(),
+                        &text,
+                        move |progress| {
+                            let mapped = progress_base
+                                .saturating_add(
+                                    progress_span.saturating_mul(progress.progress) / 100,
+                                )
+                                .min(95);
+                            update_job(
+                                &jobs,
+                                &job_id_for_progress,
+                                &format!("{:?}", progress.stage).to_ascii_lowercase(),
+                                &format!("{}: {}", document_name, progress.message),
+                                mapped,
+                                Some(total_chunks + progress.chunks.unwrap_or(0)),
+                            );
+                        },
+                    )
+                    .await?;
+                total_chunks += chunks;
+                task_state
+                    .store
+                    .update_document_chunks(&kb, &document.id, chunks)?;
+            }
+
+            let view = task_state
+                .store
+                .get(&kb)
+                .map(KnowledgeBaseView::from)
+                .ok_or_else(|| anyhow::anyhow!("knowledge base was removed during reindex"))?;
+            record_knowledge_event(
+                &task_state,
+                "reindex_knowledge_base",
+                format!(
+                    "Reindexed {} document(s) in knowledge base `{}` into {} chunks.",
+                    document_count, kb, total_chunks
+                ),
+                Some(kb.clone()),
+                serde_json::json!({
+                    "kb": kb,
+                    "documents": document_count,
+                    "chunks": total_chunks,
+                }),
+            );
+            Ok((view, total_chunks))
         }
         .await;
         finish_job(&task_state.jobs, &job_id, result);
@@ -952,6 +1046,10 @@ pub fn knowledge_router(
             get(list_knowledge_bases).post(create_knowledge_base),
         )
         .route("/api/knowledge-bases/{kb}", delete(delete_knowledge_base))
+        .route(
+            "/api/knowledge-bases/{kb}/reindex",
+            post(reindex_knowledge_base),
+        )
         .route("/api/ingest-jobs/{job_id}", get(get_ingest_job))
         .route("/api/knowledge-bases/{kb}/documents", post(ingest_document))
         .route(
@@ -1153,6 +1251,46 @@ mod tests {
         assert!(events.iter().any(|event| {
             event.category == MemoryEventCategory::Knowledge && event.action == "search"
         }));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/knowledge-bases/{kb}/reindex"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = response_json(response).await;
+        let rebuild_job_id = body["job"]["id"].as_str().unwrap();
+        let mut rebuilt = None;
+        for _ in 0..20 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(format!("/api/ingest-jobs/{rebuild_job_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let body = response_json(response).await;
+            if body["job"]["status"] == "done" {
+                rebuilt = Some(body);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let rebuilt = rebuilt.expect("knowledge base rebuild should complete");
+        assert_eq!(
+            rebuilt["job"]["knowledge_base"]["documents"][0]["id"],
+            document_id
+        );
 
         let response = app
             .oneshot(

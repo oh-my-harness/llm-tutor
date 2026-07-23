@@ -1,6 +1,6 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: in progress (Phase 0 baseline implemented; two upstream gates open) |
+> Status: in progress (Phase 0-1 implemented; two upstream gates open) |
 > Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
@@ -72,20 +72,26 @@ The current implementation has the following migration surface:
   `Projected` or `Ephemeral` Session projection.
 - Ordinary capability runs accept `RunRequest`; the legacy message/string
   methods construct one as a compatibility wrapper.
+- `tutor-rag::LanceDbKnowledgeSource` implements the runtime source contract
+  for one trusted, run-selected Knowledge Base.
+- The active LanceDB table is `knowledge_chunks_v1`, with stable opaque item
+  IDs, exact content revisions, document/chunk identity, display metadata, text,
+  and vectors.
+- Document reindex uses one LanceDB merge operation, and
+  `POST /api/knowledge-bases/{kb}/reindex` rebuilds the new index from
+  product-stored document text.
 - `tutor-rag::KnowledgeRetriever` exposes product-defined search.
 - `tutor-tools::RagSearchTool` accepts a model-provided optional `kb` argument.
 - `RagSearchTool` returns complete chunk bodies in the search response.
 - `CapabilityRouter` carries a retriever and associated KB separately.
 - Chat and Research mount `rag_search`; Quiz source collection calls the
   retriever directly.
-- The LanceDB `chunks` table stores `id`, `kb`, `source`, `text`, and `vector`.
-- Chunk IDs are random UUIDs, and rows do not carry an exact content revision.
 - The web layer checks Tutor resource permissions, but the authorization is not
   represented as a trusted run-scoped Knowledge context.
 
-The A1/A2 API baseline is complete. The remaining migration replaces the
-legacy retrieval boundary with runtime Knowledge while preserving the product
-storage and UI behavior.
+The A1/A2 API baseline and runtime-compatible LanceDB source are complete. The
+legacy retrieval boundary remains active until the Knowledge plugin is wired
+into product runs and the two upstream gates are resolved.
 
 ## 4. Ownership Boundaries
 
@@ -293,26 +299,39 @@ No Knowledge behavior changes ship in this phase.
 
 ### Phase 1: LanceDB Knowledge source
 
-- [ ] Add `llm-harness-runtime-knowledge` to the workspace and `tutor-rag`.
-- [ ] Introduce `LanceDbKnowledgeSource` bound to one trusted KB.
-- [ ] Define the versioned LanceDB Knowledge schema.
-- [ ] Generate stable opaque item IDs and exact revisions.
-- [ ] Implement lightweight vector search as `KnowledgeSource::search`.
-- [ ] Implement exact revision reads as `KnowledgeSource::read`.
-- [ ] Honor max bytes, cancellation, and supported selectors.
-- [ ] Keep backend diagnostics in controlled logs only.
-- [ ] Add a one-time index rebuild path from stored document text.
-- [ ] Update delete and reindex paths to maintain the new schema atomically.
+- [x] Add `llm-harness-runtime-knowledge` to the workspace and `tutor-rag`.
+- [x] Introduce `LanceDbKnowledgeSource` bound to one trusted KB.
+- [x] Define the versioned LanceDB Knowledge schema.
+- [x] Generate stable opaque item IDs and exact revisions.
+- [x] Implement lightweight vector search as `KnowledgeSource::search`.
+- [x] Implement exact revision reads as `KnowledgeSource::read`.
+- [x] Honor max bytes, cancellation, and supported selectors.
+- [x] Keep backend diagnostics behind sanitized `KnowledgeError` output.
+- [x] Add a one-time index rebuild path from stored document text.
+- [x] Update delete and reindex paths to maintain the new schema atomically.
+
+Implementation notes:
+
+- `knowledge_chunks_v1` intentionally replaces, rather than dual-reads, the
+  legacy random-ID table.
+- Stable item IDs include the chunk schema version, KB ID, document ID, and
+  chunk ordinal. Revisions additionally include canonical chunk content.
+- Search snippets are capped at 600 UTF-8 bytes; reads enforce `max_bytes`.
+- A document reindex is a merge keyed by `item_id`, including conditional
+  removal of old chunks from the same trusted KB/document source.
+- Public errors remain sanitized; backend detail is available only through the
+  controlled `KnowledgeError::diagnostic` boundary.
 
 Contract tests:
 
-- search returns refs/snippets without full bodies;
-- exact read succeeds;
-- stale revision returns `StaleReference`;
-- cross-KB item read fails;
-- malformed refs and selectors fail safely;
-- cancellation stops search/read;
-- LanceDB paths, API keys, raw filters, and embedding errors are not exposed.
+- [x] search returns refs/snippets without full bodies;
+- [x] exact read succeeds;
+- [x] stale revision returns `StaleReference`;
+- [x] cross-KB item read fails;
+- [x] malformed refs and selectors fail safely;
+- [x] cancellation stops search/read;
+- [x] LanceDB paths, raw filters, and embedding errors are not exposed through
+  public error display.
 
 ### Phase 2: Access and runtime assembly
 

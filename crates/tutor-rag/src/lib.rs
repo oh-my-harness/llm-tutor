@@ -4,8 +4,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use arrow_array::cast::AsArray;
 use arrow_array::types::Float32Type;
-use arrow_array::{ArrayRef, FixedSizeListArray, RecordBatch, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::{
+    ArrayRef, FixedSizeListArray, Int32Array, RecordBatch, RecordBatchIterator, StringArray,
+};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
 use lancedb::query::{ExecutableQuery, QueryBase, Select};
@@ -13,8 +15,14 @@ use llm_adapter::EmbeddingProvider;
 use llm_adapter::openai::OpenAIProvider;
 use llm_adapter::types::EmbeddingRequest;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-const TABLE_NAME: &str = "chunks";
+mod knowledge_source;
+
+pub use knowledge_source::LanceDbKnowledgeSource;
+
+const TABLE_NAME: &str = "knowledge_chunks_v1";
+const CHUNK_SCHEMA_VERSION: i32 = 1;
 const DEFAULT_TOP_K: usize = 5;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -43,6 +51,20 @@ pub struct SearchHit {
 pub struct SourceChunk {
     pub id: String,
     pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct KnowledgeRow {
+    pub item_id: String,
+    pub revision: String,
+    pub kb: String,
+    pub document_id: String,
+    pub chunk_id: String,
+    pub source: String,
+    pub title: String,
+    pub uri: String,
+    pub text: String,
+    pub score: Option<f32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -112,6 +134,7 @@ impl LanceDbRag {
         });
         let chunks = chunk_text(text, 900, 160);
         if chunks.is_empty() {
+            self.delete_source(kb, source).await?;
             on_progress(IngestProgress {
                 stage: IngestStage::Done,
                 message: "Document did not produce chunks".into(),
@@ -141,7 +164,13 @@ impl LanceDbRag {
 
         match db.open_table(TABLE_NAME).execute().await {
             Ok(table) => {
-                table.add(batch).execute().await?;
+                let schema = batch.schema();
+                let reader = batches_reader(schema, vec![batch]);
+                let mut merge = table.merge_insert(&["item_id"]);
+                merge.when_matched_update_all(None);
+                merge.when_not_matched_insert_all();
+                merge.when_not_matched_by_source_delete(Some(source_predicate(kb, source)));
+                merge.execute(reader).await?;
             }
             Err(_) => {
                 db.create_table(TABLE_NAME, batch).execute().await?;
@@ -199,7 +228,7 @@ impl LanceDbRag {
 
         let batches = table
             .query()
-            .select(Select::columns(&["id", "text"]))
+            .select(Select::columns(&["item_id", "text"]))
             .only_if(source_predicate(kb, source))
             .limit(if limit == 0 { 100 } else { limit })
             .execute()
@@ -246,6 +275,85 @@ impl LanceDbRag {
         vectors.sort_by_key(|vector| vector.index);
         Ok(vectors.into_iter().map(|vector| vector.embedding).collect())
     }
+
+    pub(crate) async fn search_rows(
+        &self,
+        kb: &str,
+        query_text: &str,
+        limit: usize,
+    ) -> Result<Vec<KnowledgeRow>> {
+        let mut vectors = self.embed_texts(vec![query_text.to_string()]).await?;
+        let Some(query_vector) = vectors.pop() else {
+            return Ok(vec![]);
+        };
+
+        let db = connect_db(&self.root).await?;
+        let table = match db.open_table(TABLE_NAME).execute().await {
+            Ok(table) => table,
+            Err(_) => return Ok(vec![]),
+        };
+
+        let batches = table
+            .query()
+            .select(Select::columns(&[
+                "item_id",
+                "revision",
+                "kb",
+                "document_id",
+                "chunk_id",
+                "source",
+                "title",
+                "uri",
+                "text",
+            ]))
+            .limit(limit)
+            .nearest_to(query_vector.as_slice())?
+            .column("vector")
+            .only_if(kb_predicate(kb))
+            .execute()
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        Ok(knowledge_rows_from_batches(&batches))
+    }
+
+    pub(crate) async fn row_by_item(
+        &self,
+        kb: &str,
+        item_id: &str,
+    ) -> Result<Option<KnowledgeRow>> {
+        let db = connect_db(&self.root).await?;
+        let table = match db.open_table(TABLE_NAME).execute().await {
+            Ok(table) => table,
+            Err(_) => return Ok(None),
+        };
+
+        let predicate = format!(
+            "kb = '{}' AND item_id = '{}'",
+            escape_sql_string(kb),
+            escape_sql_string(item_id)
+        );
+        let batches = table
+            .query()
+            .select(Select::columns(&[
+                "item_id",
+                "revision",
+                "kb",
+                "document_id",
+                "chunk_id",
+                "source",
+                "title",
+                "uri",
+                "text",
+            ]))
+            .only_if(predicate)
+            .limit(1)
+            .execute()
+            .await?
+            .try_collect::<Vec<_>>()
+            .await?;
+        Ok(knowledge_rows_from_batches(&batches).into_iter().next())
+    }
 }
 
 impl KnowledgeRetriever for LanceDbRag {
@@ -256,31 +364,28 @@ impl KnowledgeRetriever for LanceDbRag {
         top_k: usize,
     ) -> BoxFuture<'a, Result<Vec<SearchHit>>> {
         Box::pin(async move {
-            let mut vectors = self.embed_texts(vec![query.to_string()]).await?;
-            let Some(query_vector) = vectors.pop() else {
+            let Some(kb) = kb.filter(|value| !value.trim().is_empty()) else {
                 return Ok(vec![]);
             };
-
-            let db = connect_db(&self.root).await?;
-            let table = match db.open_table(TABLE_NAME).execute().await {
-                Ok(table) => table,
-                Err(_) => return Ok(vec![]),
-            };
-
-            let mut query = table
-                .query()
-                .select(Select::columns(&["id", "kb", "source", "text"]))
-                .limit(if top_k == 0 { DEFAULT_TOP_K } else { top_k })
-                .nearest_to(query_vector.as_slice())?
-                .column("vector");
-
-            if let Some(kb) = kb.filter(|value| !value.trim().is_empty()) {
-                query = query.only_if(format!("kb = '{}'", escape_sql_string(kb)));
-            }
-
-            let batches = query.execute().await?.try_collect::<Vec<_>>().await?;
-            Ok(search_hits_from_batches(&batches))
+            let rows = self
+                .search_rows(kb, query, if top_k == 0 { DEFAULT_TOP_K } else { top_k })
+                .await?;
+            Ok(rows.into_iter().map(SearchHit::from).collect())
         })
+    }
+}
+
+impl From<KnowledgeRow> for SearchHit {
+    fn from(row: KnowledgeRow) -> Self {
+        Self {
+            id: row.item_id,
+            kb: row.kb,
+            source: row.title,
+            raw_source: row.source,
+            document_id: Some(row.document_id),
+            text: row.text,
+            score: row.score,
+        }
     }
 }
 
@@ -290,6 +395,16 @@ async fn connect_db(root: &Path) -> Result<lancedb::Connection> {
         .to_str()
         .ok_or_else(|| anyhow!("RAG database path is not valid UTF-8"))?;
     Ok(lancedb::connect(uri).execute().await?)
+}
+
+fn batches_reader(
+    schema: SchemaRef,
+    batches: Vec<RecordBatch>,
+) -> Box<dyn arrow_array::RecordBatchReader + Send> {
+    Box::new(RecordBatchIterator::new(
+        batches.into_iter().map(Ok::<_, arrow_schema::ArrowError>),
+        schema,
+    ))
 }
 
 fn chunks_to_batch(
@@ -312,11 +427,33 @@ fn chunks_to_batch(
         return Err(anyhow!("embedding vectors have inconsistent dimensions"));
     }
 
-    let ids =
-        StringArray::from_iter_values((0..chunks.len()).map(|_| uuid::Uuid::new_v4().to_string()));
+    let document_id = source_document_id(source).unwrap_or_else(|| source.to_string());
+    let title = display_source(source);
+    let item_ids = StringArray::from_iter_values(
+        chunks
+            .iter()
+            .enumerate()
+            .map(|(ordinal, _)| stable_item_id(kb, &document_id, ordinal)),
+    );
+    let revisions = StringArray::from_iter_values(
+        chunks
+            .iter()
+            .enumerate()
+            .map(|(ordinal, text)| chunk_revision(kb, &document_id, ordinal, text)),
+    );
     let kbs = StringArray::from_iter_values(std::iter::repeat_n(kb.to_string(), chunks.len()));
+    let document_ids =
+        StringArray::from_iter_values(std::iter::repeat_n(document_id.clone(), chunks.len()));
+    let chunk_ids = StringArray::from_iter_values((0..chunks.len()).map(chunk_id));
+    let chunk_ordinals = Int32Array::from_iter_values(0..chunks.len() as i32);
     let sources =
         StringArray::from_iter_values(std::iter::repeat_n(source.to_string(), chunks.len()));
+    let titles = StringArray::from_iter_values(std::iter::repeat_n(title.clone(), chunks.len()));
+    let uris = StringArray::from_iter_values(
+        (0..chunks.len()).map(|ordinal| knowledge_uri(kb, &document_id, ordinal)),
+    );
+    let schema_versions =
+        Int32Array::from_iter_values(std::iter::repeat_n(CHUNK_SCHEMA_VERSION, chunks.len()));
     let texts = StringArray::from_iter_values(chunks);
     let vectors = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
         vectors
@@ -326,9 +463,16 @@ fn chunks_to_batch(
     );
 
     let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Utf8, false),
+        Field::new("item_id", DataType::Utf8, false),
+        Field::new("revision", DataType::Utf8, false),
         Field::new("kb", DataType::Utf8, false),
+        Field::new("document_id", DataType::Utf8, false),
+        Field::new("chunk_id", DataType::Utf8, false),
+        Field::new("chunk_ordinal", DataType::Int32, false),
         Field::new("source", DataType::Utf8, false),
+        Field::new("title", DataType::Utf8, false),
+        Field::new("uri", DataType::Utf8, false),
+        Field::new("schema_version", DataType::Int32, false),
         Field::new("text", DataType::Utf8, false),
         Field::new(
             "vector",
@@ -343,9 +487,16 @@ fn chunks_to_batch(
     RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(ids) as ArrayRef,
+            Arc::new(item_ids) as ArrayRef,
+            Arc::new(revisions) as ArrayRef,
             Arc::new(kbs) as ArrayRef,
+            Arc::new(document_ids) as ArrayRef,
+            Arc::new(chunk_ids) as ArrayRef,
+            Arc::new(chunk_ordinals) as ArrayRef,
             Arc::new(sources) as ArrayRef,
+            Arc::new(titles) as ArrayRef,
+            Arc::new(uris) as ArrayRef,
+            Arc::new(schema_versions) as ArrayRef,
             Arc::new(texts) as ArrayRef,
             Arc::new(vectors) as ArrayRef,
         ],
@@ -353,11 +504,17 @@ fn chunks_to_batch(
     .context("failed to build RAG record batch")
 }
 
-fn search_hits_from_batches(batches: &[RecordBatch]) -> Vec<SearchHit> {
-    let mut hits = Vec::new();
+fn knowledge_rows_from_batches(batches: &[RecordBatch]) -> Vec<KnowledgeRow> {
+    let mut rows = Vec::new();
     for batch in batches {
-        let Some(ids) = batch
-            .column_by_name("id")
+        let Some(item_ids) = batch
+            .column_by_name("item_id")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        let Some(revisions) = batch
+            .column_by_name("revision")
             .and_then(|array| array.as_string_opt::<i32>())
         else {
             continue;
@@ -368,8 +525,32 @@ fn search_hits_from_batches(batches: &[RecordBatch]) -> Vec<SearchHit> {
         else {
             continue;
         };
+        let Some(document_ids) = batch
+            .column_by_name("document_id")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        let Some(chunk_ids) = batch
+            .column_by_name("chunk_id")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
         let Some(sources) = batch
             .column_by_name("source")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        let Some(titles) = batch
+            .column_by_name("title")
+            .and_then(|array| array.as_string_opt::<i32>())
+        else {
+            continue;
+        };
+        let Some(uris) = batch
+            .column_by_name("uri")
             .and_then(|array| array.as_string_opt::<i32>())
         else {
             continue;
@@ -385,25 +566,28 @@ fn search_hits_from_batches(batches: &[RecordBatch]) -> Vec<SearchHit> {
             .and_then(|array| array.as_primitive_opt::<Float32Type>());
 
         for row in 0..batch.num_rows() {
-            hits.push(SearchHit {
-                id: ids.value(row).to_string(),
+            rows.push(KnowledgeRow {
+                item_id: item_ids.value(row).to_string(),
+                revision: revisions.value(row).to_string(),
                 kb: kbs.value(row).to_string(),
-                source: display_source(sources.value(row)),
-                raw_source: sources.value(row).to_string(),
-                document_id: source_document_id(sources.value(row)),
+                document_id: document_ids.value(row).to_string(),
+                chunk_id: chunk_ids.value(row).to_string(),
+                source: sources.value(row).to_string(),
+                title: titles.value(row).to_string(),
+                uri: uris.value(row).to_string(),
                 text: texts.value(row).to_string(),
                 score: scores.map(|array| array.value(row)),
             });
         }
     }
-    hits
+    rows
 }
 
 fn source_chunks_from_batches(batches: &[RecordBatch]) -> Vec<SourceChunk> {
     let mut chunks = Vec::new();
     for batch in batches {
         let Some(ids) = batch
-            .column_by_name("id")
+            .column_by_name("item_id")
             .and_then(|array| array.as_string_opt::<i32>())
         else {
             continue;
@@ -474,6 +658,49 @@ fn source_document_id(value: &str) -> Option<String> {
         .filter(|document_id| !document_id.is_empty())
 }
 
+fn stable_item_id(kb: &str, document_id: &str, ordinal: usize) -> String {
+    format!(
+        "chunk_{}",
+        digest_parts(&[
+            &CHUNK_SCHEMA_VERSION.to_string(),
+            kb,
+            document_id,
+            &ordinal.to_string(),
+        ])
+    )
+}
+
+fn chunk_revision(kb: &str, document_id: &str, ordinal: usize, text: &str) -> String {
+    format!(
+        "sha256:{}",
+        digest_parts(&[
+            &CHUNK_SCHEMA_VERSION.to_string(),
+            kb,
+            document_id,
+            &ordinal.to_string(),
+            text,
+        ])
+    )
+}
+
+fn chunk_id(ordinal: usize) -> String {
+    format!("chunk-{ordinal}")
+}
+
+fn knowledge_uri(kb: &str, document_id: &str, ordinal: usize) -> String {
+    format!("kb:{kb}:{document_id}:{}", chunk_id(ordinal))
+}
+
+fn digest_parts(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.len().to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn hash_embedding(text: &str, dimensions: usize) -> Vec<f32> {
     let mut vector = vec![0.0; dimensions];
     for token in text
@@ -501,6 +728,18 @@ fn hash_embedding(text: &str, dimensions: usize) -> Vec<f32> {
 mod tests {
     use super::*;
 
+    fn hash_config() -> EmbeddingConfig {
+        EmbeddingConfig {
+            provider: "hash".into(),
+            model: "test".into(),
+            api_key: String::new(),
+            base_url: None,
+            embeddings_path: None,
+            dimensions: Some(32),
+            send_dimensions: false,
+        }
+    }
+
     #[test]
     fn chunk_text_splits_with_overlap() {
         let chunks = chunk_text("abcdefghijklmnopqrstuvwxyz", 10, 2);
@@ -512,5 +751,71 @@ mod tests {
     fn chunks_to_batch_requires_matching_vectors() {
         let err = chunks_to_batch("default", "doc", vec!["hello".into()], vec![]).unwrap_err();
         assert!(err.to_string().contains("embedding count"));
+    }
+
+    #[tokio::test]
+    async fn reindex_keeps_item_ids_and_revises_changed_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let rag = LanceDbRag::new(temp.path(), hash_config());
+        let source = "document-1::lesson.md";
+        rag.ingest_text("kb-a", source, &"alpha ".repeat(300))
+            .await
+            .unwrap();
+        let mut before = rag.chunks_for_source("kb-a", source, 100).await.unwrap();
+        before.sort_by(|left, right| left.id.cmp(&right.id));
+        let before_revisions = futures::future::try_join_all(
+            before
+                .iter()
+                .map(|chunk| rag.row_by_item("kb-a", &chunk.id)),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap().revision)
+        .collect::<Vec<_>>();
+
+        rag.ingest_text("kb-a", source, &"bravo ".repeat(300))
+            .await
+            .unwrap();
+        let mut after = rag.chunks_for_source("kb-a", source, 100).await.unwrap();
+        after.sort_by(|left, right| left.id.cmp(&right.id));
+        let after_revisions = futures::future::try_join_all(
+            after.iter().map(|chunk| rag.row_by_item("kb-a", &chunk.id)),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap().revision)
+        .collect::<Vec<_>>();
+
+        assert_eq!(
+            before.iter().map(|chunk| &chunk.id).collect::<Vec<_>>(),
+            after.iter().map(|chunk| &chunk.id).collect::<Vec<_>>()
+        );
+        assert_ne!(before_revisions, after_revisions);
+    }
+
+    #[tokio::test]
+    async fn reindex_removes_chunks_that_are_no_longer_in_the_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let rag = LanceDbRag::new(temp.path(), hash_config());
+        let source = "document-1::lesson.md";
+        rag.ingest_text("kb-a", source, &"long ".repeat(600))
+            .await
+            .unwrap();
+        assert!(
+            rag.chunks_for_source("kb-a", source, 100)
+                .await
+                .unwrap()
+                .len()
+                > 1
+        );
+
+        rag.ingest_text("kb-a", source, "short replacement")
+            .await
+            .unwrap();
+        let chunks = rag.chunks_for_source("kb-a", source, 100).await.unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "short replacement");
     }
 }
