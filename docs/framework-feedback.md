@@ -20,6 +20,23 @@
 
 ## Friction Points
 
+- **Knowledge citation validation needs a final-answer runtime boundary**
+  - Checked against `codex/session-projection` commit `8ab2a377` on 2026-07-23.
+    `KnowledgeReadTool` correctly issues and verifies evidence, registers a
+    run-scoped citation handle, and persists only an ephemeral summary plus
+    `knowledge.evidence` metadata.
+  - `CitationValidator` validates handles through `KnowledgeRunState` in the
+    current `RunContext`, but `KnowledgePlugin` only registers search/read
+    tools. It does not validate handles used by the final assistant message.
+  - `AgentHarness::run` returns `Result<()>` and does not expose the completed
+    `RunContext`. Existing `AfterTurnHook` is observational, so an application
+    cannot atomically reject or repair an invalid final answer before it becomes
+    the durable result without rebuilding citation state outside the runtime.
+  - Suggestion: add a final-answer validation hook with access to
+    `RunContext` and the candidate assistant message, or let
+    `KnowledgePlugin` install a validator that can reject/repair unknown
+    handles before final-answer persistence.
+
 - **Runtime `workflow` / issue #43 fix branch can compile, with provider tool-call adjacency improved**
   - `llm-tutor` tested `llm-harness-runtime` issue #43 fix branch commit `e200c12` and aligned `llm-api-adapter` to `69a868f`.
   - Runtime issue #43 remains open, but PR #44 (`Fix provider-specific tool message normalization boundary`) contains the relevant fix. The default converter no longer inserts an empty assistant between consecutive tool result messages, preserving OpenAI-compatible `assistant tool_calls -> tool -> tool` adjacency.

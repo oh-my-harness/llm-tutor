@@ -25,6 +25,9 @@ checklists.
 - `2026-07-17-product-onboarding-plan.md`: first-run setup, interface-faithful
   composer guidance, persistent Help topics, contextual hints, and the built-in
   Usage Guide Tutor.
+- `2026-07-23-runtime-knowledge-a6-migration-plan.md`: migration from the
+  product-owned RAG Tool protocol to runtime Knowledge, trusted run-scoped
+  access, evidence receipts, and safe Session Projection.
 
 ## Feature Plans
 

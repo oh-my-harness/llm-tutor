@@ -5,6 +5,12 @@ Date: 2026-07-08
 > Historical note (2026-07-16): the standalone Deep Solve capability has been
 > retired. Its references in this audit record the migration state on the audit
 > date and do not describe a capability available for new runs.
+>
+> Update (2026-07-23): runtime branch `codex/session-projection` at `8ab2a377`
+> now contains Knowledge Milestone A1-A5 and introduces breaking Tool,
+> workflow, run-context, and Session Projection contracts. The repository is
+> still pinned to `e200c12`; the staged A6 migration is defined in
+> `docs/plans/2026-07-23-runtime-knowledge-a6-migration-plan.md`.
 
 ## Current Evidence
 
