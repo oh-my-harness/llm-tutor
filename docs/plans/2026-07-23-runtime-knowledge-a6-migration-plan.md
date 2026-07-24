@@ -1,6 +1,6 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: in progress (Phase 0-2 implemented; two upstream gates open) |
+> Status: in progress (Phase 0-3 product wiring implemented; two upstream gates open) |
 > Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
@@ -90,14 +90,16 @@ The current implementation has the following migration surface:
 - `tutor-tools::RagSearchTool` accepts a model-provided optional `kb` argument.
 - `RagSearchTool` returns complete chunk bodies in the search response.
 - `CapabilityRouter` carries a retriever and associated KB separately.
-- Chat and Research mount `rag_search`; Quiz source collection calls the
-  retriever directly.
-- The web layer checks Tutor resource permissions, but the authorization is not
-  represented as a trusted run-scoped Knowledge context.
+- Chat installs the runtime `KnowledgePlugin` and uses `knowledge_search` /
+  `knowledge_read`; Research still mounts `rag_search`, and Quiz source
+  collection still calls the retriever directly.
+- The web layer derives a trusted run-scoped Knowledge context from the selected
+  KB, session, and current Tutor resource permissions.
 
-The A1/A2 API baseline and runtime-compatible LanceDB source are complete. The
-legacy retrieval boundary remains active until the Knowledge plugin is wired
-into product runs and the two upstream gates are resolved.
+The A1/A2 API baseline, runtime-compatible LanceDB source, trusted access
+assembly, and Chat product wiring are complete. The legacy retrieval boundary
+remains active for Research and Quiz until their runtime paths are migrated and
+the two upstream gates are resolved.
 
 ## 4. Ownership Boundaries
 
@@ -353,9 +355,9 @@ Contract tests:
 - [x] Ensure background/rejoined runs keep their immutable original run access;
   a new user turn receives a newly evaluated context.
 
-Implementation note: the assembled plugin is held by `CapabilityRouter` but is
-not registered alongside legacy `rag_search`. Phase 3 performs that Tool
-cutover atomically, so the model never sees two supported KB protocols.
+Implementation note: the assembled plugin is held by `CapabilityRouter`.
+Phase 3 installs it only for Chat and removes `rag_search` from the Chat tool
+set atomically, so a Chat model never sees two supported KB protocols.
 
 Security tests:
 
@@ -369,15 +371,21 @@ Security tests:
 
 ### Phase 3: Chat migration
 
-- [ ] Register `KnowledgePlugin` in the Chat harness when a KB is selected.
-- [ ] Remove `rag_search` from Chat tools and system prompts.
-- [ ] Teach the Agent to search first, read selected refs, and cite only returned
+- [x] Register `KnowledgePlugin` in the Chat harness when a KB is selected.
+- [x] Remove `rag_search` from Chat tools and system prompts.
+- [x] Teach the Agent to search first, read selected refs, and cite only returned
   handles.
-- [ ] Bridge validated Knowledge citation records to product
+- [x] Bridge runtime-issued Knowledge citation records to product
   `SourceReferences`.
-- [ ] Preserve normal streaming and final assistant message behavior.
-- [ ] Verify Session replay contains safe search/evidence projections but no
+- [x] Preserve normal streaming and final assistant message behavior.
+- [x] Verify Session replay contains safe search/evidence projections but no
   `knowledge_read` body.
+
+Implementation note: the product path now displays Runtime-issued read evidence
+without duplicating receipt validation or persisting read bodies. Phase 3
+remains release-gated by the upstream final-answer citation validation boundary:
+the product does not independently claim that every handle shown in assistant
+text was cited by the final answer validator.
 
 Acceptance:
 

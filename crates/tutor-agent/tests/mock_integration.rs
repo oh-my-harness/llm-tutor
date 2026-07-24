@@ -9,18 +9,27 @@ use llm_harness_loop::{
     test_utils::{MockLlmClient, MockResponse, NoOpEnv},
 };
 use llm_harness_runtime::observability::audit::AuditSink;
+use llm_harness_runtime_knowledge::{
+    EvidenceAuthority, KnowledgeAccessContext, KnowledgeScope, PrincipalRef,
+    KNOWLEDGE_READ_TOOL_NAME, KNOWLEDGE_SEARCH_TOOL_NAME,
+};
 use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::{
-    AgentMessage, AssistantMessageKind, DataBlock, ExecutionEnv, RunRequest, Tool, ToolContext,
-    ToolFailure, ToolResult,
+    AgentMessage, AssistantMessage, AssistantMessageKind, DataBlock, ExecutionEnv, RunContext,
+    RunRequest, Tool, ToolContext, ToolFailure, ToolResult,
 };
 use tempfile::TempDir;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tutor_agent::capability::Capability;
 use tutor_agent::chat::{assistant_message, user_message};
 use tutor_agent::event_sink::EventSink;
 use tutor_agent::governance::GovernanceConfig;
 use tutor_agent::research::{ResearchWorkflowInput, run_research_workflow_with_runtime};
-use tutor_agent::{CapabilityRouter, LlmConfig};
+use tutor_agent::{
+    CapabilityRouter, LlmConfig, assemble_course_knowledge, course_evidence_provider_id,
+};
+use tutor_rag::{EmbeddingConfig, LanceDbKnowledgeSource, LanceDbRag};
 
 fn make_governance(audit: Option<Arc<dyn AuditSink>>) -> GovernanceConfig {
     GovernanceConfig::new(100.0, audit, false)
@@ -90,6 +99,52 @@ fn text_delta_end_turn_response(text: &str) -> MockResponse {
                 usage: Usage::default(),
             }),
         ],
+    }
+}
+
+fn hash_embedding_config() -> EmbeddingConfig {
+    EmbeddingConfig {
+        provider: "hash".into(),
+        model: "test".into(),
+        api_key: String::new(),
+        base_url: None,
+        embeddings_path: None,
+        dimensions: Some(32),
+        send_dimensions: false,
+    }
+}
+
+fn knowledge_access(kb: &str) -> KnowledgeAccessContext {
+    let mut scope = KnowledgeScope::new(tutor_rag::COURSE_KNOWLEDGE_NAMESPACE);
+    scope.attributes.insert(
+        tutor_rag::KNOWLEDGE_BASE_SCOPE_ATTRIBUTE.into(),
+        kb.into(),
+    );
+    KnowledgeAccessContext::new(scope, PrincipalRef::new("local-user", "test"))
+}
+
+fn tool_context(request: RunRequest) -> ToolContext {
+    let (update_tx, _update_rx) = mpsc::channel(1);
+    ToolContext {
+        env: Arc::new(NoOpEnv),
+        run: Arc::new(RunContext::new(request)),
+        abort: CancellationToken::new(),
+        tool_use_id: "knowledge-setup".into(),
+        turn_index: 0,
+        assistant_message: Arc::new(AssistantMessage {
+            kind: AssistantMessageKind::Progress,
+            message_id: "knowledge-setup-message".into(),
+            turn_id: "knowledge-setup-turn".into(),
+            content: vec![],
+            usage: None,
+            stop_reason: None,
+            timestamp: chrono::Utc::now(),
+            provider: None,
+            api: None,
+            model: None,
+            error_message: None,
+        }),
+        update_tx,
     }
 }
 
@@ -190,6 +245,111 @@ async fn chat_run_request_extension_reaches_product_tool_context() {
 }
 
 #[tokio::test]
+async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session() {
+    let dir = TempDir::new().unwrap();
+    let rag = LanceDbRag::new(dir.path().join("rag"), hash_embedding_config());
+    let private_tail = "READ_BODY_PRIVATE_TAIL_MUST_NOT_BE_PERSISTED";
+    let body = format!(
+        "{} {private_tail}",
+        "Newton's laws describe motion and force. ".repeat(16)
+    );
+    rag.ingest_text("kb-a", "document-a::Newton notes", &body)
+        .await
+        .unwrap();
+
+    let authority = Arc::new(
+        EvidenceAuthority::new(vec![7; 32], [course_evidence_provider_id()]).unwrap(),
+    );
+    let knowledge_runtime = assemble_course_knowledge(
+        LanceDbKnowledgeSource::new(rag, "kb-a"),
+        authority,
+    )
+    .unwrap();
+    let access = knowledge_access("kb-a");
+    let mut knowledge_tools = Vec::new();
+    knowledge_runtime
+        .plugin()
+        .register_tools(&mut knowledge_tools);
+    let search = knowledge_tools
+        .iter()
+        .find(|tool| tool.name() == KNOWLEDGE_SEARCH_TOOL_NAME)
+        .unwrap();
+    let setup_context = tool_context(
+        RunRequest::from_text("Newton")
+            .with_extension(access.clone()),
+    );
+    let search_result = search
+        .execute(serde_json::json!({"query": "Newton"}), &setup_context)
+        .await
+        .unwrap();
+    let reference = search_result.details["hits"][0]["reference"].clone();
+    let selector = search_result.details["hits"][0]["suggested_selectors"][0].clone();
+    let read_args = serde_json::json!({
+        "reference": reference,
+        "selector": selector,
+    })
+    .to_string();
+
+    let sink = Arc::new(TraceRecorder::default());
+    let router = make_router(
+        vec![
+            MockResponse::tool_use(
+                "knowledge-search",
+                KNOWLEDGE_SEARCH_TOOL_NAME,
+                r#"{"query":"Newton"}"#,
+            ),
+            MockResponse::tool_use(
+                "knowledge-read",
+                KNOWLEDGE_READ_TOOL_NAME,
+                &read_args,
+            ),
+            MockResponse::text("Newton's laws are grounded in the selected course evidence."),
+        ],
+        make_governance(None),
+    )
+    .with_knowledge_runtime(knowledge_runtime)
+    .with_associated_kb("kb-a")
+    .with_event_sink(sink.clone());
+
+    let repo = JsonlSessionRepo::new(dir.path().join("sessions"));
+    let storage = repo.create(CreateSessionOptions::default()).await.unwrap();
+    let session = Session::new(storage.clone());
+    let inspect_session = Session::new(storage);
+    let answer = router
+        .run_request_with_session_cancel(
+            Capability::Chat,
+            session,
+            RunRequest::from_text("Explain Newton's laws").with_extension(access),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert!(answer.contains("Newton"));
+    let events = sink.events();
+    assert!(events.iter().any(|(kind, data)| {
+        kind == "tool_result"
+            && data["tool"] == KNOWLEDGE_SEARCH_TOOL_NAME
+            && data["ok"] == true
+    }));
+    assert!(events.iter().any(|(kind, data)| {
+        kind == "tool_result"
+            && data["tool"] == KNOWLEDGE_READ_TOOL_NAME
+            && data["ok"] == true
+            && data["details"]["citation"]["handle"]
+                .as_str()
+                .is_some_and(|handle| handle.starts_with("[K:"))
+    }));
+
+    let context = inspect_session.build_context().await.unwrap();
+    let persisted_context = format!("{:?}", context.messages);
+    assert!(
+        !persisted_context.contains(private_tail),
+        "knowledge_read body leaked into durable Session context: {persisted_context}"
+    );
+}
+
+#[tokio::test]
 async fn chat_returns_error_instead_of_no_response() {
     let responses = vec![MockResponse {
         events: vec![Err(LlmError::InvalidRequest("bad request".into()))],
@@ -210,9 +370,9 @@ async fn chat_returns_error_instead_of_no_response() {
 }
 
 #[tokio::test]
-async fn chat_tool_call_then_text() {
+async fn chat_web_tool_call_then_text() {
     let responses = vec![
-        MockResponse::tool_use("use-1", "rag_search", r#"{"query":"Newton"}"#),
+        MockResponse::tool_use("use-1", "web_search", r#"{"query":"Newton"}"#),
         MockResponse::text("Newton's first law: an object at rest stays at rest."),
     ];
     let router = make_router(responses, make_governance(None));

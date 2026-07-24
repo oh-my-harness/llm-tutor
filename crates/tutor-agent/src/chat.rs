@@ -15,7 +15,7 @@ use crate::error::{Result, TutorError};
 use crate::event_sink::{emit_content, emit_trace};
 use crate::runtime_harness::{RuntimeHarnessConfig, build_runtime_harness};
 
-/// Run a single Chat turn: question → [rag_search + web_search] → answer.
+/// Run a single Chat turn through runtime-owned Knowledge and web tools.
 /// Creates a fresh in-memory harness per call (stateless in v0.1).
 pub async fn run_chat(router: &CapabilityRouter, question: &str) -> Result<String> {
     run_chat_with_messages(router, vec![user_message(question)]).await
@@ -183,18 +183,7 @@ pub(crate) async fn run_conversation_with_request(
         .await;
     }
 
-    let rag_tool = router
-        .retriever
-        .clone()
-        .map(RagSearchTool::with_retriever)
-        .unwrap_or_default();
-    let rag_tool = match &router.associated_kb {
-        Some(kb) => rag_tool.with_associated_kb(kb.clone()),
-        None => rag_tool,
-    };
-
     let mut tools: Vec<Arc<dyn llm_harness_types::Tool>> = vec![
-        Arc::new(rag_tool),
         Arc::new(match router.web_search.clone() {
             Some(config) => WebSearchTool::with_config(config),
             None => WebSearchTool::new(),
@@ -205,6 +194,23 @@ pub(crate) async fn run_conversation_with_request(
         }),
         Arc::new(CodeExecTool::new()),
     ];
+    let mut plugins = Vec::new();
+    if capability == "chat" {
+        if let Some(knowledge_runtime) = &router.knowledge_runtime {
+            plugins.push(knowledge_runtime.plugin());
+        }
+    } else {
+        let rag_tool = router
+            .retriever
+            .clone()
+            .map(RagSearchTool::with_retriever)
+            .unwrap_or_default();
+        let rag_tool = match &router.associated_kb {
+            Some(kb) => rag_tool.with_associated_kb(kb.clone()),
+            None => rag_tool,
+        };
+        tools.insert(0, Arc::new(rag_tool));
+    }
     tools.extend(router.learner_memory_tools());
     tools.extend(router.product_tools.iter().cloned());
 
@@ -220,6 +226,7 @@ pub(crate) async fn run_conversation_with_request(
                 model: router.llm.model.clone(),
                 model_info: router.llm.model_info(8192),
                 tools,
+                plugins,
                 system_prompt,
                 final_answer_mode: final_answer_mode_for_capability(capability),
                 before_tool_call: vec![],
@@ -536,7 +543,12 @@ fn last_assistant_text(messages: &[AgentMessage]) -> Option<String> {
 }
 
 fn chat_system_prompt() -> String {
-    "You are a knowledgeable tutor. Use rag_search only when a Knowledge Base is associated. \
+    "You are a knowledgeable tutor. When knowledge_search and knowledge_read are available, \
+     use them for facts from the selected Knowledge Base. Search first, then read only the exact \
+     opaque references returned by knowledge_search. Base Knowledge Base claims on content returned \
+     by knowledge_read, and cite only the citation handles returned by that read. Never cite a \
+     search hit that you did not read, never invent a citation handle, and never ask the user for \
+     a source ID, item ID, revision, or authorization scope. \
      Use search_notebook when Notebook is associated and saved Markdown notes may be relevant. \
      When the user references Space artifacts such as Notebook entries, Quiz sessions, or Quiz questions, \
      call read_space_item before relying on their content. Do not guess the contents of a referenced Space item. \
@@ -618,6 +630,12 @@ mod tests {
         let prompt = chat_system_prompt();
         assert!(!prompt.contains("read_memory"));
         assert!(!prompt.contains("write_memory"));
+        assert!(!prompt.contains("rag_search"));
+        assert!(prompt.contains("knowledge_search"));
+        assert!(prompt.contains("knowledge_read"));
+        assert!(prompt.contains("Search first"));
+        assert!(prompt.contains("cite only the citation handles"));
+        assert!(prompt.contains("never invent a citation handle"));
         assert!(prompt.contains("call read_space_item"));
         assert!(prompt.contains("propose_notebook_edit"));
         assert!(prompt.contains("collect facts"));

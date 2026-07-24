@@ -57,6 +57,7 @@ import {
 import type { NotebookVaultInfo, SaveToNotebookResult } from './notebookSave'
 import { BUILT_IN_GUIDE_TUTOR_ID, fetchTutors, type TutorProfile, type TutorSummary } from './tutorTypes'
 import { tutorBindingForCreate } from './tutorSession'
+import { knowledgeCitationsFromTrace } from './knowledgeCitation'
 
 type Capability = 'chat' | 'deep_solve' | 'code_exec' | 'quiz' | 'research' | 'organize'
 
@@ -1820,6 +1821,9 @@ function statusFromTrace(payload: Record<string, unknown>): AgentStatus {
 }
 
 function citationsFromTrace(payload: Record<string, unknown>): Citation[] {
+  const knowledgeCitations = knowledgeCitationsFromTrace(payload)
+  if (knowledgeCitations.length > 0) return knowledgeCitations
+
   const isRagToolResult = payload.kind === 'tool_result' && payload.tool === 'rag_search'
   const isWebToolResult =
     payload.kind === 'tool_result' && (payload.tool === 'web_search' || payload.tool === 'web_fetch')
@@ -2048,7 +2052,10 @@ function attachRestoredCitations(messages: Message[], traceEntries: TraceEntry[]
       return (
         entry.kind === 'rag_citations' ||
         (entry.kind === 'tool_result' &&
-          (payload.tool === 'rag_search' || payload.tool === 'web_search' || payload.tool === 'web_fetch'))
+          (payload.tool === 'rag_search' ||
+            payload.tool === 'knowledge_read' ||
+            payload.tool === 'web_search' ||
+            payload.tool === 'web_fetch'))
       )
     })
     .map((entry) => citationsFromTrace(entry.payload))

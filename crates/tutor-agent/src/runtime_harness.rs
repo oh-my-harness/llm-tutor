@@ -14,6 +14,7 @@ pub struct RuntimeHarnessConfig {
     pub model: String,
     pub model_info: ModelInfo,
     pub tools: Vec<Arc<dyn Tool>>,
+    pub plugins: Vec<Arc<dyn Plugin>>,
     pub system_prompt: String,
     pub final_answer_mode: FinalAnswerMode,
     pub before_tool_call: Vec<Arc<dyn BeforeToolCallHook>>,
@@ -41,6 +42,12 @@ pub async fn build_runtime_harness(
 
     for tool in config.tools {
         builder = builder.tool(tool);
+    }
+
+    // Runtime-owned plugin tools are installed last so their trusted boundaries
+    // win over any accidental product-tool name collision.
+    for plugin in config.plugins {
+        builder = builder.install(plugin.as_ref());
     }
 
     match session {
