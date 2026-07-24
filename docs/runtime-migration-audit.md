@@ -119,7 +119,10 @@ mentions, and citations.
 ## Latest Runtime API Recheck
 
 Checked against runtime `codex/session-projection` commit `8ab2a377` on
-2026-07-23.
+2026-07-23. Rechecked on 2026-07-24: the branch still points to `8ab2a377`;
+runtime `main` and run-safety PR #76 (`071f703`) still start workflow LLM steps
+with `harness.prompt(&prompt_text)`, and no final-answer Knowledge validator
+has landed. Both gates remain open.
 
 | Area | Runtime evidence | Product decision |
 | --- | --- | --- |

@@ -25,6 +25,9 @@
     Ordinary product Chat now calls `AgentHarness::run(RunRequest)` and an
     integration test proves that a typed extension reaches
     `ToolContext.run`.
+  - Rechecked on 2026-07-24 against the unchanged branch plus runtime `main`
+    and run-safety PR #76 (`071f703`); `run_llm_step` still enters through
+    `harness.prompt(&prompt_text)`.
   - `WorkflowEngine::run_llm_step` still calls `harness.prompt(&prompt_text)`.
     This creates a fresh request with no product extensions. The shared and
     per-step builder customizers can install plugins and tools, but cannot
@@ -42,6 +45,8 @@
     `KnowledgeReadTool` correctly issues and verifies evidence, registers a
     run-scoped citation handle, and persists only an ephemeral summary plus
     `knowledge.evidence` metadata.
+  - Rechecked on 2026-07-24; no final-answer Knowledge validator is present on
+    the pinned branch, runtime `main`, or PR #76 (`071f703`).
   - `CitationValidator` validates handles through `KnowledgeRunState` in the
     current `RunContext`, but `KnowledgePlugin` only registers search/read
     tools. It does not validate handles used by the final assistant message.
