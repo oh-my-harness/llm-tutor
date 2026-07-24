@@ -1,6 +1,6 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: in progress (Phase 0-3 product wiring implemented; two upstream gates open) |
+> Status: in progress (Phase 0-3 implemented; Phase 4 outer Chat migrated; two upstream gates open) |
 > Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
@@ -91,15 +91,17 @@ The current implementation has the following migration surface:
 - `RagSearchTool` returns complete chunk bodies in the search response.
 - `CapabilityRouter` carries a retriever and associated KB separately.
 - Chat installs the runtime `KnowledgePlugin` and uses `knowledge_search` /
-  `knowledge_read`; Research still mounts `rag_search`, and Quiz source
-  collection still calls the retriever directly.
+  `knowledge_read`. Outer Research Chat uses the same runtime tools, while the
+  detailed Research workflow still mounts `rag_search`; Quiz source collection
+  still calls the retriever directly.
 - The web layer derives a trusted run-scoped Knowledge context from the selected
   KB, session, and current Tutor resource permissions.
 
 The A1/A2 API baseline, runtime-compatible LanceDB source, trusted access
-assembly, and Chat product wiring are complete. The legacy retrieval boundary
-remains active for Research and Quiz until their runtime paths are migrated and
-the two upstream gates are resolved.
+assembly, Chat product wiring, and outer Research Chat wiring are complete. The
+legacy retrieval boundary remains active for the detailed Research workflow and
+Quiz until their runtime paths are migrated and the two upstream gates are
+resolved.
 
 ## 4. Ownership Boundaries
 
@@ -396,7 +398,7 @@ Acceptance:
 
 ### Phase 4: Research migration
 
-- [ ] Register the same Knowledge assembly in the outer Research Chat agent.
+- [x] Register the same Knowledge assembly in the outer Research Chat agent.
 - [ ] Pass trusted access and Knowledge tools into detailed Research workflow
   LLM steps that use course material.
 - [ ] Remove `rag_search` from Research workflow Tool scopes and prompts.
@@ -405,6 +407,12 @@ Acceptance:
 - [ ] Validate course Knowledge handles before publishing the report.
 - [ ] Keep saved reports and source lists compatible with Notebook and
   `SourceReferences`.
+
+Implementation note: outer Research Chat now performs the same atomic Tool
+cutover as Chat and can emit Runtime-issued read citations through the shared
+`SourceReferences` bridge. The detailed workflow deliberately retains
+`rag_search` until `WorkflowEngine` propagates trusted per-run extensions; the
+product does not create a parallel workflow run context.
 
 Acceptance:
 

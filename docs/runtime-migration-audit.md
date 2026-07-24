@@ -9,8 +9,9 @@ Date: 2026-07-08
 > Update (2026-07-23): the repository is now pinned to runtime branch
 > `codex/session-projection` at `8ab2a377` and adapter `16a22ad`. The A1/A2
 > Tool, workflow, run-context, and Session Projection baseline has been
-> migrated. Knowledge source, trusted access assembly, and the Chat product
-> path are implemented; Research/Quiz cutover and two upstream gates remain in
+> migrated. Knowledge source, trusted access assembly, Chat, and outer Research
+> Chat are implemented; detailed Research/Quiz cutover and two upstream gates
+> remain in
 > `docs/plans/2026-07-23-runtime-knowledge-a6-migration-plan.md`.
 
 ## Current Evidence
@@ -53,11 +54,13 @@ Date: 2026-07-08
   Exec now enter the harness through `RunRequest`. Product integration coverage
   proves a typed extension reaches a Chat product Tool through
   `ToolContext.run`.
-- Knowledge-enabled Chat installs the runtime `KnowledgePlugin`, uses
+- Knowledge-enabled Chat and outer Research Chat install the runtime
+  `KnowledgePlugin`, use
   `knowledge_search` followed by `knowledge_read`, and no longer mounts the
-  legacy `rag_search` Tool. Runtime-issued read citation records are mapped to
-  product `SourceReferences`; the ephemeral read body remains absent from
-  durable Session replay.
+  legacy `rag_search` Tool. The detailed Research workflow remains on the
+  legacy Tool until workflow run extensions are available. Runtime-issued read
+  citation records are mapped to product `SourceReferences`; the ephemeral read
+  body remains absent from durable Session replay.
 - All 26 production Tools use explicit `Projected` or `Ephemeral` Session
   projection. The checked inventory lives in
   `docs/runtime-tool-projections.json`.

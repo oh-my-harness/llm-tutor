@@ -195,7 +195,7 @@ pub(crate) async fn run_conversation_with_request(
         Arc::new(CodeExecTool::new()),
     ];
     let mut plugins = Vec::new();
-    if capability == "chat" {
+    if conversation_uses_runtime_knowledge(capability) {
         if let Some(knowledge_runtime) = &router.knowledge_runtime {
             plugins.push(knowledge_runtime.plugin());
         }
@@ -429,6 +429,10 @@ fn final_answer_mode_for_capability(capability: &str) -> FinalAnswerMode {
     FinalAnswerMode::tool_with_text_fallback()
 }
 
+fn conversation_uses_runtime_knowledge(capability: &str) -> bool {
+    matches!(capability, "chat" | "research")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextDeltaRoute {
     FinalAnswer,
@@ -572,6 +576,7 @@ fn research_system_prompt() -> String {
     "You are a research tutor. Your job is to help the user clarify research needs and, when appropriate, turn a confirmed topic into a sourced, reusable research report. \
      Research findings belong in reports, not memory. \
      Research has two modes: Research Chat and Detailed Research Workflow. \
+     When knowledge_search and knowledge_read are available in Research Chat, use them only when selected course material is relevant: search first, read exact returned references, and cite only handles returned by knowledge_read. Never invent a Knowledge citation or ask the user to provide opaque identifiers or authorization scope. \
      In Research Chat, discuss the topic, ask focused clarification questions, and help define goal, scope, source preferences, output format, depth, time range, and whether Notebook or Knowledge Base context should be used. \
      Do not call web_search, web_fetch, or produce a full report when the user's request is ambiguous or they are only discussing scope. \
      When the research need is mostly clear but not confirmed, call propose_research_plan with the proposed topic, scope, output format, depth, time range, sources, and workflow steps, then ask the user to confirm or revise it. \
@@ -579,7 +584,7 @@ fn research_system_prompt() -> String {
      Do not start the Detailed Research Workflow through free-form chat text; create_research_report is the workflow boundary. \
      For the Detailed Research Workflow: (1) identify the confirmed research question and scope, \
      (2) call web_search for external facts, (3) call web_fetch on the most relevant sources before relying on them, \
-     (4) call read_space_item when the user references Notebook or Quiz artifacts, (5) optionally call search_notebook when Notebook is associated, (6) optionally call rag_search when a knowledge base is associated, \
+     (4) call read_space_item when the user references Notebook or Quiz artifacts, (5) optionally call search_notebook when Notebook is associated, (6) carry any confirmed Knowledge Base source preference into create_research_report, \
      (7) synthesize a Markdown report. Do not answer detailed research requests from memory when external verification is needed. \
      If the user asks to modify a referenced Notebook entry, read it first and use propose_notebook_edit; the product will ask the user to confirm before applying. \
      If search or fetch fails, clearly state what failed and what remains unverified. \
@@ -618,9 +623,9 @@ fn quiz_system_prompt() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        TextDeltaRoute, chat_system_prompt, final_answer_mode_for_capability,
-        looks_like_research_report, organize_system_prompt, quiz_system_prompt,
-        research_system_prompt, text_delta_route_for_capability,
+        TextDeltaRoute, chat_system_prompt, conversation_uses_runtime_knowledge,
+        final_answer_mode_for_capability, looks_like_research_report, organize_system_prompt,
+        quiz_system_prompt, research_system_prompt, text_delta_route_for_capability,
     };
     use crate::capability::{append_memory_routing_policy, memory_routing_policy};
     use llm_harness_loop::{FinalAnswerMissingBehavior, FinalAnswerMode};
@@ -666,6 +671,11 @@ mod tests {
     fn research_prompt_requires_search_fetch_and_report() {
         let prompt = research_system_prompt();
         assert!(!prompt.contains("read_memory"));
+        assert!(!prompt.contains("rag_search"));
+        assert!(prompt.contains("knowledge_search"));
+        assert!(prompt.contains("knowledge_read"));
+        assert!(prompt.contains("search first"));
+        assert!(prompt.contains("cite only handles"));
         assert!(prompt.contains("Research findings belong in reports"));
         assert!(prompt.contains("Research Chat and Detailed Research Workflow"));
         assert!(prompt.contains("Do not call web_search"));
@@ -680,6 +690,14 @@ mod tests {
         assert!(prompt.contains("Markdown report"));
         assert!(prompt.contains("Sources"));
         assert!(!prompt.contains("final_answer"));
+    }
+
+    #[test]
+    fn only_migrated_conversations_install_runtime_knowledge() {
+        assert!(conversation_uses_runtime_knowledge("chat"));
+        assert!(conversation_uses_runtime_knowledge("research"));
+        assert!(!conversation_uses_runtime_knowledge("quiz"));
+        assert!(!conversation_uses_runtime_knowledge("organize"));
     }
 
     #[test]
