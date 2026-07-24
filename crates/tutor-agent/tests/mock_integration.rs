@@ -1,8 +1,14 @@
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use futures::future::BoxFuture;
-use llm_adapter::types::{ContentKind, StopReason, StreamEvent, Usage};
+use async_trait::async_trait;
+use futures::{future::BoxFuture, stream};
+use llm_adapter::{
+    ChatRequest, ChatResponse, Message, Provider, ProviderCapabilities, RequestContent,
+    StreamHandle,
+    types::{ContentKind, StopReason, StreamEvent, Usage},
+};
 use llm_harness_agent::{JsonlSessionRepo, Session, SessionRepo, session::CreateSessionOptions};
 use llm_harness_loop::{
     LlmError,
@@ -10,8 +16,8 @@ use llm_harness_loop::{
 };
 use llm_harness_runtime::observability::audit::AuditSink;
 use llm_harness_runtime_knowledge::{
-    EvidenceAuthority, KnowledgeAccessContext, KnowledgeScope, PrincipalRef,
-    KNOWLEDGE_READ_TOOL_NAME, KNOWLEDGE_SEARCH_TOOL_NAME,
+    EvidenceAuthority, KNOWLEDGE_READ_TOOL_NAME, KNOWLEDGE_SEARCH_TOOL_NAME,
+    KnowledgeAccessContext, KnowledgeScope, PrincipalRef,
 };
 use llm_harness_runtime_sandbox_os::OsEnv;
 use llm_harness_types::{
@@ -52,6 +58,183 @@ fn make_router_with_env(
     CapabilityRouter::new(env, llm, governance).with_client(client)
 }
 
+struct CitationEchoMockClient {
+    responses: Mutex<Vec<MockResponse>>,
+    final_usage: Usage,
+}
+
+impl CitationEchoMockClient {
+    fn new(responses: Vec<MockResponse>) -> Self {
+        Self {
+            responses: Mutex::new(responses),
+            final_usage: Usage::default(),
+        }
+    }
+
+    fn with_final_usage(mut self, final_usage: Usage) -> Self {
+        self.final_usage = final_usage;
+        self
+    }
+}
+
+#[async_trait]
+impl Provider for CitationEchoMockClient {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::new(false, false, false)
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        self.chat_stream(request).await?.collect().await
+    }
+
+    async fn chat_stream(&self, request: &ChatRequest) -> Result<StreamHandle, LlmError> {
+        let response = {
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                let handle = citation_handle_from_request(request)
+                    .expect("knowledge_read tool result should contain a citation handle");
+                text_delta_end_turn_response_with_usage(
+                    &format!(
+                        "Newton's laws are grounded in the selected course evidence. {handle}"
+                    ),
+                    self.final_usage.clone(),
+                )
+            } else {
+                responses.remove(0)
+            }
+        };
+        mock_stream(response)
+    }
+}
+
+struct ResearchKnowledgeMockClient {
+    call_count: AtomicUsize,
+    reference: serde_json::Value,
+    read_args: String,
+}
+
+impl ResearchKnowledgeMockClient {
+    fn new(reference: serde_json::Value, read_args: String) -> Self {
+        Self {
+            call_count: AtomicUsize::new(0),
+            reference,
+            read_args,
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for ResearchKnowledgeMockClient {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::new(false, false, false)
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        self.chat_stream(request).await?.collect().await
+    }
+
+    async fn chat_stream(&self, request: &ChatRequest) -> Result<StreamHandle, LlmError> {
+        let response = match self.call_count.fetch_add(1, Ordering::SeqCst) {
+            0 => MockResponse::tool_use(
+                "research-knowledge-search",
+                KNOWLEDGE_SEARCH_TOOL_NAME,
+                r#"{"query":"Newton"}"#,
+            ),
+            1 => MockResponse::text(
+                &serde_json::json!({
+                    "queries": ["Newton"],
+                    "source_candidates": [{
+                        "kind": "knowledge",
+                        "title": "Newton notes",
+                        "url": "knowledge://course/Newton-notes",
+                        "snippet": "Newton's laws describe motion and force.",
+                        "reference": self.reference.clone(),
+                    }],
+                    "failures": [],
+                })
+                .to_string(),
+            ),
+            2 => MockResponse::tool_use(
+                "research-knowledge-read",
+                KNOWLEDGE_READ_TOOL_NAME,
+                &self.read_args,
+            ),
+            3 => {
+                let handle = citation_handle_from_request(request)
+                    .expect("read_sources should receive a runtime citation handle");
+                MockResponse::text(
+                    &serde_json::json!({
+                        "sources": [{
+                            "kind": "knowledge",
+                            "title": "Newton notes",
+                            "url": "knowledge://course/Newton-notes",
+                            "summary": format!("Newton's laws describe motion and force. {handle}"),
+                            "used_for": "grounding the explanation",
+                            "reference": self.reference.clone(),
+                            "citation": handle,
+                        }],
+                        "failures": [],
+                    })
+                    .to_string(),
+                )
+            }
+            4 => MockResponse::text(r#"{"verdict":"pass","issues":[]}"#),
+            5 => MockResponse::tool_use(
+                "research-final-knowledge-read",
+                KNOWLEDGE_READ_TOOL_NAME,
+                &self.read_args,
+            ),
+            6 => {
+                let handle = citation_handle_from_request(request)
+                    .expect("write_report should receive a fresh runtime citation handle");
+                MockResponse::text(
+                    &serde_json::json!({
+                        "markdown": format!(
+                            "# Newton Report\n\n## Summary\n\nNewton's laws describe motion and force. {handle}\n\n## Key Findings\n\n- Motion changes under force. {handle}\n\n## Analysis\n\nThe course evidence supports the finding. {handle}\n\n## Limitations\n\nOne course document was used.\n\n## Follow-up Questions\n\n- How do the laws apply to orbiting bodies?\n\n## Sources\n\n- Newton notes {handle}"
+                        ),
+                        "sources": [{
+                            "title": "Newton notes",
+                            "url": "knowledge://course/Newton-notes",
+                        }],
+                    })
+                    .to_string(),
+                )
+            }
+            call => panic!("unexpected Research Knowledge mock call {call}"),
+        };
+        mock_stream(response)
+    }
+}
+
+fn citation_handle_from_request(request: &ChatRequest) -> Option<String> {
+    request
+        .messages()
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::Tool { content, .. } => content.iter().find_map(|block| {
+                let RequestContent::Text(text) = block else {
+                    return None;
+                };
+                let start = text.find("[K:")?;
+                let suffix = &text[start..];
+                let end = suffix.find(']')?;
+                Some(suffix[..=end].to_string())
+            }),
+            _ => None,
+        })
+}
+
+fn mock_stream(response: MockResponse) -> Result<StreamHandle, LlmError> {
+    if let Some(error) = response.stream_error {
+        return Err(error);
+    }
+    Ok(StreamHandle::from_raw_stream(
+        response.model,
+        Box::pin(stream::iter(response.events)),
+    ))
+}
+
 fn progress_text_response(text: &str) -> MockResponse {
     MockResponse {
         model: "mock-model".into(),
@@ -78,6 +261,10 @@ fn progress_text_response(text: &str) -> MockResponse {
 }
 
 fn text_delta_end_turn_response(text: &str) -> MockResponse {
+    text_delta_end_turn_response_with_usage(text, Usage::default())
+}
+
+fn text_delta_end_turn_response_with_usage(text: &str, usage: Usage) -> MockResponse {
     MockResponse {
         model: "mock-model".into(),
         stream_error: None,
@@ -96,7 +283,7 @@ fn text_delta_end_turn_response(text: &str) -> MockResponse {
             }),
             Ok(StreamEvent::MessageStop {
                 stop_reason: StopReason::EndTurn,
-                usage: Usage::default(),
+                usage,
             }),
         ],
     }
@@ -116,10 +303,9 @@ fn hash_embedding_config() -> EmbeddingConfig {
 
 fn knowledge_access(kb: &str) -> KnowledgeAccessContext {
     let mut scope = KnowledgeScope::new(tutor_rag::COURSE_KNOWLEDGE_NAMESPACE);
-    scope.attributes.insert(
-        tutor_rag::KNOWLEDGE_BASE_SCOPE_ATTRIBUTE.into(),
-        kb.into(),
-    );
+    scope
+        .attributes
+        .insert(tutor_rag::KNOWLEDGE_BASE_SCOPE_ATTRIBUTE.into(), kb.into());
     KnowledgeAccessContext::new(scope, PrincipalRef::new("local-user", "test"))
 }
 
@@ -257,14 +443,10 @@ async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session(
         .await
         .unwrap();
 
-    let authority = Arc::new(
-        EvidenceAuthority::new(vec![7; 32], [course_evidence_provider_id()]).unwrap(),
-    );
-    let knowledge_runtime = assemble_course_knowledge(
-        LanceDbKnowledgeSource::new(rag, "kb-a"),
-        authority,
-    )
-    .unwrap();
+    let authority =
+        Arc::new(EvidenceAuthority::new(vec![7; 32], [course_evidence_provider_id()]).unwrap());
+    let knowledge_runtime =
+        assemble_course_knowledge(LanceDbKnowledgeSource::new(rag, "kb-a"), authority).unwrap();
     let access = knowledge_access("kb-a");
     let mut knowledge_tools = Vec::new();
     knowledge_runtime
@@ -274,10 +456,8 @@ async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session(
         .iter()
         .find(|tool| tool.name() == KNOWLEDGE_SEARCH_TOOL_NAME)
         .unwrap();
-    let setup_context = tool_context(
-        RunRequest::from_text("Newton")
-            .with_extension(access.clone()),
-    );
+    let setup_context =
+        tool_context(RunRequest::from_text("Newton").with_extension(access.clone()));
     let search_result = search
         .execute(serde_json::json!({"query": "Newton"}), &setup_context)
         .await
@@ -285,33 +465,40 @@ async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session(
     let reference = search_result.details["hits"][0]["reference"].clone();
     let selector = search_result.details["hits"][0]["suggested_selectors"][0].clone();
     let read_args = serde_json::json!({
-        "reference": reference,
+        "reference": reference.clone(),
         "selector": selector,
     })
     .to_string();
 
     let sink = Arc::new(TraceRecorder::default());
-    let router = make_router(
-        vec![
+    let client = Arc::new(
+        CitationEchoMockClient::new(vec![
             MockResponse::tool_use(
                 "knowledge-search",
                 KNOWLEDGE_SEARCH_TOOL_NAME,
                 r#"{"query":"Newton"}"#,
             ),
-            MockResponse::tool_use(
-                "knowledge-read",
-                KNOWLEDGE_READ_TOOL_NAME,
-                &read_args,
-            ),
-            MockResponse::text("Newton's laws are grounded in the selected course evidence."),
-        ],
+            MockResponse::tool_use("knowledge-read", KNOWLEDGE_READ_TOOL_NAME, &read_args),
+        ])
+        .with_final_usage(Usage {
+            input_tokens: 240,
+            output_tokens: 36,
+            cached_input_tokens: 12,
+            cache_creation_input_tokens: 8,
+            reasoning_tokens: 0,
+        }),
+    );
+    let router = CapabilityRouter::new(
+        Arc::new(NoOpEnv),
+        LlmConfig::anthropic("mock-model", ""),
         make_governance(None),
     )
+    .with_client(client)
     .with_knowledge_runtime(knowledge_runtime)
-    .with_associated_kb("kb-a")
     .with_event_sink(sink.clone());
 
-    let repo = JsonlSessionRepo::new(dir.path().join("sessions"));
+    let sessions_root = dir.path().join("sessions");
+    let repo = JsonlSessionRepo::new(&sessions_root);
     let storage = repo.create(CreateSessionOptions::default()).await.unwrap();
     let session = Session::new(storage.clone());
     let inspect_session = Session::new(storage);
@@ -328,9 +515,7 @@ async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session(
     assert!(answer.contains("Newton"));
     let events = sink.events();
     assert!(events.iter().any(|(kind, data)| {
-        kind == "tool_result"
-            && data["tool"] == KNOWLEDGE_SEARCH_TOOL_NAME
-            && data["ok"] == true
+        kind == "tool_result" && data["tool"] == KNOWLEDGE_SEARCH_TOOL_NAME && data["ok"] == true
     }));
     assert!(events.iter().any(|(kind, data)| {
         kind == "tool_result"
@@ -340,12 +525,133 @@ async fn chat_uses_runtime_knowledge_tools_and_keeps_read_bodies_out_of_session(
                 .as_str()
                 .is_some_and(|handle| handle.starts_with("[K:"))
     }));
+    let runtime_usage = events
+        .iter()
+        .find_map(|(kind, data)| (kind == "runtime_usage").then_some(data))
+        .expect("knowledge run should emit provider-reported usage");
+    assert_eq!(runtime_usage["input_tokens"], 240);
+    assert_eq!(runtime_usage["output_tokens"], 36);
+    assert_eq!(runtime_usage["cache_read_tokens"], 12);
+    assert_eq!(runtime_usage["cache_write_tokens"], 8);
 
     let context = inspect_session.build_context().await.unwrap();
     let persisted_context = format!("{:?}", context.messages);
     assert!(
         !persisted_context.contains(private_tail),
         "knowledge_read body leaked into durable Session context: {persisted_context}"
+    );
+
+    let persisted_session_dir = std::fs::read_dir(&sessions_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.is_dir())
+        .expect("runtime session directory should exist");
+    let mut persisted_bytes = 0_u64;
+    let mut persisted_text = String::new();
+    for entry in std::fs::read_dir(&persisted_session_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_file() {
+            persisted_bytes += entry.metadata().unwrap().len();
+            if let Ok(text) = std::fs::read_to_string(path) {
+                persisted_text.push_str(&text);
+            }
+        }
+    }
+    assert!(
+        !persisted_text.contains(private_tail),
+        "knowledge_read body leaked into raw durable Session files"
+    );
+    println!(
+        "{}",
+        serde_json::json!({
+            "provider": "deterministic_mock",
+            "input_tokens": 240,
+            "output_tokens": 36,
+            "cache_read_tokens": 12,
+            "cache_write_tokens": 8,
+            "durable_session_bytes": persisted_bytes,
+            "read_body_sentinel_persisted": false,
+        })
+    );
+}
+
+#[tokio::test]
+async fn chat_rejects_a_valid_knowledge_citation_reused_across_runs() {
+    let dir = TempDir::new().unwrap();
+    let rag = LanceDbRag::new(dir.path().join("rag"), hash_embedding_config());
+    rag.ingest_text(
+        "kb-a",
+        "document-a::Newton notes",
+        "Newton's laws describe motion and force.",
+    )
+    .await
+    .unwrap();
+
+    let authority =
+        Arc::new(EvidenceAuthority::new(vec![7; 32], [course_evidence_provider_id()]).unwrap());
+    let knowledge_runtime =
+        assemble_course_knowledge(LanceDbKnowledgeSource::new(rag, "kb-a"), authority).unwrap();
+    let access = knowledge_access("kb-a");
+    let mut knowledge_tools = Vec::new();
+    knowledge_runtime
+        .plugin()
+        .register_tools(&mut knowledge_tools);
+    let search = knowledge_tools
+        .iter()
+        .find(|tool| tool.name() == KNOWLEDGE_SEARCH_TOOL_NAME)
+        .unwrap();
+    let read = knowledge_tools
+        .iter()
+        .find(|tool| tool.name() == KNOWLEDGE_READ_TOOL_NAME)
+        .unwrap();
+    let issued_context =
+        tool_context(RunRequest::from_text("Newton").with_extension(access.clone()));
+    let search_result = search
+        .execute(serde_json::json!({"query": "Newton"}), &issued_context)
+        .await
+        .unwrap();
+    let read_result = read
+        .execute(
+            serde_json::json!({
+                "reference": search_result.details["hits"][0]["reference"].clone(),
+                "selector": search_result.details["hits"][0]["suggested_selectors"][0].clone(),
+            }),
+            &issued_context,
+        )
+        .await
+        .unwrap();
+    let issued_handle = read_result.details["citation"]["handle"]
+        .as_str()
+        .expect("knowledge read should issue a citation handle")
+        .to_string();
+
+    let router = CapabilityRouter::new(
+        Arc::new(NoOpEnv),
+        LlmConfig::anthropic("mock-model", ""),
+        make_governance(None),
+    )
+    .with_client(Arc::new(MockLlmClient::new(vec![MockResponse::text(
+        &format!("Reused evidence {issued_handle}"),
+    )])))
+    .with_knowledge_runtime(knowledge_runtime);
+
+    let error = router
+        .run_request(
+            Capability::Chat,
+            RunRequest::from_text("Reuse a prior citation").with_extension(access),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("citation that was not issued in this run"),
+        "cross-run citation should be rejected at the final-answer boundary: {error}"
     );
 }
 
@@ -663,6 +969,7 @@ async fn research_explicit_start_enters_search_path() {
         },
         None,
         None,
+        None,
     )
     .await
     .unwrap()
@@ -692,6 +999,72 @@ async fn research_explicit_start_enters_search_path() {
             .any(|(kind, _)| { kind == "research_report_done" }),
         "explicit research start should emit report done: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn research_workflow_uses_runtime_knowledge_and_refreshes_final_citations() {
+    let dir = TempDir::new().unwrap();
+    let rag = LanceDbRag::new(dir.path().join("rag"), hash_embedding_config());
+    rag.ingest_text(
+        "kb-a",
+        "document-a::Newton notes",
+        &"Newton's laws describe motion and force. ".repeat(16),
+    )
+    .await
+    .unwrap();
+
+    let authority =
+        Arc::new(EvidenceAuthority::new(vec![7; 32], [course_evidence_provider_id()]).unwrap());
+    let knowledge_runtime =
+        assemble_course_knowledge(LanceDbKnowledgeSource::new(rag, "kb-a"), authority).unwrap();
+    let access = knowledge_access("kb-a");
+    let mut knowledge_tools = Vec::new();
+    knowledge_runtime
+        .plugin()
+        .register_tools(&mut knowledge_tools);
+    let search = knowledge_tools
+        .iter()
+        .find(|tool| tool.name() == KNOWLEDGE_SEARCH_TOOL_NAME)
+        .unwrap();
+    let setup_context =
+        tool_context(RunRequest::from_text("Newton").with_extension(access.clone()));
+    let search_result = search
+        .execute(serde_json::json!({"query": "Newton"}), &setup_context)
+        .await
+        .unwrap();
+    let reference = search_result.details["hits"][0]["reference"].clone();
+    let selector = search_result.details["hits"][0]["suggested_selectors"][0].clone();
+    let read_args = serde_json::json!({
+        "reference": reference,
+        "selector": selector,
+    })
+    .to_string();
+
+    let client = Arc::new(ResearchKnowledgeMockClient::new(reference, read_args));
+    let router = CapabilityRouter::new(
+        Arc::new(NoOpEnv),
+        LlmConfig::anthropic("mock-model", ""),
+        make_governance(None),
+    )
+    .with_client(client.clone())
+    .with_knowledge_runtime(knowledge_runtime)
+    .with_workflow_root(dir.path().join("workflow-sessions"));
+
+    let report = run_research_workflow_with_runtime(
+        &router,
+        ResearchWorkflowInput {
+            request: "Research Newton's laws using the selected course knowledge.".into(),
+        },
+        None,
+        None,
+        Some(access),
+    )
+    .await
+    .unwrap();
+
+    assert!(report.markdown.contains("Newton Report"));
+    assert!(report.markdown.contains("[K:"));
+    assert_eq!(client.call_count.load(Ordering::SeqCst), 7);
 }
 
 #[tokio::test]
@@ -736,6 +1109,7 @@ async fn research_workflow_accepts_confirmed_chinese_context() {
             request: "Conversation context:\nUser: 帮我调研一下transformer架构，我想学习\n\nAssistant: 这是调研计划。确认后我就启动详细研究工作流程。\n\nConfirmed research instruction:\n可以".into(),
         },
         Some(session),
+        None,
         None,
     )
         .await
@@ -785,6 +1159,7 @@ async fn research_workflow_persists_final_report_to_session() {
         },
         Some(session),
         None,
+        None,
     )
     .await
     .unwrap()
@@ -831,6 +1206,7 @@ async fn research_workflow_fails_clearly_after_citation_repair_attempt() {
         ResearchWorkflowInput {
             request: "Start the detailed research workflow for agent research workflow.".into(),
         },
+        None,
         None,
         None,
     )

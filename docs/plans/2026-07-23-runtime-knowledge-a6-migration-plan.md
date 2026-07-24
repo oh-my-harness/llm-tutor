@@ -1,10 +1,10 @@
 # Runtime Knowledge A6 Migration Plan
 
-> Status: in progress (Phase 0-3 implemented; Phase 4 outer Chat migrated; two upstream gates open) |
+> Status: complete (Phase 0-7 implemented and verified) |
 > Date: 2026-07-23 | Tracks:
 > [llm-tutor issue #1](https://github.com/oh-my-harness/llm-tutor/issues/1) |
 > Upstream baseline:
-> [`llm-harness-runtime@8ab2a377`](https://github.com/oh-my-harness/llm-harness-runtime/commit/8ab2a3770bee0e7a1731b8074552ef9b6d70653a)
+> [`llm-harness-runtime@83bef164`](https://github.com/oh-my-harness/llm-harness-runtime/commit/83bef164b36bd46ffa6f41cd6d3288a6b93cac4e)
 
 ## 1. Goal
 
@@ -50,6 +50,8 @@ The `codex/session-projection` branch implements the runtime prerequisites:
 | A4 | `50d61d4` | Local source reference implementation and contract tests |
 | A5 | `8f54607` | Knowledge tools, evidence receipts, citations and safe projections |
 | Tracking | `8ab2a377` | Design status records A1-A5 complete and A6 pending |
+| A6 gate | `bff00c1` | Runtime final-answer Knowledge citation validator and policy |
+| A6 gate | `7aebdca` | Trusted workflow request extensions propagated to every LLM step |
 
 The reviewed branch uses `llm-api-adapter` revision
 `16a22ad284b8deb8c3a77664a0876f565f4a6eb9`.
@@ -66,9 +68,9 @@ shall not replace LanceDB in the product.
 
 The current implementation has the following migration surface:
 
-- Root runtime dependencies are pinned to `8ab2a377`; `llm_adapter` is aligned
+- Root runtime dependencies are pinned to `83bef164`; `llm_adapter` is aligned
   to `16a22ad`.
-- All 26 production Tools use `ToolFailure`, typed result data, and an explicit
+- All 25 production Tools use `ToolFailure`, typed result data, and an explicit
   `Projected` or `Ephemeral` Session projection.
 - Ordinary capability runs accept `RunRequest`; the legacy message/string
   methods construct one as a compatibility wrapper.
@@ -86,22 +88,23 @@ The current implementation has the following migration surface:
 - A single process-held `EvidenceAuthority`, product authorizer, registry, and
   `KnowledgePlugin` are assembled without exposing the secret or trusted scope
   to prompts, Tool arguments, Session data, or frontend state.
-- `tutor-rag::KnowledgeRetriever` exposes product-defined search.
-- `tutor-tools::RagSearchTool` accepts a model-provided optional `kb` argument.
-- `RagSearchTool` returns complete chunk bodies in the search response.
-- `CapabilityRouter` carries a retriever and associated KB separately.
-- Chat installs the runtime `KnowledgePlugin` and uses `knowledge_search` /
-  `knowledge_read`. Outer Research Chat uses the same runtime tools, while the
-  detailed Research workflow still mounts `rag_search`; Quiz source collection
-  still calls the retriever directly.
+- The Agent-facing `KnowledgeRetriever` / `RagSearchTool` protocol has been
+  removed. Knowledge Base management keeps a direct product search API, while
+  every Agent/Quiz evidence path uses runtime Knowledge contracts.
+- `CapabilityRouter` carries only the assembled runtime Knowledge boundary.
+- Chat and both Research paths install the runtime `KnowledgePlugin` and use
+  `knowledge_search` / `knowledge_read`. Detailed Research passes trusted access
+  through `WorkflowRunRequest` and validates run-local handles before accepting
+  Knowledge-backed step output. Quiz source collection uses the same registry
+  and evidence authority, then passes only verified bounded chunks into the
+  generation workflow.
 - The web layer derives a trusted run-scoped Knowledge context from the selected
   KB, session, and current Tutor resource permissions.
 
 The A1/A2 API baseline, runtime-compatible LanceDB source, trusted access
-assembly, Chat product wiring, and outer Research Chat wiring are complete. The
-legacy retrieval boundary remains active for the detailed Research workflow and
-Quiz until their runtime paths are migrated and the two upstream gates are
-resolved.
+assembly, Chat product wiring, and Research migration are complete. Both
+upstream A6 gates are consumed from the unified `83bef164` baseline. Quiz
+source collection and legacy Agent RAG cleanup are also complete.
 
 ## 4. Ownership Boundaries
 
@@ -251,12 +254,10 @@ Display conversion does not create trust. A Knowledge citation is accepted only
 when its handle resolves through runtime `CitationValidator` in the same run.
 Unknown, forged, stale, or cross-run handles are rejected.
 
-The reviewed A5 plugin registers tools but does not install a final-answer
-citation validation hook. `AgentHarness::run` also does not return the
-`RunContext` needed for validation. Phase 0 therefore includes an upstream API
-gate: add or consume a runtime-owned final-answer validation boundary before
-claiming citation enforcement complete. The product shall not build a parallel
-run-state or receipt validator.
+Runtime `bff00c1` adds the final-answer citation validation hook and
+`KnowledgeCitationPolicy`; the product consumes
+`RequireWhenEvidenceRead`. Citation enforcement remains inside the runtime and
+the product does not build a parallel run-state or receipt validator.
 
 ## 6. Migration Phases
 
@@ -278,23 +279,20 @@ run-state or receipt validator.
   - `submit_step_result` prompts/mocks with structured LLM step output;
   - old workflow result fields and test `ToolContext` construction.
 - [x] Prove `RunRequest` extensions reach ordinary Chat Tool calls.
-- [ ] Prove how extensions and Knowledge plugins reach each Research/Quiz
+- [x] Prove how extensions and Knowledge plugins reach each Research/Quiz
   workflow LLM step. Record a runtime issue before adding a product workaround
   if the workflow boundary cannot carry them.
-- [ ] Resolve the runtime-owned final-answer citation validation boundary.
+- [x] Resolve the runtime-owned final-answer citation validation boundary.
 
-Open upstream gates:
+Resolved upstream gates:
 
-- `WorkflowEngine::run_llm_step` currently starts each step with
-  `harness.prompt(&prompt_text)`, so a product `RunRequest` extension cannot
-  reach the step's `ToolContext.run`. `customize_builder` can install a plugin
-  but cannot supply trusted per-run extensions.
-- `KnowledgePlugin` does not install a final-answer citation validator, and
-  `AgentHarness::run` does not return the completed `RunContext`.
+- Runtime `7aebdca` adds `WorkflowRunRequest` and propagates typed extensions
+  to every workflow LLM step attempt.
+- Runtime `bff00c1` lets `KnowledgePlugin` install a final-answer citation
+  validator with strict evidence-read policy.
 
-Both gaps are recorded in `docs/framework-feedback.md`. Phase 1 source work may
-continue independently, but Chat/Research/Quiz Knowledge cutover must not claim
-completion until the relevant runtime-owned boundaries exist.
+Both resolutions and product integration evidence are recorded in
+`docs/framework-feedback.md`.
 
 Checkpoint:
 
@@ -383,11 +381,11 @@ Security tests:
 - [x] Verify Session replay contains safe search/evidence projections but no
   `knowledge_read` body.
 
-Implementation note: the product path now displays Runtime-issued read evidence
-without duplicating receipt validation or persisting read bodies. Phase 3
-remains release-gated by the upstream final-answer citation validation boundary:
-the product does not independently claim that every handle shown in assistant
-text was cited by the final answer validator.
+Implementation note: the product path displays runtime-issued read evidence
+without duplicating receipt validation or persisting read bodies. The
+`KnowledgePlugin` now uses `RequireWhenEvidenceRead`, so runtime rejects a final
+answer that omits a citation after reading trusted evidence and rejects handles
+that were not issued in the current run.
 
 Acceptance:
 
@@ -399,20 +397,21 @@ Acceptance:
 ### Phase 4: Research migration
 
 - [x] Register the same Knowledge assembly in the outer Research Chat agent.
-- [ ] Pass trusted access and Knowledge tools into detailed Research workflow
+- [x] Pass trusted access and Knowledge tools into detailed Research workflow
   LLM steps that use course material.
-- [ ] Remove `rag_search` from Research workflow Tool scopes and prompts.
-- [ ] Keep web search/web fetch evidence distinct from course Knowledge
+- [x] Remove `rag_search` from Research workflow Tool scopes and prompts.
+- [x] Keep web search/web fetch evidence distinct from course Knowledge
   evidence.
-- [ ] Validate course Knowledge handles before publishing the report.
-- [ ] Keep saved reports and source lists compatible with Notebook and
+- [x] Validate course Knowledge handles before publishing the report.
+- [x] Keep saved reports and source lists compatible with Notebook and
   `SourceReferences`.
 
-Implementation note: outer Research Chat now performs the same atomic Tool
-cutover as Chat and can emit Runtime-issued read citations through the shared
-`SourceReferences` bridge. The detailed workflow deliberately retains
-`rag_search` until `WorkflowEngine` propagates trusted per-run extensions; the
-product does not create a parallel workflow run context.
+Implementation note: detailed Research calls
+`WorkflowEngine::run_with_request`, mounts Knowledge as step plugins, and
+declares only `knowledge_search` or `knowledge_read` on the steps that need
+them. Because citation handles are scoped to one step run, `write_report`
+re-reads selected Knowledge refs and cites the fresh handles issued in that
+final step. Web sources continue to use numbered report references.
 
 Acceptance:
 
@@ -424,14 +423,14 @@ Acceptance:
 
 ### Phase 5: Quiz migration
 
-- [ ] Replace Quiz's direct `KnowledgeRetriever` source path with the runtime
+- [x] Replace Quiz's direct `KnowledgeRetriever` source path with the runtime
   Knowledge source/registry boundary.
-- [ ] Keep deterministic product source collection where it is part of the Quiz
+- [x] Keep deterministic product source collection where it is part of the Quiz
   workflow, but issue and validate evidence through runtime contracts.
-- [ ] Pass only verified, bounded source bodies into generation and verifier
+- [x] Pass only verified, bounded source bodies into generation and verifier
   steps.
-- [ ] Map validated Knowledge refs into `QuizCitation` metadata.
-- [ ] Preserve conversation, Notebook, and no-KB Quiz source paths.
+- [x] Map validated Knowledge refs into `QuizCitation` metadata.
+- [x] Preserve conversation, Notebook, and no-KB Quiz source paths.
 - [x] Remove stale `submit_step_result` mocks/prompts as part of the Phase 0
   runtime workflow migration.
 
@@ -443,29 +442,32 @@ Acceptance:
 
 ### Phase 6: Remove the legacy Agent RAG boundary
 
-- [ ] Delete `tutor-tools::RagSearchTool`.
-- [ ] Delete `tutor-rag::KnowledgeRetriever`.
-- [ ] Remove `CapabilityRouter.retriever` and `associated_kb`.
-- [ ] Remove legacy `rag_search` prompt text, Tool event mapping, mocks, and
+- [x] Delete `tutor-tools::RagSearchTool`.
+- [x] Delete `tutor-rag::KnowledgeRetriever`.
+- [x] Remove `CapabilityRouter.retriever` and `associated_kb`.
+- [x] Remove legacy `rag_search` prompt text, Tool event mapping, mocks, and
   citation extraction.
-- [ ] Keep direct product search APIs only where they support Knowledge Base
+- [x] Keep direct product search APIs only where they support Knowledge Base
   management UI; they must call product storage/search services, not emulate an
   Agent Tool.
-- [ ] Confirm no active source contains `rag_search` or model-provided `kb`
+- [x] Confirm no active source contains `rag_search` or model-provided `kb`
   authorization.
 
 ### Phase 7: Quality, security, and release gate
 
-- [ ] Capture representative retrieval quality samples before and after.
-- [ ] Measure P50/P95 search and read latency.
-- [ ] Measure answer token use and durable Session size.
-- [ ] Verify no full read bodies appear in JSONL Session files.
-- [ ] Verify citation handle forgery and cross-run reuse fail.
-- [ ] Verify controlled diagnostics contain enough backend detail while public
+- [x] Capture representative retrieval quality samples before and after.
+- [x] Measure P50/P95 search and read latency.
+- [x] Measure answer token use and durable Session size.
+- [x] Verify no full read bodies appear in JSONL Session files.
+- [x] Verify citation handle forgery and cross-run reuse fail.
+- [x] Verify controlled diagnostics contain enough backend detail while public
   failures remain sanitized.
-- [ ] Update README, manual, runtime audit, framework feedback, product
+- [x] Update README, manual, runtime audit, framework feedback, product
   requirements, and desktop QA checklist.
-- [ ] Update issue #1 checklist and link the landed commits.
+- [x] Update issue #1 checklist and link the landed commits.
+
+The reproducible fixture, measurements, environment, limitations, and security
+evidence are recorded in `docs/qa/knowledge-a6-acceptance.md`.
 
 Release commands:
 
